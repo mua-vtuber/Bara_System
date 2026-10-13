@@ -1,0 +1,2072 @@
+/* apps/memory/web/dashboard/ui/components.css
+   공유 class 어휘. 토큰(tokens.css) 의존 — 인라인 색 금지. 새 색 토큰 0.
+   card / rp-row / node-detail 컴포넌트 class 포함. */
+
+/* ── .badge 기본 ───────────────────────────────────────────── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--fs-xs);
+  font-family: var(--sans);
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--radius-sm);
+  line-height: 1.2;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+/* ── source 배지 ───────────────────────────────────────────── */
+.badge--source-vector {
+  color: var(--source-vector);
+  background: color-mix(in srgb, var(--source-vector) 16%, transparent);
+}
+.badge--source-fts {
+  color: var(--source-fts);
+  background: color-mix(in srgb, var(--source-fts) 16%, transparent);
+}
+.badge--source-graph {
+  color: var(--source-graph);
+  background: color-mix(in srgb, var(--source-graph) 16%, transparent);
+}
+.badge--source-concept {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.badge--source-imageVec {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.badge--source-project {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.badge--source-person {
+  color: var(--tag-important);
+  background: color-mix(in srgb, var(--tag-important) 14%, transparent);
+}
+
+/* ── marker 배지 ───────────────────────────────────────────── */
+.badge--marker-important {
+  color: var(--tag-important);
+  background: color-mix(in srgb, var(--tag-important) 16%, transparent);
+}
+.badge--marker-uncertain {
+  color: var(--tag-uncertain);
+  background: color-mix(in srgb, var(--tag-uncertain) 16%, transparent);
+}
+.badge--marker-supersedes {
+  color: var(--revision-supersedes);
+  background: color-mix(in srgb, var(--revision-supersedes) 16%, transparent);
+}
+.badge--marker-superseded {
+  color: var(--revision-superseded);
+  background: color-mix(in srgb, var(--revision-superseded) 16%, transparent);
+}
+
+/* ── state 배지 ────────────────────────────────────────────── */
+.badge--state-current {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.badge--state-superseded {
+  color: var(--revision-superseded);
+  background: color-mix(in srgb, var(--revision-superseded) 16%, transparent);
+}
+.badge--state-archived {
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--text-dim) 14%, transparent);
+}
+.badge--state-pending_review {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 16%, transparent);
+}
+.badge--state-proposal {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+}
+.badge--state-project_paused {
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--text-dim) 14%, transparent);
+}
+.badge--state-project_done {
+  color: var(--source-fts);
+  background: color-mix(in srgb, var(--source-fts) 16%, transparent);
+}
+
+/* ── .card 컴포넌트 ───────────────────────────────────────── */
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  position: relative;
+  overflow: hidden;
+  background: var(--glass-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--sp-4);
+  transition: border-color 0.15s ease;
+}
+
+.card:hover {
+  border-color: color-mix(in srgb, var(--au-b) 50%, var(--border));
+}
+
+.card--top3 {
+  gap: var(--sp-3);
+  min-height: 150px;
+  padding: var(--sp-4);
+  border-radius: var(--hud-radius);
+  box-shadow: var(--panel-glow);
+}
+
+.card--list {
+  padding: var(--sp-3) var(--sp-4);
+}
+
+.card--detail {
+  padding: var(--sp-5);
+  gap: var(--sp-3);
+  border-radius: var(--hud-radius);
+  box-shadow: var(--panel-glow);
+}
+
+/* hover 팁 — top3 표면을 재사용하되 폭만 좁게 잡는다.
+   작은 떠다니는 표면이라 브래킷은 soft 티어(위 2모서리만·아래는 생략)로 가볍게. */
+.card--hover {
+  padding: var(--sp-3) var(--sp-4);
+  min-width: 220px;
+  max-width: 260px;
+  border-radius: var(--hud-radius);
+  box-shadow: var(--panel-glow);
+}
+
+/* .card--detail 은 .au-panel 과 동일한 4모서리 브래킷 프레임 패턴을 쓴다.
+   TS 가 au-panel 클래스를 추가할 수 없어(무변경 원칙) 여기서 같은 배경을 기재. */
+.card--top3::before,
+.card--detail::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  pointer-events: none;
+  background: var(--frame-bracket-4);
+}
+
+/* hover 팁 브래킷 — soft 티어(위 2모서리만). .au-panel--soft 와 동일 패턴. */
+.card--hover::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  pointer-events: none;
+  background: var(--frame-bracket-2);
+}
+
+.card__kicker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1);
+  min-height: 18px;
+}
+
+.card__node-type {
+  color: var(--text-dim);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-family: var(--sans);
+}
+
+.card__title {
+  font-size: var(--fs-base);
+  font-family: var(--sans);
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.card--top3 .card__title,
+.card--list .card__title,
+.card--hover .card__title {
+  font-size: var(--fs-sm);
+}
+
+.card__snippet {
+  font-size: var(--fs-sm);
+  font-family: var(--sans);
+  color: var(--text-soft);
+  line-height: 1.5;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.card--detail .card__snippet {
+  -webkit-line-clamp: unset;
+  white-space: pre-wrap;
+}
+
+.card--hover .card__snippet {
+  white-space: pre-wrap;
+}
+
+.card__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  align-items: center;
+}
+
+.card__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+.card__date {
+  font-size: var(--fs-xs);
+  font-family: var(--mono);
+  color: var(--text-dim);
+}
+
+.card__components,
+.node-detail__components {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.card__components {
+  padding-top: var(--sp-1);
+  border-top: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+}
+
+.card__components-label,
+.node-detail__components-label {
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  font-family: var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.chip--component {
+  color: var(--text-soft);
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  font-family: var(--mono);
+}
+
+.card__match {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding-left: var(--sp-2);
+  border-left: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+}
+
+.card__schedule,
+.node-detail__schedule {
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  font-family: var(--mono);
+}
+
+/* ── .rp-row 컴포넌트 ─────────────────────────────────────── */
+.rp-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text-soft);
+  text-align: left;
+}
+
+.rp-row:hover {
+  background: var(--panel-hover-bg);
+  color: var(--text);
+}
+
+/* 선택 행 — 좌측 .mp-item.selected 와 같은 밝은 시안 그라데이션 배경을 쓴다(단일 토큰).
+   왼쪽 인셋 라인으로 선택 표시(브래킷 형태 문법과 결이 맞는 각진 강조). */
+.rp-row.selected {
+  background: var(--list-selected-bg);
+  border-radius: 0;
+  color: var(--text-on-selected);
+  font-weight: 600;
+  box-shadow: inset 2px 0 0 var(--list-selected-line);
+}
+
+.rp-row__label {
+  flex: 1;
+  font-size: var(--fs-sm);
+  font-family: var(--sans);
+  color: inherit;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 선택 행 라벨 — 선택 배경 위에서는 선택 전용 글자색을 쓴다. */
+.rp-row.selected .rp-row__label {
+  color: var(--text-on-selected);
+}
+
+/* 선택 행 안의 점수 칩·배지 — 밝은 시안 배경 위에서 기본 시안/연한 글자가 묻히므로
+   검정 글자(--text-on-selected)로 보정하고, 칩 배경은 흰 글자색(--text)을 옅게 섞은 막으로
+   띄워 읽히게 한다(새 색 리터럴 없이 토큰 합성만). 비선택 행은 기본 칩·배지 색을 그대로
+   둔다(이 보정은 선택 행 한정). */
+.rp-row.selected .chip--score,
+.rp-row.selected .badge {
+  color: var(--text-on-selected);
+  background: color-mix(in srgb, var(--text) 72%, transparent);
+}
+
+.rp-list--reveal .rp-row--reveal {
+  opacity: 0;
+  transform: translateY(10px);
+  animation: rp-row-rise 280ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+  animation-delay: var(--rp-row-delay, 0ms);
+}
+
+@keyframes rp-row-rise {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── .node-detail 컴포넌트 ────────────────────────────────── */
+.node-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-5);
+  background: color-mix(in srgb, var(--bg-card) 48%, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--hud-radius);
+}
+
+.node-detail__title {
+  font-size: var(--fs-lg);
+  font-family: var(--sans);
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.node-detail__snippet {
+  font-size: var(--fs-sm);
+  font-family: var(--sans);
+  color: var(--text-soft);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.node-detail__snippet--typing {
+  cursor: pointer;
+}
+
+.node-detail__snippet--typing::after {
+  content: "";
+  display: inline-block;
+  width: 0.52ch;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -0.12em;
+  background: var(--accent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 54%, transparent);
+  animation: node-detail-caret-blink 720ms steps(2, end) infinite;
+}
+
+@keyframes node-detail-caret-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+.graph-node-snippet {
+  word-break: break-word;
+}
+
+.graph-node-snippet h1,
+.graph-node-snippet h2,
+.graph-node-snippet h3 {
+  margin: 0.6em 0 0.3em;
+  color: var(--text);
+  font-family: var(--sans);
+  line-height: 1.3;
+}
+
+.graph-node-snippet h1 {
+  font-size: var(--fs-xl);
+}
+
+.graph-node-snippet h2 {
+  font-size: var(--fs-base);
+}
+
+.graph-node-snippet h3 {
+  font-size: var(--fs-sm);
+}
+
+.graph-node-snippet p {
+  margin: 0.5em 0;
+}
+
+.graph-node-snippet ul,
+.graph-node-snippet ol {
+  margin: 0.5em 0;
+  padding-left: 1.4em;
+}
+
+.graph-node-snippet li {
+  margin: 0.2em 0;
+}
+
+.graph-node-snippet a {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.graph-node-snippet code {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  background: var(--bg-elev);
+  border-radius: var(--radius-sm);
+  padding: 0.1em 0.3em;
+}
+
+.graph-node-snippet pre {
+  margin: 0.5em 0;
+  padding: 0.6em 0.8em;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow-x: auto;
+}
+
+.graph-node-snippet pre code {
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
+}
+
+.graph-node-snippet blockquote {
+  margin: 0.7em 0;
+  padding: 0.7em 0.9em;
+  border: thin solid var(--border);
+  border-left: 0.3em solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  color: var(--text-soft);
+  white-space: normal;
+}
+
+.graph-node-snippet blockquote > :first-child {
+  margin-top: 0;
+}
+
+.graph-node-snippet blockquote > :last-child {
+  margin-bottom: 0;
+}
+
+.graph-node-snippet .md-table-wrap {
+  margin: 0.7em 0;
+  overflow-x: auto;
+  border: thin solid var(--border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-elev) 86%, transparent);
+}
+
+.graph-node-snippet table {
+  width: 100%;
+  border-collapse: collapse;
+  white-space: normal;
+  font-size: var(--fs-sm);
+}
+
+.graph-node-snippet th,
+.graph-node-snippet td {
+  padding: 0.55em 0.7em;
+  border-bottom: thin solid color-mix(in srgb, var(--border) 82%, transparent);
+  color: var(--text-soft);
+  text-align: left;
+  vertical-align: top;
+}
+
+.graph-node-snippet th {
+  color: var(--text);
+  font-weight: 600;
+  background: color-mix(in srgb, var(--accent) 11%, transparent);
+}
+
+.graph-node-snippet tr:last-child td {
+  border-bottom: 0;
+}
+
+.graph-node-snippet .md-align-left {
+  text-align: left;
+}
+
+.graph-node-snippet .md-align-center {
+  text-align: center;
+}
+
+.graph-node-snippet .md-align-right {
+  text-align: right;
+}
+
+.node-detail__images {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(88px, 128px));
+  gap: var(--sp-2);
+  align-items: start;
+}
+
+.node-detail__image-thumb {
+  width: 100%;
+  aspect-ratio: 1;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  cursor: pointer;
+}
+
+.node-detail__image-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.node-detail__image-thumb:hover,
+.node-detail__image-thumb:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.node-detail__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  align-items: center;
+}
+
+.node-detail__sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+.node-detail__match {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+  padding-left: var(--sp-3);
+  border-left: 1px solid var(--border);
+}
+
+.node-detail__tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.node-detail__tags-label {
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+
+.node-detail__tag-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-soft);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.node-detail__tag-add:hover,
+.node-detail__tag-add:focus-visible {
+  background: var(--surface-3);
+  border-color: var(--accent);
+  color: var(--text);
+  outline: none;
+}
+
+/* ── .chip 기본 ────────────────────────────────────────────── */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--fs-xs);
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--radius-sm);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+/* ── chip 변형 ─────────────────────────────────────────────── */
+.chip--score {
+  font-family: var(--mono);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.chip--tag {
+  color: var(--text-soft);
+  background: color-mix(in srgb, var(--text-soft) 10%, transparent);
+}
+
+/* 단계6 — 일정 시간 칩(제목 앞). 색·크기는 토큰만. */
+.chip--eventtime {
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+  background: var(--surface-2);
+  padding: 0 var(--sp-1);
+  border-radius: var(--radius-sm);
+}
+
+/* 단계6 — 분류 종류 배지(점수 앞). 색·크기는 토큰만. */
+.badge--kind {
+  font-size: var(--fs-xs);
+  color: var(--text);
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+}
+
+/* ── .top3-float-card ───────────────────────────────────────────────────── */
+.top3-float-card {
+  position: absolute;
+  width: min(268px, calc(100vw - 32px));
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  z-index: 12;
+  pointer-events: auto;
+}
+
+.top3-float-card::before {
+  content: attr(data-rank);
+  position: absolute;
+  left: -10px;
+  top: -10px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  color: var(--text-on-accent);
+  background: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--text) 36%, var(--accent));
+  box-shadow: 0 0 18px color-mix(in srgb, var(--accent) 36%, transparent);
+  clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 7px 100%, 0 calc(100% - 7px));
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  font-weight: 800;
+  pointer-events: none;
+}
+
+.top3-float-card--hidden {
+  display: none;
+}
+
+/* ── .top3-leader-svg / .top3-leader-line ───────────────────────────────── */
+.top3-leader-svg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 11;
+}
+
+.top3-leader-line {
+  stroke: var(--accent);
+  stroke-width: 1.75px;
+  stroke-dasharray: 4 3;
+  opacity: 0.68;
+}
+
+.top3-leader-line--hidden {
+  display: none;
+}
+
+/* ── .node-hover-tip — 호버한 노드 옆에 따라 떠다니는 요약 팁 ──────────────── */
+.node-hover-tip {
+  position: absolute;
+  pointer-events: none;
+  z-index: 9;
+}
+
+/* ── .nav-rail — 그래프 화면 제일 좌측 아이콘 줄 ───────────────────── */
+.nav-rail {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 56px;
+  flex-shrink: 0;
+  height: 100%;
+  padding: var(--sp-3) 7px;
+  gap: var(--sp-2);
+  overflow-y: auto;
+  background: var(--bg-elev);
+  border-right: 1px solid var(--border);
+  box-shadow: inset -1px 0 0 color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.nr-item {
+  box-sizing: border-box;
+  position: relative;
+  width: 40px;
+  height: 52px;
+  flex-shrink: 0;
+  display: grid;
+  grid-template-rows: 25px 14px;
+  align-content: center;
+  place-items: center;
+  color: var(--text);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.16s, border-color 0.16s, color 0.16s, transform 0.16s;
+}
+
+.nr-label {
+  font-size: 10px;
+  line-height: 14px;
+  white-space: nowrap;
+  letter-spacing: -0.2px;
+}
+
+/* nav-rail 은 flex column 이라 .nr-spacer 가 뒤 항목(테마 토글 등)을 바닥으로 밀어낸다.
+   nav-rail 은 dashboard·graph·settings 세 화면에서 공유되므로 여기서 전역 스코프로 둔다. */
+.nr-spacer {
+  flex: 1;
+}
+
+.nr-item--section-start {
+  margin-top: var(--sp-3);
+}
+
+.nr-item--section-start::after {
+  content: "";
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  top: calc(-1 * var(--sp-2));
+  height: 1px;
+  background: color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.nr-item:hover,
+.nr-item:focus-visible {
+  color: var(--text);
+  background: var(--panel-hover-bg);
+  border-color: var(--panel-hover-line);
+  outline: none;
+}
+
+.nr-item:active {
+  transform: translateY(1px);
+}
+
+.nr-item.active {
+  color: var(--text-on-selected);
+  background: var(--list-selected-bg);
+  border-color: var(--list-selected-line);
+  box-shadow: inset 0 0 0 1px var(--list-selected-line);
+}
+
+.nr-item.active::before {
+  content: "";
+  position: absolute;
+  left: -7px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent);
+}
+
+.nr-icon,
+.nr-icon svg {
+  width: 21px;
+  height: 21px;
+  display: block;
+}
+
+.nr-icon svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ── .left-shell — 패널 본체 + 접기 탭을 담는 셸 래퍼 ───────────────────── */
+/* 그래프 위 absolute 오버레이로 띄운다(.shell-main 왼쪽 0=nav-rail 오른쪽부터).
+   좌측을 flex 흐름에서 빼면 .shell-center 가 .shell-main 전체를 채워, 좌측을 접거나
+   숨겨도 가운데 그래프가 밀리지 않는다(§4). .mp-toggle 의 right:-28px 는 여전히 셸
+   오른쪽 모서리 기준이라 접힘(본체 폭 0) 때 left:0~28px 에 걸쳐 화면 안에 남는다. */
+.left-shell {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 8;
+  display: flex;
+  flex-shrink: 0;
+  height: 100%;
+}
+
+/* ── .memory-panel — 좌측 부유 기억목록 패널(graph.html) ─────────────────── */
+/* .au-panel 과 동일한 유리 몸체 + 4모서리 브래킷 프레임(TS 무변경 원칙이라 클래스
+   대신 여기서 같은 규칙을 직접 기재 — .card--detail 과 같은 패턴). */
+.memory-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 240px;
+  flex-shrink: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--glass-bg);
+  border-right: 1px solid var(--border);
+  box-shadow: var(--panel-glow);
+}
+
+.memory-panel::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  pointer-events: none;
+  background: var(--frame-bracket-4);
+}
+
+/* 접힘 — 본체를 폭 0 으로 완전히 숨긴다(레일 잔류 없음·Q4). 토글 탭은 셸에 남는다. */
+.left-shell.collapsed .memory-panel {
+  width: 0;
+  border-right: none;
+}
+
+/* ── .mp-toggle — 셸 오른쪽 모서리 세로 가운데 접기 탭(§4) ───────────────── */
+.mp-toggle {
+  position: absolute;
+  right: -28px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 28px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--side-toggle-bg);
+  border: 1px solid var(--border);
+  border-left: none;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  color: var(--text-on-selected);
+  cursor: pointer;
+  z-index: 7;
+}
+/* 접힘 — 셸 폭이 0 이라 right:-28px 토글이 화면 밖으로 밀릴 위험을 없애기 위해
+   left:0 으로 다시 고정해 화면 왼쪽 모서리에 확실히 보이게 한다(다시 펼칠 진입점). */
+.left-shell.collapsed .mp-toggle {
+  right: auto;
+  left: 0;
+}
+.mp-toggle__arrow {
+  font-size: var(--fs-sm);
+  line-height: 1;
+}
+.mp-toggle:focus-visible {
+  outline: 2px solid var(--au-b);
+  outline-offset: 2px;
+}
+
+.mp-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+/* 브랜드 */
+.mp-brand {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.mp-brand__name {
+  font-size: var(--fs-xl);
+  font-family: var(--sans);
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.01em;
+}
+.mp-brand__sub {
+  font-size: var(--fs-xs);
+  font-family: var(--mono);
+  color: var(--text-dim);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+/* 상태줄 */
+.mp-status {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-xs);
+  font-family: var(--mono);
+  color: var(--text-soft);
+  flex-wrap: wrap;
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--mp-status-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.mp-status__sep {
+  color: var(--text-dim);
+}
+
+/* "기억 목록 N" 라벨 — 흰색 헤딩(브랜드 다음 2번째 위계) */
+.mp-title {
+  font-size: var(--fs-lg);
+  font-family: var(--sans);
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* 탭 3개 — 세그먼트 컨트롤(트랙 박스 + 안쪽 세그먼트) */
+.mp-tabs {
+  display: flex;
+  gap: var(--sp-1);
+  padding: var(--sp-1);
+  background: var(--panel-hover-bg);
+  border-radius: var(--radius-sm);
+}
+.mp-tab {
+  flex: 1;
+  padding: var(--sp-2) var(--sp-1);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  font-family: var(--sans);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.mp-tab:hover {
+  color: var(--text-soft);
+  background: color-mix(in srgb, var(--text-soft) 10%, transparent);
+}
+.mp-tab.on {
+  color: var(--text-on-accent);
+  background: var(--au-grad);
+  font-weight: 600;
+}
+
+/* 목록 본체 */
+.mp-list {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 항목 */
+.mp-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-2) var(--sp-4);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  color: var(--text-soft);
+  text-align: left;
+}
+.mp-item:hover {
+  background: var(--panel-hover-bg);
+  border-bottom-color: var(--panel-hover-line);
+  color: var(--text);
+}
+.mp-item.selected {
+  background: var(--list-selected-bg);
+  border-bottom-color: var(--list-selected-line);
+  color: var(--text-on-selected);
+  font-weight: 600;
+}
+.mp-item__label {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  font-family: var(--sans);
+  color: inherit;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.mp-item__type {
+  flex-shrink: 0;
+  font-size: var(--fs-xs);
+  font-family: var(--mono);
+  color: inherit;
+}
+.mp-stat {
+  flex-shrink: 0;
+  font-size: var(--fs-xs);
+  font-family: var(--mono);
+  color: inherit;
+  white-space: nowrap;
+}
+
+/* "지난" 구분 행 */
+.mp-divider {
+  padding: var(--sp-2) var(--sp-4);
+  font-size: var(--fs-xs);
+  font-family: var(--mono);
+  color: var(--text-dim);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+/* 빈 상태 */
+.mp-empty {
+  padding: var(--sp-6) var(--sp-4);
+  font-size: var(--fs-sm);
+  font-family: var(--sans);
+  color: var(--text-dim);
+  text-align: center;
+}
+
+/* ── .results-panel — 우측 검색 결과 패널(graph.html) ────────────────────── */
+/* 좌측과 같은 방식으로 그래프 위 absolute 오버레이로 띄운다(.shell-main 오른쪽 0).
+   레이아웃·표면 스타일을 results-panel.ts 인라인에서 이 규칙으로 옮겨 단일 출처로 둔다. */
+.results-panel {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  width: 260px;
+  height: 100%;
+  overflow: hidden;
+  background: var(--glass-bg);
+  border-left: 1px solid var(--border);
+}
+
+/* .au-panel 과 동일한 4모서리 브래킷 프레임(TS 무변경 원칙 — .memory-panel 과 같은 패턴). */
+.results-panel::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  pointer-events: none;
+  background: var(--frame-bracket-4);
+}
+
+/* 검색 전·검색 클리어 상태 — 우측 패널을 숨긴다(검색했을 때만 표시·§5). */
+.rp-hidden {
+  display: none;
+}
+
+/* 좁은 그래프에서는 검색·입력 공간을 남기고 목록 하나만 펼친다. */
+@media (max-width: 1279px) {
+  .left-shell,
+  .results-panel {
+    top: var(--graph-panel-top, 220px);
+    bottom: var(--graph-panel-bottom, 160px);
+    height: auto;
+  }
+  .memory-panel {
+    width: min(240px, calc(100vw - 100px));
+  }
+  .results-panel {
+    width: min(300px, calc(100% - 44px));
+  }
+  #graph-root .shell-main:has(.left-shell:not(.collapsed)) > .results-panel {
+    display: none;
+  }
+}
+
+.rp-body--loading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-height: 0;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+
+.dash-square-loader {
+  --dash-square-loader-size: 24px;
+
+  position: relative;
+  display: inline-block;
+  width: var(--dash-square-loader-size);
+  height: var(--dash-square-loader-size);
+  flex: 0 0 var(--dash-square-loader-size);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background:
+    linear-gradient(color-mix(in srgb, var(--bg-elev) 78%, transparent), color-mix(in srgb, var(--bg-elev) 78%, transparent)) padding-box,
+    var(--au-grad) border-box;
+  box-shadow:
+    0 0 16px color-mix(in srgb, var(--au-b) 34%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--text) 8%, transparent);
+  transform-origin: 50% 50%;
+  animation: dash-square-loader-spin 820ms steps(4, end) infinite;
+}
+
+.dash-square-loader::before {
+  content: "";
+  position: absolute;
+  inset: 5px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background:
+    linear-gradient(color-mix(in srgb, var(--au-a) 18%, transparent), color-mix(in srgb, var(--au-a) 18%, transparent)) padding-box,
+    linear-gradient(315deg, var(--au-b), var(--au-point)) border-box;
+}
+
+.dash-square-loader--sm {
+  --dash-square-loader-size: 14px;
+
+  border-radius: var(--radius-sm);
+}
+
+.dash-square-loader--sm::before {
+  inset: 3px;
+  border-radius: var(--radius-sm);
+}
+
+.dash-square-loader--lg {
+  --dash-square-loader-size: 30px;
+}
+
+.rp-loading__text {
+  color: var(--text-dim);
+}
+
+@keyframes dash-square-loader-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── .node-window 드래그되는 노드 상세 창(큰 모달) ────────────────
+   인라인 style 로 남는 것은 위치(left/top)·z-index 뿐. 색·테두리·그림자·
+   radius·폰트는 전부 여기 토큰으로. graph-entry buildNodeDetailEl 패널
+   스타일을 그대로 옮긴 것(fixed 중앙고정 → absolute 좌표). */
+.node-window {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  width: min(540px, 90vw);
+  max-height: 68vh;
+  overflow: hidden;
+  box-sizing: border-box;
+  background: var(--glass-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--hud-radius);
+  box-shadow: var(--panel-glow);
+  font-family: var(--sans);
+  color: var(--text);
+  font-size: var(--fs-base);
+}
+
+/* .au-panel--primary 와 동일한 4모서리 브래킷 프레임(TS 무변경 원칙 — 직접 기재). */
+.node-window::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  pointer-events: none;
+  background: var(--frame-bracket-4);
+}
+
+@media (max-width: 1279px) {
+  #graph-root .memory-panel,
+  #graph-root .results-panel,
+  #graph-root .node-window {
+    background: var(--bg-card);
+  }
+}
+
+/* 가로로 돌린 작은 화면에서는 머리와 목록을 함께 스크롤해 행이 막히지 않게 한다. */
+@media (max-width: 1279px) and (max-height: 600px) {
+  #graph-root .memory-panel {
+    overflow-y: auto;
+  }
+  #graph-root .memory-panel::before {
+    inset: 0;
+  }
+  #graph-root .mp-list {
+    flex: 0 0 auto;
+    overflow: visible;
+  }
+}
+
+.node-window__head {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  min-height: 58px;
+  box-sizing: border-box;
+  padding: var(--sp-3) 48px var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+
+.node-window__heading {
+  position: relative;
+  z-index: 2;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  pointer-events: none;
+}
+
+.node-window__title {
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.node-window__close {
+  position: absolute;
+  top: 50%;
+  right: var(--sp-3);
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  border-radius: var(--hud-radius);
+  padding: 0;
+  font-size: var(--fs-lg);
+  font-family: var(--mono);
+  line-height: 1;
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.node-window__drag-zone {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 44px;
+  bottom: 0;
+  z-index: 1;
+  cursor: move;
+}
+
+.node-window__breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  box-sizing: border-box;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  text-shadow: 0 0 8px color-mix(in srgb, var(--bg) 82%, transparent);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.node-window__breadcrumb-part {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.node-window__breadcrumb-part:last-child {
+  color: var(--text-soft);
+}
+
+.node-window__breadcrumb-sep {
+  flex: 0 0 auto;
+  color: color-mix(in srgb, var(--accent) 52%, var(--text-dim));
+}
+
+.node-window__close:hover {
+  color: var(--text);
+  border-color: var(--accent);
+  background: var(--surface-3);
+}
+
+.node-window__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-5) calc(var(--sp-5) + 2px) var(--sp-5);
+}
+
+.node-window__missing {
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  margin: var(--sp-3) 0 0;
+}
+
+.node-window__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: var(--sp-4) 0 0;
+  font-size: var(--fs-xs);
+  font-family: var(--mono);
+}
+
+.node-window__meta-row {
+  display: flex;
+  gap: var(--sp-3);
+}
+
+.node-window__meta-label {
+  min-width: 3.5em;
+  color: var(--text-dim);
+}
+
+.node-window__meta-value {
+  color: var(--text-soft);
+}
+
+.node-window__content {
+  margin: var(--sp-4) 0 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+}
+
+.node-window__content-head {
+  padding: var(--sp-2) var(--sp-3);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+
+.node-window__snippet {
+  margin: var(--sp-4) 0 0;
+  font-size: var(--fs-sm);
+  color: inherit;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.node-window__content .node-window__snippet {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
+  border-top: 1px solid var(--border);
+}
+
+.node-window__snippet--typing {
+  cursor: pointer;
+}
+
+.node-window__snippet--typing::after {
+  content: "";
+  display: inline-block;
+  width: 0.52ch;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -0.12em;
+  background: var(--accent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 54%, transparent);
+  animation: node-window-caret-blink 720ms steps(2, end) infinite;
+}
+
+@keyframes node-window-caret-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+.node-window__edit {
+  display: flex;
+  justify-content: flex-end;
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
+  border-top: 1px solid var(--border);
+}
+
+/* .au-btn--ghost 와 동일한 컷코너 문법(TS 무변경 원칙 — 직접 기재).
+   테두리(border)와 clip-path 를 함께 쓰면 모서리가 깨지므로 border 는 반드시 none,
+   테두리 표현은 inset box-shadow 로 대체한다. */
+.node-window__edit-toggle {
+  min-height: 30px;
+  padding: 0 var(--sp-3);
+  border: none;
+  border-radius: 0;
+  clip-path: polygon(var(--cut-sm) 0, 100% 0, 100% calc(100% - var(--cut-sm)), calc(100% - var(--cut-sm)) 100%, 0 100%, 0 var(--cut-sm));
+  box-shadow: inset 0 0 0 1px var(--border);
+  background: color-mix(in srgb, var(--au-a) 8%, transparent);
+  color: var(--accent-2);
+  font: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.node-window__edit-toggle:hover,
+.node-window__edit-toggle:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--accent);
+  color: var(--text);
+  outline: none;
+}
+
+.node-window__trash {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-3) var(--sp-3);
+}
+
+/* .node-window__edit-toggle 과 동일한 컷코너 문법 — 위험 동작임을 색으로만 구분한다. */
+.node-window__trash-toggle {
+  min-height: 30px;
+  padding: 0 var(--sp-3);
+  border: none;
+  border-radius: 0;
+  clip-path: polygon(var(--cut-sm) 0, 100% 0, 100% calc(100% - var(--cut-sm)), calc(100% - var(--cut-sm)) 100%, 0 100%, 0 var(--cut-sm));
+  box-shadow: inset 0 0 0 1px var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  color: var(--danger);
+  font: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.node-window__trash-toggle:hover,
+.node-window__trash-toggle:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--danger);
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  outline: none;
+}
+
+.node-window__trash-toggle:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.node-window__trash-status {
+  font-size: var(--fs-xs);
+  color: var(--danger);
+}
+
+.node-edit-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-5);
+  background: color-mix(in srgb, var(--bg) 64%, transparent);
+}
+
+.node-edit-modal__box {
+  position: relative;
+  width: min(620px, calc(100vw - 32px));
+  max-height: min(78vh, 720px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--glass-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--hud-radius);
+  box-shadow: var(--panel-glow);
+  color: var(--text);
+  font-family: var(--sans);
+}
+
+/* .au-panel--primary 와 동일한 4모서리 브래킷 프레임(TS 무변경 원칙 — 직접 기재). */
+.node-edit-modal__box::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  pointer-events: none;
+  background: var(--frame-bracket-4);
+}
+
+.node-edit-modal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-5);
+  border-bottom: 1px solid var(--border);
+}
+
+.node-edit-modal__title {
+  color: var(--text);
+  font-size: var(--fs-base);
+  font-weight: 600;
+}
+
+.node-edit-modal__title-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.node-edit-modal__hashtag-warning {
+  color: var(--danger);
+  font-size: var(--fs-xs);
+  font-family: var(--sans);
+}
+
+.node-edit-modal__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--hud-radius);
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: var(--fs-lg);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.node-edit-modal__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-height: 0;
+  padding: var(--sp-5);
+}
+
+.node-edit-modal__textarea,
+.node-edit-modal__reason {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: var(--hud-radius);
+  background: var(--field-bg);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-sm);
+}
+
+.node-edit-modal__textarea:focus,
+.node-edit-modal__reason:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.node-edit-modal__textarea {
+  min-height: min(320px, 44vh);
+  padding: var(--sp-2) var(--sp-3);
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.node-edit-modal__reason {
+  min-height: 30px;
+  padding: 0 var(--sp-3);
+  font-size: var(--fs-xs);
+}
+
+.node-edit-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+/* 컷코너 문법(.au-btn 계열, TS 무변경 원칙 — 직접 기재).
+   save = 주 액션(그라디언트 채움), cancel = ghost. border+clip-path 동시 사용 금지 —
+   테두리는 항상 inset box-shadow 로 대체한다. */
+.node-edit-modal__save,
+.node-edit-modal__cancel {
+  min-height: 30px;
+  padding: 0 var(--sp-3);
+  border: none;
+  border-radius: 0;
+  clip-path: polygon(var(--cut-sm) 0, 100% 0, 100% calc(100% - var(--cut-sm)), calc(100% - var(--cut-sm)) 100%, 0 100%, 0 var(--cut-sm));
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.node-edit-modal__save {
+  background: var(--au-grad);
+  color: var(--text-on-accent);
+}
+
+.node-edit-modal__cancel {
+  background: color-mix(in srgb, var(--au-a) 8%, transparent);
+  box-shadow: inset 0 0 0 1px var(--border);
+  color: var(--accent-2);
+  font-weight: 500;
+}
+
+.node-edit-modal__close:hover,
+.node-edit-modal__close:focus-visible {
+  background: var(--surface-3);
+  border-color: var(--accent);
+  color: var(--text);
+  outline: none;
+}
+
+.node-edit-modal__save:hover,
+.node-edit-modal__save:focus-visible {
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--au-b) 60%, transparent)) brightness(1.08);
+  outline: none;
+}
+
+.node-edit-modal__cancel:hover,
+.node-edit-modal__cancel:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--accent);
+  color: var(--text);
+  outline: none;
+}
+
+.node-edit-modal__save:disabled,
+.node-edit-modal__cancel:disabled {
+  cursor: progress;
+  filter: grayscale(0.6) opacity(0.55);
+}
+
+.node-edit-modal__status {
+  min-height: 1.2em;
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+}
+
+.node-tag-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-5);
+  background: color-mix(in srgb, var(--bg) 64%, transparent);
+}
+
+.node-tag-modal__box {
+  position: relative;
+  width: min(360px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--glass-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--hud-radius);
+  box-shadow: var(--panel-glow);
+  color: var(--text);
+  font-family: var(--sans);
+}
+
+/* .au-panel--primary 와 동일한 4모서리 브래킷 프레임(TS 무변경 원칙 — 직접 기재). */
+.node-tag-modal__box::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  pointer-events: none;
+  background: var(--frame-bracket-4);
+}
+
+.node-tag-modal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-5);
+  border-bottom: 1px solid var(--border);
+}
+
+.node-tag-modal__title {
+  color: var(--text);
+  font-size: var(--fs-base);
+  font-weight: 600;
+}
+
+.node-tag-modal__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--hud-radius);
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: var(--fs-lg);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.node-tag-modal__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-5);
+}
+
+.node-tag-modal__input {
+  width: 100%;
+  min-height: 34px;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: var(--hud-radius);
+  background: var(--field-bg);
+  color: var(--text);
+  padding: 0 var(--sp-3);
+  font: inherit;
+  font-size: var(--fs-sm);
+}
+
+.node-tag-modal__input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.node-tag-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+/* 컷코너 문법(.au-btn 계열, TS 무변경 원칙 — 직접 기재).
+   save = 주 액션(그라디언트 채움), cancel = ghost. border+clip-path 동시 사용 금지 —
+   테두리는 항상 inset box-shadow 로 대체한다. */
+.node-tag-modal__save,
+.node-tag-modal__cancel {
+  min-height: 30px;
+  padding: 0 var(--sp-3);
+  border: none;
+  border-radius: 0;
+  clip-path: polygon(var(--cut-sm) 0, 100% 0, 100% calc(100% - var(--cut-sm)), calc(100% - var(--cut-sm)) 100%, 0 100%, 0 var(--cut-sm));
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.node-tag-modal__save {
+  background: var(--au-grad);
+  color: var(--text-on-accent);
+}
+
+.node-tag-modal__cancel {
+  background: color-mix(in srgb, var(--au-a) 8%, transparent);
+  box-shadow: inset 0 0 0 1px var(--border);
+  color: var(--accent-2);
+  font-weight: 500;
+}
+
+.node-tag-modal__close:hover,
+.node-tag-modal__close:focus-visible {
+  background: var(--surface-3);
+  border-color: var(--accent);
+  color: var(--text);
+  outline: none;
+}
+
+.node-tag-modal__save:hover,
+.node-tag-modal__save:focus-visible {
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--au-b) 60%, transparent)) brightness(1.08);
+  outline: none;
+}
+
+.node-tag-modal__cancel:hover,
+.node-tag-modal__cancel:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--accent);
+  color: var(--text);
+  outline: none;
+}
+
+.node-tag-modal__save:disabled,
+.node-tag-modal__cancel:disabled {
+  cursor: progress;
+  filter: grayscale(0.6) opacity(0.55);
+}
+
+.node-tag-modal__status {
+  min-height: 1.2em;
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+}
+
+.node-image-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-5);
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+}
+
+.node-image-modal__frame {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 48px);
+}
+
+.node-image-modal__image {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 48px);
+  object-fit: contain;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  box-shadow: var(--panel-glow);
+}
+
+.node-image-modal__close {
+  position: absolute;
+  right: var(--sp-2);
+  top: var(--sp-2);
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bg-elev) 88%, transparent);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.node-image-modal__close:hover,
+.node-image-modal__close:focus-visible {
+  background: var(--surface-3);
+  border-color: var(--accent);
+  outline: none;
+}
+
+.node-window__entity-info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin: var(--sp-4) 0 0;
+  padding: var(--sp-3) 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.node-window__entity-group + .node-window__entity-group {
+  border-top: 0;
+}
+
+.node-window__entity-head {
+  margin: 0 0 var(--sp-1);
+  padding: 0;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+
+.node-window__entity-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  padding: 0;
+  border-top: 0;
+  font-size: var(--fs-xs);
+}
+
+.node-window__entity-key {
+  flex: 0 0 auto;
+  min-width: 3.5em;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  white-space: nowrap;
+}
+
+.node-window__entity-value {
+  min-width: 0;
+  color: var(--text-soft);
+  word-break: break-word;
+}
+
+.node-window__links {
+  margin: var(--sp-6) 0 0;
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--border);
+}
+
+.node-window__extracts {
+  margin: var(--sp-6) 0 0;
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--border);
+}
+
+.node-window__extracts + .node-window__links {
+  margin-top: var(--sp-4);
+}
+
+.node-window__links-head {
+  margin: 0 0 var(--sp-2);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+
+.node-window__extracts-summary {
+  margin: 0 0 var(--sp-2);
+  color: var(--text-dim);
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+
+.node-window__extracts-list,
+.node-window__links-list {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+}
+
+.node-window__link {
+  display: grid;
+  grid-template-columns: minmax(4.8rem, 0.32fr) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  min-height: 34px;
+  padding: var(--sp-2) var(--sp-3);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  color: var(--text-soft);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.node-window__link--single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.node-window__link:hover,
+.node-window__link:focus-visible {
+  background: var(--panel-hover-bg);
+  border-bottom-color: var(--panel-hover-line);
+  color: var(--text-soft);
+  outline: none;
+}
+
+.node-window__link-rel {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+.node-window__link-rel {
+  color: var(--text-dim);
+}
+
+.node-window__link-main {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.node-window__link-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rp-list--reveal .rp-row--reveal {
+    opacity: 1;
+    transform: none;
+    animation: none;
+  }
+
+  .dash-square-loader,
+  .node-detail__snippet--typing::after,
+  .node-window__snippet--typing::after {
+    animation: none;
+  }
+}

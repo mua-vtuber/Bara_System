@@ -1,0 +1,11 @@
+node_modules/
+dist/
+resources/
+artifacts/
+.omx/
+src-tauri/target/
+src-tauri/gen/
+*.tsbuildinfo
+*.log
+.env
+data/

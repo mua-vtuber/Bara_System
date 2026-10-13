@@ -1,0 +1,9 @@
+[Unit]
+Description=Bara A1 모니터링 — 5분 주기
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target

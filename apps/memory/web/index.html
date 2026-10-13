@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b0820">
+  <title>바라 메모리</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/web/dashboard/ui/tokens.css">
+  <link rel="stylesheet" href="/web/dashboard/ui/frame.css">
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      min-height: 100%;
+      margin: 0;
+      background: var(--bg-nebula);
+      color: var(--text, #dff6ff);
+      font-family: var(--sans, system-ui, sans-serif);
+    }
+    body {
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+    .boot {
+      width: min(420px, 100%);
+      padding: 18px;
+    }
+    .boot__title {
+      margin: 0 0 6px;
+      font-size: 15px;
+      font-weight: 700;
+      background: var(--au-grad);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+    .boot__status {
+      margin: 0;
+      color: var(--text-dim, #63aeff);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .boot__links {
+      display: flex;
+      gap: 10px;
+      margin-top: 14px;
+    }
+  </style>
+</head>
+<body>
+  <main class="boot au-panel au-panel--primary" aria-live="polite">
+    <h1 class="boot__title">바라 메모리</h1>
+    <p class="boot__status" id="boot-status">첫 화면 설정을 확인하는 중...</p>
+    <div class="boot__links">
+      <a href="/web/dashboard.html" class="au-btn au-btn--ghost au-btn--small">대시보드</a>
+      <a href="/web/graph.html" class="au-btn au-btn--ghost au-btn--small">그래프</a>
+    </div>
+  </main>
+
+  <script type="module">
+    import { initTheme } from "/web/dashboard/ui/theme-switch.js";
+    initTheme();
+    import { apiFetch } from "/web/dashboard/api-fetch.js";
+
+    const statusEl = document.getElementById("boot-status");
+    const targetFor = (startPage) =>
+      startPage === "graph" ? "/web/graph.html" : "/web/dashboard.html";
+
+    async function resolveStartPage() {
+      try {
+        const res = await apiFetch("/settings");
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const settings = await res.json();
+        const startPage = settings?.ui?.startPage === "graph" ? "graph" : "dashboard";
+        return targetFor(startPage);
+      } catch (error) {
+        console.warn("[dashboard-router] settings load failed; falling back to dashboard", error);
+        if (statusEl) statusEl.textContent = "설정을 읽지 못해 대시보드로 이동합니다.";
+        return targetFor("dashboard");
+      }
+    }
+
+    const target = await resolveStartPage();
+    location.replace(target);
+  </script>
+</body>
+</html>

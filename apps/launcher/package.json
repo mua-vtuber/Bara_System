@@ -1,0 +1,22 @@
+{
+  "name": "@bara/launcher",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "scripts": {
+    "dev": "tauri dev",
+    "tauri": "tauri",
+    "build:frontend": "bun run scripts/build-frontend.ts",
+    "build": "tauri build",
+    "typecheck": "bunx tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.9.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.9.1",
+    "@types/bun": "1.3.14",
+    "typescript": "^5"
+  }
+}

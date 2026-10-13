@@ -1,0 +1,155 @@
+# booster-dictionary.yaml — regex L0 한국어 default booster 사전 (Phase 6 spec 6.3.1)
+#
+# 사용자 입력 안에서 이 단어가 검출되면(단순 부분 문자열 검색, 정규식 아님)
+# 양식 점수에 booster 점수를 합산한다(spec 3.4). 이 파일은
+# builtin-boosters.ts 의 코드 상수 BUILTIN_BOOSTERS 와 같은 내용을 사용자
+# 갱신 진입점으로 보유한다.
+#
+# 코드 상수는 항상 가동하므로 이 파일이 비어 있어도 점수 합산이 정상 작동한다.
+# 사용자는 yaml 을 직접 손대지 않아도 된다 — 대시보드 → 설정 → "booster 사전"
+# 단락에서 추가하는 통로가 후속 UI(Phase 8/T12)에서 연결된다.
+#
+# 점수 가족: 강한 결정 신호 +3 / 강한 의지 표현 +2 / 약한 부정 신호 -2 /
+# 잡담 신호 -1.
+#
+# 각 항목 칸:
+#   word         검출 대상 단어 / 어구
+#   score        합산 점수
+#   description  사람이 읽는 설명
+#   enabled      가동 여부
+
+version: 1
+lang: ko
+
+boosters:
+  # ── 강한 결정 신호 (+3) ──
+  - word: "앞으로"
+    score: +3
+    description: "선언적 결정 / 지속 의지"
+    enabled: true
+  - word: "계속"
+    score: +3
+    description: "지속 의지"
+    enabled: true
+  - word: "항상"
+    score: +3
+    description: "원칙 강조"
+    enabled: true
+  - word: "기본값"
+    score: +3
+    description: "default 결정"
+    enabled: true
+  - word: "원칙"
+    score: +3
+    description: "사용자 원칙 신호"
+    enabled: true
+  - word: "정했다"
+    score: +3
+    description: "결정 명시"
+    enabled: true
+  - word: "하기로 했다"
+    score: +3
+    description: "결정 명시"
+    enabled: true
+  - word: "확정"
+    score: +3
+    description: "결정 동결"
+    enabled: true
+  - word: "유지"
+    score: +3
+    description: "현 결정 보존"
+    enabled: true
+  - word: "동결"
+    score: +3
+    description: "변경 차단"
+    enabled: true
+  - word: "확립"
+    score: +3
+    description: "원칙 정착"
+    enabled: true
+
+  # ── 강한 의지 표현 (+2) ──
+  - word: "선호"
+    score: +2
+    description: "선호 명시"
+    enabled: true
+  - word: "좋아"
+    score: +2
+    description: "선호 신호"
+    enabled: true
+  - word: "마음에 들어"
+    score: +2
+    description: "선호 신호"
+    enabled: true
+  - word: "해야"
+    score: +2
+    description: "제약 신호"
+    enabled: true
+  - word: "필수"
+    score: +2
+    description: "제약 강조"
+    enabled: true
+  - word: "금지"
+    score: +2
+    description: "제약 강조"
+    enabled: true
+  - word: "절대"
+    score: +2
+    description: "강조"
+    enabled: true
+  - word: "반드시"
+    score: +2
+    description: "강조"
+    enabled: true
+
+  # ── 약한 부정 신호 (-2) ──
+  - word: "임시"
+    score: -2
+    description: "임시 자산 / 자산 저장 가치 ↓"
+    enabled: true
+  - word: "나중에"
+    score: -2
+    description: "지연 신호"
+    enabled: true
+  - word: "잠깐"
+    score: -2
+    description: "짧은 시점 한정"
+    enabled: true
+  - word: "일회성"
+    score: -2
+    description: "1회 한정"
+    enabled: true
+  - word: "가정"
+    score: -2
+    description: "가정 신호"
+    enabled: true
+  - word: "만약"
+    score: -2
+    description: "조건 신호"
+    enabled: true
+
+  # ── 잡담 신호 (-1) ──
+  - word: "ㅋㅋ"
+    score: -1
+    description: "잡담 신호"
+    enabled: true
+  - word: "ㅎㅎ"
+    score: -1
+    description: "잡담 신호"
+    enabled: true
+  - word: "잡담"
+    score: -1
+    description: "잡담 명시"
+    enabled: true
+  - word: "농담"
+    score: -1
+    description: "농담 명시"
+    enabled: true
+  - word: "추임새"
+    score: -1
+    description: "추임새 명시"
+    enabled: true
+  - word: "그냥"
+    score: -1
+    description: "약한 의지 신호"
+    enabled: true

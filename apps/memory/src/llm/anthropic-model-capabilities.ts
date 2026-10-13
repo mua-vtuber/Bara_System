@@ -1,0 +1,103 @@
+/**
+ * Anthropic 모델별 요청 칸 허용 규칙 — 단일 출처.
+ *
+ * 왜 필요한가: 최신 Claude 모델 가족(Fable 5·5.1, Mythos 5·5.1, Opus 5.5·5·4.8·4.7,
+ * Sonnet 5.5·5, Haiku 5.5)은 표본 추출 조절값(temperature·top_p·top_k)을 요청에 넣으면
+ * HTTP 400 (`temperature` is deprecated for this model) 으로 거절한다. Opus 4.6·Sonnet 4.6·
+ * Haiku 4.5 와 그 이전 모델은 아직 받는다. 글 클라이언트(`anthropic-client.ts`)와 이미지
+ * 캡션 클라이언트(`vision/anthropic.ts`)가 모두 이 모듈 하나만 보고 칸을 넣거나 뺀다 —
+ * 모델 이름 목록을 다른 파일에 흩어 두지 않는다.
+ *
+ * 판정 방식 (허용 목록):
+ *   - 이름을 정규화한다: 소문자화 → 앞의 공급자 접두("anthropic.", "us.anthropic." 등) 제거 →
+ *     뒤의 Bedrock 판 표시("-v1:0"), Vertex 판 표시("@20250929"), 날짜("-20251001"),
+ *     "[1m]" 같은 꼬리 제거.
+ *   - 받는 것이 확인된 옛 가족만 true. 이름 규칙을 알아볼 수 없는 모델은 false — 조절값을
+ *     빼는 쪽은 어느 모델에서도 400 을 일으키지 않지만(모든 모델에서 선택 칸), 넣는 쪽은
+ *     새 모델에서 요청 자체가 실패하기 때문이다. 이것은 실패를 가리는 대체값이 아니라
+ *     "받는다고 확인된 모델에만 보낸다"는 보수적 규칙이다.
+ *   - 새 모델이 나오면 아래 표(SAMPLING_REJECTING_FAMILIES·OPUS_SAMPLING_REJECT_FROM_MINOR)
+ *     만 고친다.
+ */
+
+/** 주 버전과 상관없이 표본 조절값을 거절하는 가족. */
+const SAMPLING_REJECTING_FAMILIES: ReadonlySet<string> = new Set([
+  "fable",
+  "mythos",
+]);
+
+/** 이 주 버전 이상인 opus·sonnet·haiku 는 표본 조절값을 거절한다. */
+const SAMPLING_REJECT_FROM_MAJOR = 5;
+
+/** Opus 4.x 중 이 부 버전 이상(4.7·4.8)은 표본 조절값을 거절한다. */
+const OPUS_SAMPLING_REJECT_FROM_MINOR = 7;
+
+/** 표본 조절값을 받는 것이 확인된 옛 이름 규칙(claude-3-5-sonnet-…, claude-2.1, claude-instant-1.2). */
+const LEGACY_ACCEPTING_PATTERN = /^claude-(?:instant|[123])(?:[-.]|$)/;
+
+/** 현행 이름 규칙: claude-<가족>-<주>[-<부>]. */
+const CURRENT_NAMING_PATTERN = /^claude-([a-z]+)-(\d+)(?:-(\d+))?$/;
+
+/** 알아볼 수 없는 모델 이름을 이미 알렸는지 — 이름마다 한 번만 경고한다(호출마다 같은 줄이 쌓이지 않게). */
+const warnedUnknownModelIds = new Set<string>();
+
+/** 이름 규칙을 알아볼 수 없어 temperature 를 빼고 보낸다는 사실을 이름마다 한 번 알린다. */
+function warnUnknownModelOnce(modelId: string): void {
+  if (warnedUnknownModelIds.has(modelId)) return;
+  warnedUnknownModelIds.add(modelId);
+  console.warn(
+    `[anthropic] 모델 이름 '${modelId}' 을 알려진 가족 규칙으로 알아볼 수 없어 temperature 를 빼고 보낸다 ` +
+      `(anthropic-model-capabilities.ts 표를 확인할 것).`,
+  );
+}
+
+/** 공급자 접두·판 표시·날짜·문맥 표시 꼬리를 걷어낸 비교용 이름. */
+export function normalizeAnthropicModelId(modelId: string): string {
+  let id = modelId.trim().toLowerCase();
+  const providerPrefixEnd = id.lastIndexOf("anthropic.");
+  if (providerPrefixEnd >= 0) id = id.slice(providerPrefixEnd + "anthropic.".length);
+  id = id.replace(/\[[^\]]*\]$/, "");
+  id = id.replace(/-v\d+(?::\d+)?$/, "");
+  id = id.replace(/@[^@]*$/, "");
+  id = id.replace(/-\d{8}$/, "");
+  return id;
+}
+
+/**
+ * 이 모델에 temperature·top_p·top_k 를 보내도 되는가.
+ * false 면 클라이언트가 해당 칸을 요청에서 뺀다.
+ */
+export function anthropicModelAcceptsSampling(modelId: string): boolean {
+  const id = normalizeAnthropicModelId(modelId);
+  if (LEGACY_ACCEPTING_PATTERN.test(id)) return true;
+
+  const match = CURRENT_NAMING_PATTERN.exec(id);
+  if (!match) {
+    warnUnknownModelOnce(modelId);
+    return false;
+  }
+  const family = match[1]!;
+  const major = Number(match[2]);
+  const minor = match[3] === undefined ? 0 : Number(match[3]);
+
+  if (SAMPLING_REJECTING_FAMILIES.has(family)) return false;
+  if (family !== "opus" && family !== "sonnet" && family !== "haiku") {
+    warnUnknownModelOnce(modelId);
+    return false;
+  }
+  if (major >= SAMPLING_REJECT_FROM_MAJOR) return false;
+  if (family === "opus" && major === 4 && minor >= OPUS_SAMPLING_REJECT_FROM_MINOR) {
+    return false;
+  }
+  return true;
+}
+
+/** 요청 본문에 펼쳐 넣을 표본 조절 칸. 허용 안 되는 모델이거나 값이 없으면 빈 객체. */
+export function anthropicSamplingParams(
+  modelId: string,
+  sampling: { temperature?: number },
+): { temperature?: number } {
+  if (sampling.temperature === undefined) return {};
+  if (!anthropicModelAcceptsSampling(modelId)) return {};
+  return { temperature: sampling.temperature };
+}

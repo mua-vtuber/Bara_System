@@ -1,0 +1,142 @@
+{
+  "contract": {
+    "progressStages": [
+      "prepare",
+      "models",
+      "server",
+      "host-key",
+      "preflight",
+      "transfer",
+      "dependencies",
+      "service",
+      "search",
+      "answer",
+      "classify",
+      "cleanup",
+      "update-backup",
+      "restore-verify",
+      "restore-data",
+      "restore-switch",
+      "server-update"
+    ],
+    "progressDetailMaxParts": 10,
+    "answerOutcomes": [
+      "found",
+      "notFound",
+      "aiFailed"
+    ],
+    "hostErrorCodes": [
+      "HOST_WINDOW_NOT_ALLOWED",
+      "HOST_INVALID_REQUEST",
+      "HOST_REQUEST_TOO_LARGE",
+      "HOST_WINDOW_MISSING",
+      "HOST_WINDOW_OPERATION_FAILED",
+      "HOST_STATE_LOCK_FAILED",
+      "HOST_TASK_FAILED",
+      "HOST_DATA_DIR_FAILED",
+      "HOST_RESOURCE_DIR_FAILED",
+      "HOST_SERVICE_MISSING",
+      "HOST_RUNTIME_MISSING",
+      "HOST_SERVICE_START_FAILED",
+      "HOST_JOB_FAILED",
+      "HOST_SERVICE_STOPPED",
+      "HOST_SERVICE_DISCONNECTED",
+      "HOST_SERVICE_NOT_CONNECTED",
+      "HOST_SERVICE_WRITE_FAILED",
+      "HOST_SERVICE_PIPE_STALLED",
+      "HOST_DUPLICATE_REQUEST",
+      "HOST_SERVICE_UNRESPONSIVE",
+      "HOST_SERVICE_ERROR_REDACTED",
+      "HOST_DASHBOARD_LINK_INVALID",
+      "HOST_BROWSER_OPEN_FAILED",
+      "HOST_TEXT_CATALOG_INVALID",
+      "HOST_INSTANCE_GUARD_FAILED",
+      "HOST_BUILD_FAILED",
+      "HOST_FATAL_PANIC",
+      "HOST_AUTOSTART_REGISTRY_FAILED",
+      "HOST_AUTOSTART_READ_FAILED",
+      "HOST_AUTOSTART_READ_INVALID",
+      "HOST_WINDIR_MISSING",
+      "HOST_SSH_UNAVAILABLE",
+      "HOST_SSH_INSTALL_DENIED",
+      "HOST_SSH_INSTALL_START_FAILED",
+      "HOST_SSH_INSTALL_CANCELLED",
+      "HOST_SSH_INSTALL_TIMEOUT",
+      "HOST_SSH_INSTALL_FAILED",
+      "HOST_SSH_INSTALL_BUSY",
+      "HOST_SSH_INSTALL_WAIT_FAILED",
+      "HOST_SSH_PICKER_UNAVAILABLE",
+      "HOST_SSH_PICKER_FAILED",
+      "HOST_SSH_PICKER_DECODE_FAILED",
+      "HOST_SSH_KEY_NOT_FOUND",
+      "HOST_POSITION_SAVE_FAILED",
+      "HOST_POSITION_READ_FAILED",
+      "HOST_POSITION_RESTORE_FAILED",
+      "HOST_FEEDBACK_UNAVAILABLE",
+      "HOST_DISPLAY_MODE_SAVE_FAILED",
+      "HOST_DISPLAY_MODE_READ_FAILED",
+      "HOST_BACKUP_FOLDER_UNAVAILABLE",
+      "HOST_BACKUP_FOLDER_FAILED",
+      "HOST_BACKUP_FOLDER_OPEN_FAILED",
+      "HOST_STARTUP_CHECK_FAILED"
+    ],
+    "serviceHeartbeatMs": 5000,
+    "serviceSilenceLimitMs": 30000,
+    "serviceDrainMs": 15000,
+    "sensitiveMarkers": [
+      "bara-token=",
+      "access_token=",
+      "api_key="
+    ],
+    "sensitiveQueryKeys": [
+      "token",
+      "bara-token",
+      "access_token",
+      "api_key"
+    ],
+    "connectionAudienceVersion": 2,
+    "quickVisibilityEvent": "pet-quick-visibility",
+    "petVisibilityEvent": "pet-visibility",
+    "trayErrorEvent": "pet-tray-error",
+    "backupFolderName": "Bara 백업"
+  },
+  "text": {
+    "productTitle": "바라 펫",
+    "tray": {
+      "status": "바라 실행 중",
+      "statusAttention": "바라 실행 중 · 확인할 결과 있음",
+      "statusQuitting": "바라를 종료하는 중이에요…",
+      "input": "입력",
+      "search": "검색",
+      "dashboard": "대시보드",
+      "settings": "설정",
+      "recentResult": "최근 결과",
+      "hidePet": "펫 숨기기",
+      "showPet": "펫 보이기",
+      "quit": "바라 종료"
+    },
+    "sshKeyPicker": {
+      "title": "SSH 개인 키 선택",
+      "filter": "개인 키|*.pem;*.key;id_*|모든 파일|*.*"
+    },
+    "startup": {
+      "HOST_DATA_DIR_FAILED": "펫 데이터 폴더를 준비하지 못해 시작하지 못했어요. 사용자 폴더(LOCALAPPDATA)의 권한과 여유 공간을 확인해 주세요.",
+      "HOST_INSTANCE_GUARD_FAILED": "펫이 이미 실행 중인지 확인하지 못해 시작하지 못했어요. 다시 시도해 주세요.",
+      "HOST_BUILD_FAILED": "바라 펫 창을 준비하지 못해 시작하지 못했어요. 바라 펫을 다시 설치해 주세요.",
+      "HOST_FATAL_PANIC": "예상하지 못한 오류가 생겨 이 창을 닫으면 바라 펫이 종료돼요. 다시 실행해 주세요. 계속되면 바라 펫을 다시 설치해 주세요."
+    },
+    "startupStatusSuffix": " (오류 번호 {status})",
+    "hostNotice": {
+      "HOST_POSITION_SAVE_FAILED": "펫 위치를 저장하지 못했어요. 다음에 열면 이전 위치로 보일 수 있어요.",
+      "HOST_POSITION_READ_FAILED": "저장된 펫 위치를 읽지 못해 처음 위치로 보여드려요.",
+      "HOST_POSITION_RESTORE_FAILED": "화면 배율이나 펫 창 크기를 Windows에서 읽지 못해 펫을 저장된 위치로 옮기지 못했어요.",
+      "HOST_DISPLAY_MODE_SAVE_FAILED": "펫 숨김 설정을 저장하지 못했어요. 다음에 실행하면 이전 상태로 보일 수 있어요.",
+      "HOST_DISPLAY_MODE_READ_FAILED": "저장된 펫 숨김 설정을 읽지 못해 펫을 보여드려요.",
+      "HOST_STARTUP_CHECK_FAILED": "시작할 때 펫 제어 프로그램이 응답하지 않아 바라 서버 연결을 확인하지 못했어요. 바라 펫을 다시 실행해 주세요. 계속되면 트레이 아이콘의 \"설정\"에서 연결을 확인해 주세요."
+    },
+    "feedbackMask": {
+      "omittedLink": "[링크 생략]",
+      "omittedCredential": "[인증정보 생략]"
+    }
+  }
+}

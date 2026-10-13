@@ -1,0 +1,64 @@
+{
+  "name": "memory",
+  "version": "0.1.7",
+  "module": "src/index.ts",
+  "type": "module",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "mcp:config": "bun run src/tools/mcp-client-config.ts",
+    "dashboard:link": "bun run src/tools/dashboard-link.ts",
+    "ocr:companion": "bun run src/tools/document-ocr-companion.ts",
+    "portable:export": "bun run scripts/portable-memory.ts export",
+    "portable:restore": "bun run scripts/portable-memory.ts restore",
+    "portable:verify": "bun run scripts/portable-memory.ts verify",
+    "test": "bun run scripts/test-suite.ts default",
+    "test:default": "bun run scripts/test-suite.ts default",
+    "test:heavy": "bun run scripts/test-suite.ts heavy",
+    "test:all": "bun run scripts/test-suite.ts all",
+    "test:list": "bun run scripts/test-suite.ts list",
+    "typecheck": "bunx tsc --noEmit -p tsconfig.json",
+    "typecheck:dashboard": "bunx tsc --noEmit -p web/dashboard/tsconfig.json",
+    "verify": "bun run typecheck && bun run typecheck:dashboard && bun run test:default",
+    "verify:full": "bun run typecheck && bun run typecheck:dashboard && bun run test:all",
+    "build:dashboard": "bun build web/dashboard/settings.ts web/dashboard/api-fetch.ts web/dashboard/nav-rail.ts web/dashboard/ui/badges.ts web/dashboard/ui/theme-switch.ts web/dashboard/dashboard-entry.ts web/dashboard/ingest-submission.ts --outdir web/dashboard --target browser --format esm && bun build web/dashboard/graph/graph-entry.ts --outdir web/dashboard/graph --target browser --format esm",
+    "build:dashboard:dev": "bun build web/dashboard/settings.ts web/dashboard/api-fetch.ts web/dashboard/nav-rail.ts web/dashboard/ui/badges.ts web/dashboard/ui/theme-switch.ts web/dashboard/dashboard-entry.ts web/dashboard/ingest-submission.ts --outdir web/dashboard --target browser --format esm --sourcemap=inline && bun build web/dashboard/graph/graph-entry.ts --outdir web/dashboard/graph --target browser --format esm --sourcemap=inline"
+  },
+  "devDependencies": {
+    "@happy-dom/global-registrator": "^20.9.0",
+    "@types/bun": "1.3.14",
+    "@types/three": "^0.184.1",
+    "happy-dom": "^20.9.0",
+    "omggif": "^1.0.10"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.96.0",
+    "@hono/mcp": "^0.3.1",
+    "@huggingface/transformers": "^4.2.0",
+    "@jsquash/avif": "^2.1.1",
+    "@jsquash/jpeg": "^1.6.0",
+    "@jsquash/png": "^3.1.1",
+    "@jsquash/resize": "^2.1.1",
+    "@jsquash/webp": "^1.5.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@napi-rs/canvas": "0.1.100",
+    "fflate": "^0.8.3",
+    "hono": "^4.12.18",
+    "jimp": "1.6.0",
+    "kiwi-nlp": "^0.23.0",
+    "mammoth": "^1.12.0",
+    "sqlite-vec": "^0.1.9",
+    "three": "^0.184.0",
+    "unpdf": "^1.6.2",
+    "yaml": "^2.9.0",
+    "zod": "^4.4.3"
+  },
+  "trustedDependencies": [
+    "onnxruntime-node",
+    "protobufjs"
+  ]
+}

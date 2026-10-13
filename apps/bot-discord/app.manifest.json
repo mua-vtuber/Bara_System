@@ -1,0 +1,32 @@
+{
+  "id": "bot-discord",
+  "name": "디스코드 봇",
+  "version": "0.1.0",
+  "manifestVersion": 1,
+  "endpoint": "http://127.0.0.1:3100",
+  "health": "/health",
+  "description": "메모리 모듈의 reference 입력 어댑터. 디스코드 메시지를 메모리에 기록하고, evolver 알림 / 슬래시 커맨드를 제공.",
+  "tags": ["adapter", "input", "reference"],
+  "settings": {
+    "schemaPath": "/settings/schema",
+    "getPath": "/settings",
+    "putPath": "/settings"
+  },
+  "actions": [
+    {
+      "id": "verify-token",
+      "label": "토큰 검증",
+      "method": "POST",
+      "path": "/actions/verify-token",
+      "returns": "toast",
+      "needsConfirm": false
+    },
+    {
+      "id": "list-channels",
+      "label": "채널 목록 갱신",
+      "method": "GET",
+      "path": "/actions/list-channels",
+      "returns": "enum"
+    }
+  ]
+}

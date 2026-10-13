@@ -1,0 +1,16 @@
+{
+  "name": "bara-system",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "workspaces": ["apps/*", "!apps/pet"],
+  "scripts": {
+    "setup": "bun run apps/setup/src/index.ts",
+    "test": "bun run scripts/test-suite.ts default",
+    "test:default": "bun run scripts/test-suite.ts default",
+    "test:heavy": "bun run scripts/test-suite.ts heavy",
+    "test:all": "bun run scripts/test-suite.ts all",
+    "test:list": "bun run scripts/test-suite.ts list",
+    "deploy:a1": "bun run apps/pet/scripts/deploy-a1.ts",
+    "version:bump": "bun run apps/pet/scripts/bump-version.ts"
+  }
+}

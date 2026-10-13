@@ -1,0 +1,9 @@
+[Unit]
+Description=Bara 백업 오프-트리 복사 — 서버 내장 백업(data/backups)을 /home/bara/backups 로
+
+[Service]
+Type=oneshot
+User=bara
+ExecStart=/home/bara/bara_system/deploy/scripts/backup-sync.sh
+StandardOutput=journal
+StandardError=journal

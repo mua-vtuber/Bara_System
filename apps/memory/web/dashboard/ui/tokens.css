@@ -1,0 +1,117 @@
+/* apps/memory/web/dashboard/ui/tokens.css
+   디자인 토큰 단일 출처 — 홀로그램 오로라. 새 색·인라인 px 금지.
+   다크 = :root 기본, 라이트 = [data-theme="light"] 덮어쓰기.
+   그래프 캔버스 토큰은 테마 무관 고정(라이트가 안 덮음). */
+:root {
+  color-scheme: dark;
+  /* 오로라 코어 — 완성 후 무드 튜닝은 이 4개부터 */
+  --au-a: #a882ff;            /* 주 발광 A (보라) */
+  --au-b: #38e8ff;            /* 주 발광 B (청록) */
+  --au-point: #ff7ad9;        /* 포인트 (분홍) */
+  --au-grad: linear-gradient(90deg, var(--au-a), var(--au-b));
+  /* 표면 */
+  --bg: #0b0820;
+  --bg-nebula: radial-gradient(130% 150% at 15% 0%, #1a1038 0%, #0b0820 48%, #060512 100%);
+  --bg-elev: rgba(20, 16, 48, 0.92);
+  --bg-card: #0d0a28;
+  --border: rgba(168, 130, 255, 0.3);
+  --overlay: rgba(6, 5, 18, 0.68);
+  /* 유리 패널 */
+  --glass-bg: linear-gradient(160deg, rgba(60, 40, 120, 0.34), rgba(20, 16, 48, 0.58));
+  --glass-blur: 8px;
+  /* 글자 */
+  --text: #f0ecff;
+  --text-dim: #a89ad8;
+  --text-soft: rgba(216, 204, 255, 0.88);
+  --accent: var(--au-b);
+  --accent-2: var(--au-a);
+  /* 브래킷 프레임 — 위왼 = 청록, 아래오른 = 보라 */
+  --frame-len: 14px; --frame-w: 2px;
+  --frame-c1: var(--au-b); --frame-c2: var(--au-a);
+  /* 브래킷 그라디언트 스택 — 4모서리(-4)/위 2모서리(-2). 소비처는 background: var(--frame-bracket-4).
+     주의: 토큰 안의 var() 는 :root 에서 치환된 값으로 상속되므로, --frame-c1/-c2 를
+     로컬 오버라이드하는 지점(예: settings.html danger-zone)은 토큰 대신 스택 직접 기재 유지. */
+  --frame-bracket-4:
+    linear-gradient(90deg, var(--frame-c1) 0 var(--frame-len), transparent var(--frame-len)) top left / 100% var(--frame-w) no-repeat,
+    linear-gradient(180deg, var(--frame-c1) 0 var(--frame-len), transparent var(--frame-len)) top left / var(--frame-w) 100% no-repeat,
+    linear-gradient(270deg, var(--frame-c2) 0 var(--frame-len), transparent var(--frame-len)) bottom right / 100% var(--frame-w) no-repeat,
+    linear-gradient(0deg, var(--frame-c2) 0 var(--frame-len), transparent var(--frame-len)) bottom right / var(--frame-w) 100% no-repeat;
+  --frame-bracket-2:
+    linear-gradient(90deg, var(--frame-c1) 0 var(--frame-len), transparent var(--frame-len)) top left / 100% var(--frame-w) no-repeat,
+    linear-gradient(180deg, var(--frame-c1) 0 var(--frame-len), transparent var(--frame-len)) top left / var(--frame-w) 100% no-repeat;
+  /* 컷코너 */
+  --cut: 10px; --cut-sm: 7px;
+  /* 패널 발광(구 --panel-glow 소비처 호환) */
+  --panel-glow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 10px 30px rgba(8, 4, 26, 0.55);
+  /* 목록 hover·선택 */
+  --panel-hover-bg: rgba(168, 130, 255, 0.12); --panel-hover-line: transparent;
+  --list-selected-bg: linear-gradient(90deg, rgba(168, 130, 255, 0.5), rgba(56, 232, 255, 0.32));
+  --list-selected-line: var(--au-b);
+  --side-toggle-bg: linear-gradient(135deg, var(--au-a), var(--au-b));
+  --mp-status-bg: rgba(6, 5, 18, 0.8);
+  --text-on-selected: #ffffff;
+  --text-on-accent: #060512;
+  /* 상태/의미 — 오로라 톤 보정, 의미 구분 유지 */
+  --danger: #ff6b8a; --warn: #ffb066;
+  --source-vector: #8fa8ff; --source-fts: #5fe0a8; --source-graph: #c98fff;
+  --tag-important: #ffc966; --tag-uncertain: #8a84a8;
+  --revision-supersedes: #5fe0a8; --revision-superseded: #ffb066;
+  /* 글자 크기 */
+  --fs-xs: 11px; --fs-sm: 13px; --fs-base: 16px; --fs-lg: 18px; --fs-xl: 24px;
+  /* 간격·반경·그림자 */
+  --sp-1: 5px; --sp-2: 7px; --sp-3: 9px; --sp-4: 13px; --sp-5: 17px; --sp-6: 26px;
+  --radius: 3px; --radius-sm: 2px;
+  --hud-radius: 3px; --hud-cut: var(--cut);
+  --field-bg: rgba(8, 6, 24, 0.7);
+  --surface-2: color-mix(in srgb, var(--bg-card) 78%, var(--au-a) 10%);
+  --surface-3: color-mix(in srgb, var(--bg-elev) 80%, var(--au-a) 14%);
+  --shadow: 0 8px 24px rgba(8, 4, 26, 0.5);
+  /* 글꼴 */
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Apple SD Gothic Neo", "Pretendard", sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  /* 그래프 캔버스 — 고정(테마 무관). 수채화 png 폐기, 오로라 성운 그라디언트로 교체 */
+  --graph-stage-bg: #0a0718;
+  --graph-nebula-bg:
+    radial-gradient(60% 50% at 30% 30%, rgba(122, 79, 224, 0.32), transparent 70%),
+    radial-gradient(50% 45% at 72% 60%, rgba(0, 184, 217, 0.2), transparent 70%),
+    radial-gradient(35% 30% at 55% 20%, rgba(217, 79, 184, 0.14), transparent 70%);
+  --graph-nebula-filter: blur(2px) saturate(118%);
+  --graph-nebula-opacity: 0.85; --graph-nebula-scale: 1.4;
+  /* 그래프 위 노드 이름표 — 배경이 테마 무관 어두운 우주라 글자도 고정 밝은색(라이트 테마의 --text 를 따르면 묻힌다) */
+  --graph-label-text: #f0ecff;
+  --graph-label-dim: #a89ad8;
+  --graph-label-halo: var(--graph-stage-bg);
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  /* 홀로 라이트 — 같은 세계관의 주간 조명. 캔버스 토큰은 상속(고정). */
+  --au-a: #7a4fe0; --au-b: #00b8d9; --au-point: #d94fb8;
+  /* 검정 라벨(--text-on-accent) 이 보라 끝 #7a4fe0 에서 대비 4.02:1 로 AA(4.5:1) 미달 —
+     그라디언트 시작색만 12% 밝힘(#000 대비 5.03:1). --au-a 자체는 테두리·강조색 무드 유지를 위해 불변. */
+  --au-grad: linear-gradient(90deg, color-mix(in srgb, var(--au-a) 88%, #ffffff), var(--au-b));
+  --bg: #eef0fa;
+  --bg-nebula: radial-gradient(130% 150% at 15% 0%, #f3eeff 0%, #eef0fa 48%, #e7ecf6 100%);
+  --bg-elev: rgba(255, 255, 255, 0.88);
+  --bg-card: #ffffff;
+  --border: rgba(140, 110, 220, 0.28);
+  --overlay: rgba(36, 29, 62, 0.4);
+  --glass-bg: linear-gradient(160deg, rgba(255, 255, 255, 0.82), rgba(244, 240, 255, 0.7));
+  --text: #241d3e;
+  --text-dim: #6a5a9a;
+  --text-soft: #4a4070;
+  --panel-glow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 6px 20px rgba(90, 70, 160, 0.1);
+  --panel-hover-bg: rgba(122, 79, 224, 0.08);
+  --list-selected-bg: linear-gradient(90deg, rgba(122, 79, 224, 0.5), rgba(0, 184, 217, 0.4));
+  --list-selected-line: var(--au-a);
+  --mp-status-bg: rgba(255, 255, 255, 0.85);
+  --text-on-selected: #ffffff;
+  --text-on-accent: #000000;
+  --danger: #d63c5e; --warn: #c77a2e;
+  --source-vector: #4a63d0; --source-fts: #1e9a68; --source-graph: #9a4fd0;
+  --tag-important: #b8860b; --tag-uncertain: #8a8498;
+  --revision-supersedes: #1e9a68; --revision-superseded: #c77a2e;
+  --field-bg: rgba(255, 255, 255, 0.8);
+  --surface-2: color-mix(in srgb, #ffffff 82%, var(--au-a) 8%);
+  --surface-3: color-mix(in srgb, #ffffff 78%, var(--au-a) 12%);
+  --shadow: 0 6px 20px rgba(90, 70, 160, 0.12);
+}

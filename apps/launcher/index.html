@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bara Launcher</title>
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body>
+    <main>
+      <h1>Bara</h1>
+      <p id="status" role="status" aria-live="polite">서버 상태 확인 중</p>
+      <p id="error" role="alert" hidden></p>
+      <div id="setup-actions" class="setup-actions" hidden>
+        <button id="setup-keep" hidden>현재 AI 설정 유지</button>
+        <button id="setup-ollama">Ollama로 코어 준비</button>
+        <button id="setup-lmstudio">LM Studio로 코어 준비</button>
+        <button id="setup-noai">AI 없이 코어 준비</button>
+      </div>
+      <div class="actions">
+        <button id="open">대시보드 열기</button>
+        <button id="restart">서버 재시작</button>
+        <button id="stop">서버 종료</button>
+      </div>
+    </main>
+  </body>
+</html>

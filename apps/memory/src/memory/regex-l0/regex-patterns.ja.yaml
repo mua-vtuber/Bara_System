@@ -1,0 +1,69 @@
+# regex-patterns.ja.yaml — regex L0 Japanese OPTIONAL scaffold (Phase 6 spec 단락 7.2).
+#
+# Japanese is an OPT-IN scaffold, NOT part of the default langs (default langs =
+# ["ko", "en"] — 사용자 결정 #6). It loads only when settings extractor.regex.langs
+# explicitly includes "ja" (e.g. ["ko", "en", "ja"]). With the default langs this
+# file is never read, so it does not affect production matching.
+#
+# Same schema as regex-patterns.yaml: version / lang / patterns[]. Each item carries
+# example_input / example_extracted whose extracted value equals the actual first
+# capture group, trimmed (T1 drift rule) — verified by multilang.test.ts.
+#
+# This is a scaffold (4 patterns from spec 7.2), the entry point for external-fork
+# Japanese users to grow their own bundle. The boot path-family also resolves
+# booster-dictionary.ja.yaml for Japanese boosters when "ja" is in langs; the spec
+# 7.2 candidate boosters are listed in the comment block below so a fork author can
+# drop them into booster-dictionary.ja.yaml (same booster schema as the en/ko files):
+#
+#   - word: "これから"   score: +3   # declarative decision / continuous intent
+#   - word: "ずっと"     score: +3   # continuous intent
+#   - word: "必ず"       score: +2   # emphasis
+#   - word: "一時的"     score: -2   # temporary signal
+
+version: 1
+lang: ja
+
+patterns:
+  - id: "decision_ja_001"
+    pattern: "(.{2,40})\\s+(?:に決め|に決定)"
+    score: 3
+    category: decision
+    polarity: positive
+    description: "X に決めた / 決定した"
+    example_input: "Bun ランタイム に決めた"
+    example_extracted: "Bun ランタイム"
+    enabled: true
+    lang: "ja"
+
+  - id: "decision_ja_002"
+    pattern: "(.{2,40})\\s+(?:を選ん|を選択)"
+    score: 3
+    category: decision
+    polarity: positive
+    description: "X を選ぶ / 選択する"
+    example_input: "bge-m3 モデル を選んだ"
+    example_extracted: "bge-m3 モデル"
+    enabled: true
+    lang: "ja"
+
+  - id: "preference_ja_001"
+    pattern: "(.{2,40})\\s+が\\s*(?:好き|気に入)"
+    score: 2
+    category: preference
+    polarity: positive
+    description: "X が好き / 気に入った"
+    example_input: "水彩トーン が好き"
+    example_extracted: "水彩トーン"
+    enabled: true
+    lang: "ja"
+
+  - id: "constraint_ja_001"
+    pattern: "(.{2,40})\\s+(?:なきゃ|なければならない)"
+    score: 2
+    category: constraint
+    polarity: positive
+    description: "X なきゃ / なければならない"
+    example_input: "型チェック なければならない"
+    example_extracted: "型チェック"
+    enabled: true
+    lang: "ja"

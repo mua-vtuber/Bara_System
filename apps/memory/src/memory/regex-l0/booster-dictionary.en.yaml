@@ -1,0 +1,138 @@
+# booster-dictionary.en.yaml — regex L0 English default booster dictionary
+# (Phase 6 spec 단락 3.3 영어 booster).
+#
+# When one of these words is found inside the input (plain substring search via
+# indexOf, NOT regex — spec 3.4), its score is added to the matched pattern score.
+# English is a shipped default bundle, loaded when settings extractor.regex.langs
+# includes "en" (default langs = ["ko", "en"], so English boosters are default-ON).
+#
+# Same schema as booster-dictionary.yaml: version / lang / boosters[]. Each item:
+#   word         word / phrase to detect
+#   score        score to add
+#   description  human-readable summary
+#   enabled      active flag
+#
+# Score families: strong decision signal +3 / strong intent +2 / weak negative -2 /
+# small-talk signal -1.
+
+version: 1
+lang: en
+
+boosters:
+  # ── strong decision signal (+3) ──
+  - word: "always"
+    score: +3
+    description: "principle emphasis / continuous intent"
+    enabled: true
+    lang: "en"
+  - word: "forever"
+    score: +3
+    description: "continuous intent"
+    enabled: true
+    lang: "en"
+  - word: "from now on"
+    score: +3
+    description: "declarative decision"
+    enabled: true
+    lang: "en"
+  - word: "default"
+    score: +3
+    description: "default decision"
+    enabled: true
+    lang: "en"
+  - word: "principle"
+    score: +3
+    description: "user principle signal"
+    enabled: true
+    lang: "en"
+  - word: "confirmed"
+    score: +3
+    description: "decision freeze"
+    enabled: true
+    lang: "en"
+  - word: "decided"
+    score: +3
+    description: "decision stated"
+    enabled: true
+    lang: "en"
+  - word: "finalized"
+    score: +3
+    description: "decision finalized"
+    enabled: true
+    lang: "en"
+
+  # ── strong intent (+2) ──
+  - word: "prefer"
+    score: +2
+    description: "preference stated"
+    enabled: true
+    lang: "en"
+  - word: "must"
+    score: +2
+    description: "constraint signal"
+    enabled: true
+    lang: "en"
+  - word: "required"
+    score: +2
+    description: "constraint emphasis"
+    enabled: true
+    lang: "en"
+  - word: "forbidden"
+    score: +2
+    description: "constraint emphasis"
+    enabled: true
+    lang: "en"
+  - word: "never"
+    score: +2
+    description: "emphasis"
+    enabled: true
+    lang: "en"
+
+  # ── weak negative signal (-2) ──
+  - word: "temporary"
+    score: -2
+    description: "temporary asset / storage value down"
+    enabled: true
+    lang: "en"
+  - word: "temporarily"
+    score: -2
+    description: "temporary signal"
+    enabled: true
+    lang: "en"
+  - word: "for now"
+    score: -2
+    description: "deferral signal"
+    enabled: true
+    lang: "en"
+  - word: "later"
+    score: -2
+    description: "deferral signal"
+    enabled: true
+    lang: "en"
+
+  # ── small-talk signal (-1) ──
+  - word: "lol"
+    score: -1
+    description: "small-talk signal"
+    enabled: true
+    lang: "en"
+  - word: "lmao"
+    score: -1
+    description: "small-talk signal"
+    enabled: true
+    lang: "en"
+  - word: "haha"
+    score: -1
+    description: "small-talk signal"
+    enabled: true
+    lang: "en"
+  - word: "jk"
+    score: -1
+    description: "joke signal"
+    enabled: true
+    lang: "en"
+  - word: "just kidding"
+    score: -1
+    description: "joke signal"
+    enabled: true
+    lang: "en"

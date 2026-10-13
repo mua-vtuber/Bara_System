@@ -1,0 +1,96 @@
+/* apps/memory/web/dashboard/ui/frame.css
+   오로라 형태 문법 공용 클래스 — 패널(브래킷 프레임)·버튼(컷코너)·칩·입력칸.
+   색·치수는 tokens.css 토큰만 소비. 화면 CSS 는 이 클래스를 조합해 쓴다. */
+
+/* ── 패널: 유리 몸체 + 브래킷 프레임 ── */
+.au-panel {
+  position: relative;
+  background: var(--glass-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--panel-glow);
+}
+.au-panel::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  pointer-events: none;
+  background: var(--frame-bracket-4);
+}
+/* 주 패널 — 오른위 해시 노치 장식 추가 */
+.au-panel--primary::after {
+  content: "";
+  position: absolute;
+  top: calc(var(--sp-2) + 1px);
+  right: var(--sp-3);
+  width: 34px;
+  height: 6px;
+  pointer-events: none;
+  background: repeating-linear-gradient(90deg,
+    color-mix(in srgb, var(--frame-c1) 80%, transparent) 0 4px, transparent 4px 8px);
+}
+/* 경량 패널 — 위 2모서리만 */
+.au-panel--soft::before {
+  background: var(--frame-bracket-2);
+}
+
+/* ── 버튼: 컷코너 ── */
+.au-btn {
+  appearance: none;
+  border: none;
+  cursor: pointer;
+  text-decoration: none; /* a 태그에 얹어도 밑줄 없음 (부트 링크·전체화면 버튼) */
+  padding: var(--sp-2) var(--sp-5);
+  font-family: var(--sans);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--text-on-accent);
+  background: var(--au-grad);
+  clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
+  transition: filter 0.15s ease;
+}
+.au-btn:hover { filter: drop-shadow(0 0 6px color-mix(in srgb, var(--au-b) 60%, transparent)) brightness(1.08); }
+.au-btn:focus-visible { outline: 2px solid var(--au-b); outline-offset: 2px; }
+.au-btn:disabled { cursor: default; filter: grayscale(0.6) opacity(0.55); }
+.au-btn--ghost {
+  color: var(--accent-2);
+  background: color-mix(in srgb, var(--au-a) 8%, transparent);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.au-btn--ghost:hover { filter: drop-shadow(0 0 5px color-mix(in srgb, var(--au-a) 50%, transparent)); }
+.au-btn--danger { background: linear-gradient(90deg, var(--danger), color-mix(in srgb, var(--danger) 60%, var(--au-point))); color: #ffffff; }
+.au-btn--small { padding: var(--sp-1) var(--sp-4); font-size: var(--fs-xs); clip-path: polygon(var(--cut-sm) 0, 100% 0, 100% calc(100% - var(--cut-sm)), calc(100% - var(--cut-sm)) 100%, 0 100%, 0 var(--cut-sm)); }
+
+/* ── 칩·입력칸 ── */
+.au-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 3px var(--sp-3);
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--bg-elev) 80%, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.au-chip strong { color: var(--accent); }
+.au-field {
+  font-family: var(--sans);
+  font-size: var(--fs-sm);
+  color: var(--text);
+  background: var(--field-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-2) var(--sp-3);
+}
+.au-field:focus-visible { outline: none; border-color: var(--au-b); box-shadow: 0 0 0 1px color-mix(in srgb, var(--au-b) 55%, transparent); }
+
+/* ── 패널 등장 연출: 브래킷 먼저, 몸체 페이드인 ── */
+@keyframes au-frame-draw { from { background-size: 0 var(--frame-w), var(--frame-w) 0, 0 var(--frame-w), var(--frame-w) 0; } }
+@keyframes au-body-rise { from { opacity: 0; transform: translateY(6px); } }
+.au-reveal { animation: au-body-rise 0.45s 0.12s ease-out backwards; }
+.au-reveal::before { animation: au-frame-draw 0.3s ease-out backwards; }
+@media (prefers-reduced-motion: reduce) {
+  .au-reveal, .au-reveal::before { animation: none; }
+  .au-btn { transition: none; }
+}

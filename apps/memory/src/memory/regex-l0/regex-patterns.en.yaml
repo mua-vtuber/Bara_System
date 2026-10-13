@@ -1,0 +1,266 @@
+# regex-patterns.en.yaml — regex L0 English default patterns (Phase 6 spec 단락 2 영어 갈래).
+#
+# English is a shipped default bundle, loaded when settings extractor.regex.langs
+# includes "en" (default langs = ["ko", "en"], so English is default-ON). The
+# Korean primary lives in code constants (builtin-patterns.ts) + regex-patterns.yaml;
+# English lives only here as a data bundle (korean-first language-profile principle —
+# language-specific patterns are DATA, not code constants).
+#
+# Same schema as regex-patterns.yaml: version / lang / patterns[]. Each item:
+#   id              unique pattern id
+#   pattern         regex string (first capture group is the extracted content)
+#   score           base score (+1 ~ +3)
+#   category        decision / preference / constraint / status / fact / technical
+#   polarity        positive / negative / neutral (단락 5 정합)
+#   description     human-readable summary
+#   example_input   sample input the pattern matches
+#   example_extracted  content extracted from example_input (= first capture group, trimmed)
+#   enabled         active flag (false excludes from matching)
+#
+# NOTE on example_extracted: the spec patterns end with `(?:\.|$)` and use a
+# greedy `.{2,60}` capture. When the input ends with a period, the `$` branch
+# wins at end-of-string and the trailing "." stays inside the capture group.
+# example_extracted records the ACTUAL extracted value (T1 drift rule) — so it
+# includes the trailing "." where the regex captures it.
+
+version: 1
+lang: en
+
+patterns:
+  # ── decision patterns (+3) — spec 2.1.2 ──
+  - id: "decision_en_001"
+    pattern: "decided\\s+to\\s+(.{2,60})(?:\\.|$)"
+    score: 3
+    category: decision
+    polarity: positive
+    description: "decided to X"
+    example_input: "I decided to use Bun runtime."
+    example_extracted: "use Bun runtime."
+    enabled: true
+    lang: "en"
+
+  - id: "decision_en_002"
+    pattern: "chose\\s+(.{2,60})(?:\\s+over|\\.|$)"
+    score: 3
+    category: decision
+    polarity: positive
+    description: "chose X"
+    example_input: "We chose PostgreSQL over MySQL."
+    example_extracted: "PostgreSQL over MySQL."
+    enabled: true
+    lang: "en"
+
+  - id: "decision_en_003"
+    pattern: "going\\s+(?:to\\s+)?(?:use|with)\\s+(.{2,60})(?:\\.|$)"
+    score: 3
+    category: decision
+    polarity: positive
+    description: "going to use X / going with X"
+    example_input: "I am going to use TypeScript."
+    example_extracted: "TypeScript."
+    enabled: true
+    lang: "en"
+
+  - id: "decision_en_004"
+    pattern: "switched\\s+to\\s+(.{2,60})(?:\\.|$)"
+    score: 3
+    category: decision
+    polarity: positive
+    description: "switched to X"
+    example_input: "We switched to Hono framework."
+    example_extracted: "Hono framework."
+    enabled: true
+    lang: "en"
+
+  # ── preference patterns (+2) — spec 2.2.2 ──
+  - id: "preference_en_001"
+    pattern: "(?:I\\s+)?prefer(?:s)?\\s+(.{2,60})(?:\\s+over|\\.|$)"
+    score: 2
+    category: preference
+    polarity: positive
+    description: "I prefer X"
+    example_input: "I prefer dark mode."
+    example_extracted: "dark mode."
+    enabled: true
+    lang: "en"
+
+  - id: "preference_en_002"
+    pattern: "(?:I\\s+)?(?:really\\s+)?(?:like|love|enjoy)s?\\s+(.{2,60})(?:\\.|$)"
+    score: 2
+    category: preference
+    polarity: positive
+    description: "I like X / I love X"
+    example_input: "I really like watercolor tones."
+    example_extracted: "watercolor tones."
+    enabled: true
+    lang: "en"
+
+  - id: "preference_en_003"
+    pattern: "(?:I\\s+)?(?:hate|dislike|don'?t\\s+like)\\s+(.{2,60})(?:\\.|$)"
+    score: 2
+    category: preference
+    polarity: negative
+    description: "I hate X / I dislike X"
+    example_input: "I dislike kanji notation."
+    example_extracted: "kanji notation."
+    enabled: true
+    lang: "en"
+
+  - id: "preference_en_004"
+    pattern: "(?:my|I)\\s+favorite\\s+(?:\\w+\\s+)?is\\s+(.{2,60})(?:\\.|$)"
+    score: 2
+    category: preference
+    polarity: positive
+    description: "my favorite is X"
+    example_input: "My favorite color is teal."
+    example_extracted: "teal."
+    enabled: true
+    lang: "en"
+
+  # ── constraint patterns (+2) — spec 2.3.2 ──
+  - id: "constraint_en_001"
+    pattern: "(?:must|have\\s+to|need\\s+to)\\s+(.{2,60})(?:\\.|$)"
+    score: 2
+    category: constraint
+    polarity: positive
+    description: "must / have to / need to X"
+    example_input: "We must run type checks before commit."
+    example_extracted: "run type checks before commit."
+    enabled: true
+    lang: "en"
+
+  - id: "constraint_en_002"
+    pattern: "(?:can'?t|cannot|do\\s+not|don'?t)\\s+(.{2,60})(?:\\.|$)"
+    score: 2
+    category: constraint
+    polarity: negative
+    description: "can't / cannot / don't X"
+    example_input: "We cannot modify old code."
+    example_extracted: "modify old code."
+    enabled: true
+    lang: "en"
+
+  - id: "constraint_en_003"
+    pattern: "(.{2,60})\\s+(?:forbidden|prohibited|not\\s+allowed)"
+    score: 2
+    category: constraint
+    polarity: negative
+    description: "X forbidden / prohibited"
+    example_input: "Mock data is forbidden."
+    example_extracted: "Mock data is"
+    enabled: true
+    lang: "en"
+
+  # ── status patterns (+1) — spec 2.4 status_en ──
+  - id: "status_en_001"
+    pattern: "(?:I'm\\s+|currently\\s+)?(?:working\\s+on|building)\\s+(.{2,60})(?:\\.|$)"
+    score: 1
+    category: status
+    polarity: neutral
+    description: "working on X / building X"
+    example_input: "I'm working on the search route."
+    example_extracted: "the search route."
+    enabled: true
+    lang: "en"
+
+  - id: "status_en_002"
+    pattern: "(?:I'm\\s+|currently\\s+)?(?:reviewing|testing)\\s+(.{2,60})(?:\\.|$)"
+    score: 1
+    category: status
+    polarity: neutral
+    description: "reviewing / testing X"
+    example_input: "Currently reviewing the regex patterns."
+    example_extracted: "the regex patterns."
+    enabled: true
+    lang: "en"
+
+  # ── fact patterns (+1~2) — spec 2.5.2 ──
+  - id: "fact_en_001"
+    pattern: "(?:my\\s+)?name\\s+is\\s+(.{2,60})(?:\\.|$)"
+    score: 2
+    category: fact
+    polarity: neutral
+    description: "my name is X"
+    example_input: "My name is Banjjagi."
+    example_extracted: "Banjjagi."
+    enabled: true
+    lang: "en"
+
+  - id: "fact_en_002"
+    pattern: "(?:I\\s+)?(?:am|I'm)\\s+(?:a\\s+)?(.{2,60})(?:\\.|$)"
+    score: 1
+    category: fact
+    polarity: neutral
+    description: "I am X"
+    example_input: "I am a developer."
+    example_extracted: "developer."
+    enabled: true
+    lang: "en"
+
+  - id: "fact_en_003"
+    pattern: "(?:I\\s+)?(?:live|living)\\s+in\\s+(.{2,60})(?:\\.|$)"
+    score: 2
+    category: fact
+    polarity: neutral
+    description: "I live in X"
+    example_input: "I live in Seoul."
+    example_extracted: "Seoul."
+    enabled: true
+    lang: "en"
+
+  - id: "fact_en_004"
+    pattern: "(?:I\\s+)?work(?:s|ing)?\\s+(?:at|for)\\s+(.{2,60})(?:\\.|$)"
+    score: 2
+    category: fact
+    polarity: neutral
+    description: "I work at X"
+    example_input: "I work at a startup."
+    example_extracted: "a startup."
+    enabled: true
+    lang: "en"
+
+  # ── technical patterns (+1~2) — spec 2.6 default ON parity, English variants
+  #    sourced from regex-extractor.ts (verified old English technical regex).
+  - id: "technical_en_001"
+    pattern: "(?:I\\s+)?(?:use|using)\\s+(.{2,60})(?:\\s+for|\\.|$)"
+    score: 2
+    category: technical
+    polarity: positive
+    description: "I use X"
+    example_input: "I use Bun for the runtime."
+    example_extracted: "Bun for the runtime."
+    enabled: true
+    lang: "en"
+
+  - id: "technical_en_002"
+    pattern: "(?:I\\s+)?(?:develop|developing|build|building)\\s+(?:with|in|using)\\s+(.{2,60})(?:\\.|$)"
+    score: 2
+    category: technical
+    polarity: positive
+    description: "develop with X"
+    example_input: "I develop with TypeScript."
+    example_extracted: "TypeScript."
+    enabled: true
+    lang: "en"
+
+  - id: "technical_en_003"
+    pattern: "(?:I\\s+)?(?:learning|studying)\\s+(.{2,60})(?:\\.|$)"
+    score: 1
+    category: technical
+    polarity: positive
+    description: "learning X"
+    example_input: "I am learning Rust."
+    example_extracted: "Rust."
+    enabled: true
+    lang: "en"
+
+  - id: "technical_en_004"
+    pattern: "(?:my|our)\\s+stack\\s+(?:is|includes)\\s+(.{2,60})(?:\\.|$)"
+    score: 2
+    category: technical
+    polarity: positive
+    description: "our stack is X / includes X"
+    example_input: "Our stack is Bun and Hono."
+    example_extracted: "Bun and Hono."
+    enabled: true
+    lang: "en"

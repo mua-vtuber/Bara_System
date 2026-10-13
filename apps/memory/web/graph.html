@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="theme-color" content="#0a0718" />
+<title>바라 메모리 — 그래프</title>
+<link rel="stylesheet" href="/web/dashboard/ui/tokens.css" />
+<link rel="stylesheet" href="/web/dashboard/ui/frame.css" />
+<link rel="stylesheet" href="/web/dashboard/ui/components.css" />
+<link rel="stylesheet" href="/web/dashboard/ui/forms.css" />
+<style>
+  /* 토큰만 사용 — 인라인 px·새 색 금지. 레이아웃 골격만. */
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: var(--sans); font-size: var(--fs-base); }
+  #graph-root { position: fixed; inset: 0; }
+  .graph-stage { isolation: isolate; background: var(--graph-stage-bg); }
+  .graph-stage::before {
+    content: '';
+    position: absolute;
+    inset: -18%;
+    z-index: 0;
+    pointer-events: none;
+    background: var(--graph-nebula-bg);
+    filter: var(--graph-nebula-filter);
+    opacity: var(--graph-nebula-opacity);
+    transform: scale(var(--graph-nebula-scale, 1.06));
+    transform-origin: 50% 50%;
+    animation: graph-nebula-drift 68s ease-in-out infinite alternate;
+    will-change: transform;
+  }
+  .graph-stage > canvas { position: relative; z-index: 1; }
+  .node-label {
+    position: absolute;
+    pointer-events: none;
+    user-select: none;
+    /* 라벨을 점 오른쪽에 붙여 세로 가운데로 맞춘다(left 는 leader-line 이 점+여백으로 지정). */
+    transform: translateY(-50%);
+    text-align: left;
+    white-space: nowrap;
+    color: var(--graph-label-text);
+    font-family: var(--sans);
+    font-size: var(--fs-xs);
+    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.85);
+    z-index: 5;
+  }
+  .node-label.hidden { display: none; }
+
+  /* document 글 모달 본문의 마크다운 요소 최소 스타일.
+     모달 컨테이너 클래스 .graph-node-snippet 하위로만 한정(전역 오염 방지).
+     색·글자 크기는 토큰만 사용, 간격은 상대 단위(em)로 px 리터럴 회피. */
+  .graph-node-snippet h1,
+  .graph-node-snippet h2,
+  .graph-node-snippet h3 { margin: 0.6em 0 0.3em; color: var(--text); font-family: var(--sans); line-height: 1.3; }
+  .graph-node-snippet h1 { font-size: var(--fs-xl); }
+  .graph-node-snippet h2 { font-size: var(--fs-base); }
+  .graph-node-snippet h3 { font-size: var(--fs-sm); }
+  .graph-node-snippet p { margin: 0.5em 0; }
+  .graph-node-snippet ul,
+  .graph-node-snippet ol { margin: 0.5em 0; padding-left: 1.4em; }
+  .graph-node-snippet li { margin: 0.2em 0; }
+  .graph-node-snippet a { color: var(--accent); text-decoration: underline; }
+  .graph-node-snippet code { font-family: var(--mono); font-size: var(--fs-xs); background: var(--bg-elev); border-radius: var(--radius-sm); padding: 0.1em 0.3em; }
+  .graph-node-snippet pre { margin: 0.5em 0; padding: 0.6em 0.8em; background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); overflow-x: auto; }
+  .graph-node-snippet pre code { background: transparent; border-radius: 0; padding: 0; }
+  .graph-node-snippet blockquote {
+    margin: 0.7em 0;
+    padding: 0.7em 0.9em;
+    border: thin solid var(--border);
+    border-left: 0.3em solid var(--accent);
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--accent) 9%, transparent);
+    color: var(--text-soft);
+    white-space: normal;
+  }
+  .graph-node-snippet blockquote > :first-child { margin-top: 0; }
+  .graph-node-snippet blockquote > :last-child { margin-bottom: 0; }
+  .graph-node-snippet .md-table-wrap {
+    margin: 0.7em 0;
+    overflow-x: auto;
+    border: thin solid var(--border);
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--bg-elev) 86%, transparent);
+  }
+  .graph-node-snippet table {
+    width: 100%;
+    border-collapse: collapse;
+    white-space: normal;
+    font-size: var(--fs-sm);
+  }
+  .graph-node-snippet th,
+  .graph-node-snippet td {
+    padding: 0.55em 0.7em;
+    border-bottom: thin solid color-mix(in srgb, var(--border) 82%, transparent);
+    color: var(--text-soft);
+    text-align: left;
+    vertical-align: top;
+  }
+  .graph-node-snippet th {
+    color: var(--text);
+    font-weight: 600;
+    background: color-mix(in srgb, var(--accent) 11%, transparent);
+  }
+  .graph-node-snippet tr:last-child td { border-bottom: 0; }
+  .graph-node-snippet .md-align-left { text-align: left; }
+  .graph-node-snippet .md-align-center { text-align: center; }
+  .graph-node-snippet .md-align-right { text-align: right; }
+
+  @keyframes graph-nebula-drift {
+    0% {
+      transform: translate3d(-1.6%, 1.1%, 0) scale(var(--graph-nebula-scale, 1.06)) rotate(-0.35deg);
+    }
+    100% {
+      transform: translate3d(1.6%, -1.1%, 0) scale(var(--graph-nebula-scale, 1.06)) rotate(0.35deg);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .graph-stage::before {
+      animation: none;
+      transform: scale(var(--graph-nebula-scale, 1.06));
+    }
+  }
+</style>
+</head>
+<body>
+<div id="graph-root"></div>
+<script type="module" src="/web/dashboard/graph/graph-entry.js"></script>
+</body>
+</html>

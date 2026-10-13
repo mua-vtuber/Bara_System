@@ -1,0 +1,13 @@
+# Windows 배치 파일은 CRLF 줄 끝 필수 — cmd 가 LF 만 박혀 있으면 줄 깨짐.
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+
+# Unix 셸 스크립트 + .sh 는 LF 유지.
+*.sh    text eol=lf
+
+# SQL 스키마는 LF 유지 — sqlite_master DDL 대조가 체크아웃 EOL 에 흔들리지 않게 한다.
+*.sql   text eol=lf
+
+# 대시보드 JS 는 LF 유지 — build:dashboard 가 LF 로 쓰므로, autocrlf 환경에서 내용이
+# 같은데도 수정됨으로 잡히지 않게 한다.
+*.js    text eol=lf

@@ -1,0 +1,679 @@
+/* web/dashboard/ui/forms.css — 입력 폼·계산 위젯·검색 모달 공유 스타일.
+   index.html 인라인에서 이관(단일 출처). 색·간격은 theme 토큰만(하드코딩 색 0). */
+
+/* ── Graph bottom command bar ─────────────────────────────────── */
+.graph-bottom-bar {
+  box-sizing: border-box;
+  position: absolute;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  width: min(820px, calc(100% - 48px));
+  z-index: 6;
+  isolation: isolate;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--hud-radius);
+  box-shadow: var(--panel-glow);
+  padding: 10px 12px;
+  pointer-events: auto;
+}
+.graph-bottom-bar::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(135deg, var(--accent) 0 1px, transparent 1px 100%) top left / 28px 28px no-repeat,
+    linear-gradient(315deg, var(--accent) 0 1px, transparent 1px 100%) bottom right / 28px 28px no-repeat;
+  opacity: 0.52;
+}
+.graph-bottom-bar > *,
+.search-modal > * {
+  position: relative;
+  z-index: 1;
+}
+.graph-bottom-bar .ingest-box {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  margin-bottom: 0;
+}
+
+/* ── Ingest form (채팅창 입력 폼 — Phase 14b T6) ──────────────────── */
+.ingest-box {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px;
+  margin-bottom: 12px;
+  transition: border-color 0.15s ease;
+  /* 단계6 T3a: column flex — 종류 헤더·칸이 메모칸 위에, 메모칸·전송은 아래 고정. */
+  display: flex;
+  flex-direction: column;
+}
+.ingest-box.dragover {
+  border-color: var(--accent);
+  background: var(--bg-card);
+}
+
+/* ── S8: 떠 있는 미리보기 패널 (#  자유 타이핑 인식 결과) ───────────────── */
+/* 입력창 위에 떠 "이렇게 이해했어요"를 실시간으로 보인다(S7·결정 2). 입력칸이 아니라
+   읽기 전용 안내라 클릭·입력을 안 받는다(pointer-events:none — 입력 흐름 무방해). */
+.ingest-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: var(--sp-1);
+  font-size: var(--fs-xs);
+  pointer-events: none;
+}
+.ingest-preview:empty { margin-bottom: 0; }
+/* 인식된 태그가 하나도 없을 때 — 정직한 빈 상태 한 줄. */
+.preview-empty {
+  color: var(--text-dim);
+  font-style: italic;
+}
+.preview-row {
+  display: flex;
+  gap: var(--sp-1);
+  align-items: baseline;
+}
+.preview-label {
+  color: var(--text-dim);
+  min-width: 3em;
+  white-space: nowrap;
+}
+.preview-value {
+  color: var(--text);
+  word-break: break-word;
+}
+/* 못 알아든 값 — 가짜값으로 위장하지 않고 흐린 색으로 정직하게 드러낸다(No-fallback). */
+.preview-row[data-unrecognized="1"] .preview-value {
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+/* ── S8: 종류 인식 시 칸 자동 표시 (결정 6) ────────────────────────────── */
+/* 종류를 인식하면 "이 종류는 이런 칸을 가질 수 있어요"를 칩으로 보인다. 강제 입력칸이 아니라
+   안내라, 사용자는 칸값도 `#금액:28000` 처럼 본문 태그로 친다(spec §5.6). */
+.ingest-fields-auto {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  pointer-events: auto;
+}
+.ingest-fields-auto:empty { display: none; }
+.ingest-fields-auto-label {
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.ingest-field-chip {
+  appearance: none;
+  background: var(--field-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-soft);
+  cursor: pointer;
+  padding: 2px 6px;
+  font-family: var(--mono);
+  font-size: inherit;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+.ingest-field-chip:focus-visible {
+  outline: none;
+  border-color: var(--au-b);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--au-b) 55%, transparent);
+}
+.ingest-field-chip-filled {
+  cursor: default;
+  color: var(--text);
+}
+/* 종류 칸 조회 실패 — 식별자와 함께 정직하게 표시(빈 칸 목록으로 위장하지 않음·No-fallback). */
+.ingest-fields-auto-error {
+  color: var(--danger);
+  font-size: var(--fs-xs);
+}
+
+/* ── S8: # 자동완성 드롭다운 (저장된 태그 추천) ────────────────────────── */
+/* textarea 래퍼 안에 absolute 로 떠 입력창 바로 아래에 추천 목록을 보인다(S6·결정 3). */
+.ingest-input-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+.tag-autocomplete {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  z-index: 10;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  max-height: 200px;
+  overflow-y: auto;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 16px var(--overlay);
+}
+.tag-autocomplete[hidden] { display: none; }
+.tag-autocomplete-item {
+  padding: 4px 12px;
+  color: var(--text);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+.tag-autocomplete-item:hover {
+  background: var(--bg-elev);
+  color: var(--accent);
+}
+
+.ingest-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+.ingest-add-btn {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  font-size: 20px;
+  line-height: 1;
+  background: transparent;
+  border: none;
+  box-shadow: inset 0 0 0 1px var(--border);
+  color: var(--text-dim);
+  clip-path: polygon(var(--cut-sm) 0, 100% 0, 100% calc(100% - var(--cut-sm)), calc(100% - var(--cut-sm)) 100%, 0 100%, 0 var(--cut-sm));
+}
+.ingest-add-btn:hover { color: var(--text); box-shadow: inset 0 0 0 1px var(--au-b); background: transparent; }
+.ingest-add-btn:focus-visible { outline: 2px solid var(--au-b); outline-offset: 2px; }
+.ingest-input {
+  /* textarea 는 이제 .ingest-input-wrap(flex:1) 안에 있다(S8 자동완성 드롭다운 앵커).
+     래퍼를 가득 채우도록 width:100% + flex:1 둘 다 둔다. */
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  background: var(--field-bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 15px;
+  font-family: var(--sans);
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  resize: none;
+  min-height: 36px;
+  max-height: 200px;
+  line-height: 1.4;
+}
+.ingest-input:focus {
+  outline: none;
+  border-color: var(--au-b);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--au-b) 55%, transparent);
+}
+.ingest-send-btn {
+  flex: 0 0 auto;
+  height: 36px;
+  background: var(--au-grad);
+  color: var(--text-on-accent);
+  border: none;
+  font-weight: 700;
+  clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
+  transition: filter 0.15s ease;
+}
+.ingest-send-btn:hover {
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--au-b) 60%, transparent)) brightness(1.08);
+}
+.ingest-send-btn:focus-visible { outline: 2px solid var(--au-b); outline-offset: 2px; }
+.ingest-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.ingest-attachments:empty { margin-top: 0; }
+.ingest-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px 6px 4px 12px;
+  font-size: 12px;
+  color: var(--text-soft);
+  font-family: var(--mono);
+}
+.ingest-chip-size { color: var(--text-dim); font-size: 11px; }
+.ingest-chip-remove {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  padding: 0;
+  width: 18px;
+  height: 18px;
+  line-height: 1;
+  font-size: 15px;
+  border-radius: 50%;
+}
+.ingest-chip-remove:hover { background: var(--danger); color: var(--bg); }
+.ingest-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.ingest-result { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.ingest-result-block {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+.ingest-result-block.ok {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+.ingest-result-block.fail {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  color: var(--danger);
+}
+.ingest-result-head { font-weight: 600; margin-bottom: 4px; }
+.ingest-result-line { color: var(--text-soft); font-size: 12px; }
+.ingest-result-block.fail .ingest-result-line { color: var(--danger); }
+
+/* ── 집계(계산 경로) 위젯·검색/계산 탭·정렬 토글 ──────────────────── */
+/* 집계(계산 경로) 위젯(활용 단계5 T7) — 종류·집계 종류·프로젝트로 글을
+   목록·개수·시간순·누적 집계한다. 검색 카드와 다른 표/목록 렌더라 별도 자리에
+   둔다. theme 토큰은 검색 위젯과 같은 양식(하드코딩 색 0). */
+.compute-widget {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.compute-widget .compute-label {
+  color: var(--text-dim);
+  font-size: 13px;
+  font-family: var(--sans);
+}
+.compute-widget select,
+.compute-widget input[type="text"] {
+  background: var(--field-bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 14px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  font-family: var(--sans);
+}
+.compute-widget select:focus,
+.compute-widget input[type="text"]:focus {
+  outline: none;
+  border-color: var(--au-b);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--au-b) 55%, transparent);
+}
+.compute-widget input[type="text"] { flex: 1; min-width: 120px; }
+.compute-widget button {
+  background: var(--au-grad);
+  color: var(--text-on-accent);
+  border: none;
+  padding: 8px 14px;
+  clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  cursor: pointer;
+  font-family: var(--sans);
+  transition: filter 0.15s ease;
+}
+.compute-widget button:hover {
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--au-b) 60%, transparent)) brightness(1.08);
+}
+.compute-widget button:focus-visible { outline: 2px solid var(--au-b); outline-offset: 2px; }
+.compute-result { margin-bottom: 16px; }
+.compute-count {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--accent);
+  font-family: var(--sans);
+  padding: 8px 0;
+}
+.compute-count .compute-count-unit {
+  font-size: 15px;
+  font-weight: 400;
+  color: var(--text-dim);
+  margin-left: 6px;
+}
+.compute-list { display: flex; flex-direction: column; gap: 6px; }
+.compute-item {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 8px 10px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--sans);
+}
+.compute-item .compute-item-date {
+  color: var(--text-dim);
+  font-size: 12px;
+  white-space: nowrap;
+  min-width: 92px;
+}
+.compute-item .compute-item-content {
+  color: var(--text);
+  font-size: 14px;
+}
+.compute-note {
+  color: var(--text-dim);
+  font-size: 13px;
+  font-family: var(--sans);
+  padding: 6px 0;
+}
+/* 그래프 화면 우측 결과 패널 안 계산 결과(graph-entry showComputeResult). 검색 결과
+   목록과 같은 자리를 공유하되 padding·스크롤만 준다(결과 노드 색·폰트는 .compute-*
+   규칙이 입힌다). theme 토큰만 사용(하드코딩 색 0). */
+.rp-compute-body {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 12px;
+}
+.rp-compute-error {
+  color: var(--danger);
+  font-size: var(--fs-sm);
+  font-family: var(--sans);
+  padding: 12px 0;
+  line-height: 1.5;
+}
+/* 검색/계산 탭 토글 (활용 단계6b T4) — theme 토큰만 사용(하드코딩 색 0). */
+.query-tabs {
+  display: flex;
+  gap: var(--sp-1);
+  padding: var(--sp-1);
+  background: var(--panel-hover-bg);
+  border-radius: var(--radius-sm);
+  margin-bottom: 10px;
+}
+.query-tab {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  padding: var(--sp-2) var(--sp-1);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-family: var(--sans);
+  white-space: nowrap;
+}
+.query-tab:hover {
+  color: var(--text-soft);
+  background: color-mix(in srgb, var(--text-soft) 10%, transparent);
+}
+.query-tab:focus-visible { outline: 2px solid var(--au-b); outline-offset: 2px; }
+.query-tab.active {
+  background: var(--au-grad);
+  color: var(--text-on-accent);
+  font-weight: 600;
+}
+.compute-headline {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--accent);
+  font-family: var(--sans);
+  padding: 8px 0;
+}
+.compute-numeric-field-row, .compute-divisor-row {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+/* 검색 탭 정렬 토글 (활용 단계6b T6) — 관련순/시간순. theme 토큰만(하드코딩 색 0). */
+.search-sort {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin: 4px 0 8px;
+}
+.sort-toggle {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 13px;
+  padding: 5px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-family: var(--sans);
+}
+.sort-toggle:focus-visible { outline: 2px solid var(--au-b); outline-offset: 2px; }
+.sort-toggle.active {
+  background: var(--au-grad);
+  color: var(--text-on-accent);
+  border-color: transparent;
+  font-weight: 600;
+}
+
+/* 우측 결과 패널 헤더 정렬 토글(results-panel.ts·S6) — 관련순/최신등록순/빠른일정순.
+   패널이 260px 로 좁아 .sort-toggle 보다 작은 패딩·글자로 한 줄에 셋이 들어가게 한다.
+   theme 토큰만(하드코딩 색 0). */
+.rp-sort {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.rp-sort-toggle {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 11px;
+  padding: 3px 7px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-family: var(--sans);
+  line-height: 1.2;
+}
+.rp-sort-toggle:focus-visible { outline: 2px solid var(--au-b); outline-offset: 2px; }
+.rp-sort-toggle.active {
+  background: var(--au-grad);
+  color: var(--text-on-accent);
+  border-color: transparent;
+  font-weight: 600;
+}
+
+/* ── 검색 모달(search-modal.ts·S4) — 옛 검색 오버레이를 흡수·확장. theme 토큰만(하드코딩 색 0). ── */
+/* 그래프 캔버스 위에 absolute 로 얹는 상단 검색 카드. 옛 오버레이가 가지던 인라인 폭을
+   여기로 옮기고, 종류·칸·기간이 더해져 커졌으니 폭을 키운다. */
+.search-modal {
+  box-sizing: border-box;
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  width: min(680px, calc(100% - 48px));
+  isolation: isolate;
+  background: var(--glass-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--hud-radius);
+  padding: 12px 14px;
+  box-shadow: var(--panel-glow);
+  pointer-events: auto;
+}
+
+/* .au-panel--primary 와 동일한 4모서리 브래킷 프레임(TS 무변경 원칙 — 직접 기재). */
+.search-modal::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  z-index: 0;
+  pointer-events: none;
+  background: var(--frame-bracket-4);
+}
+.so-tab-row {
+  margin-bottom: 8px;
+}
+/* 종류 드롭다운 + 하위분류 + 기간 두 칸을 한 줄에 흐르게(좁은 카드에서 줄바꿈). */
+.so-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.so-date {
+  background: var(--field-bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: var(--fs-xs);
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  font-family: var(--sans);
+}
+.so-date:focus {
+  outline: none;
+  border-color: var(--au-b);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--au-b) 55%, transparent);
+}
+.so-input-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.so-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--field-bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-family: var(--sans);
+  outline: none;
+}
+.so-input:focus {
+  border-color: var(--au-b);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--au-b) 55%, transparent);
+}
+.so-search-btn {
+  flex-shrink: 0;
+  background: var(--au-grad);
+  color: var(--text-on-accent);
+  border: none;
+  padding: 8px 14px;
+  clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  cursor: pointer;
+  font-family: var(--sans);
+  transition: filter 0.15s ease;
+}
+.so-search-btn:hover {
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--au-b) 60%, transparent)) brightness(1.08);
+}
+.so-search-btn:focus-visible { outline: 2px solid var(--au-b); outline-offset: 2px; }
+.so-compute-slot {
+  margin-top: 8px;
+}
+/* 공용 picker(entity-type-field-picker) 의 종류 드롭다운(.etfp-select)·하위분류 단일 드롭다운
+   (.etfp-subcategory·S7). 검색 모달·입력 모달 양쪽이 쓴다. 같은 줄의 .so-date 와 배경·테두리
+   토큰을 맞춘다(하드코딩 색 0). 두 드롭다운은 모양이 같아 한 규칙으로 묶는다(중복 0). */
+.etfp-select,
+.etfp-subcategory {
+  background: var(--field-bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: var(--fs-xs);
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  font-family: var(--sans);
+  cursor: pointer;
+}
+.etfp-select:focus,
+.etfp-subcategory:focus {
+  outline: none;
+  border-color: var(--au-b);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--au-b) 55%, transparent);
+}
+/* load() 실패 표시 자리(No-fallback). 평소엔 :empty 로 숨고, 메시지가 채워지면 한 줄 전체를
+   차지해(flex-basis 100%) 종류 목록 로드 실패를 사용자에게 정직하게 드러낸다(ingest-field-error 양식). */
+.etfp-error {
+  flex-basis: 100%;
+  color: var(--danger);
+  font-size: var(--fs-xs);
+  font-family: var(--sans);
+}
+.etfp-error:empty {
+  display: none;
+}
+/* 동적 칸 묶음 — 한 줄 흐름(.so-filter-row) 안에서 칸들이 자연스럽게 이어지게 한다. */
+.etfp-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.etfp-fields:empty {
+  display: none;
+}
+
+@media (max-width: 1279px) {
+  #graph-root .search-modal,
+  #graph-root .graph-bottom-bar {
+    width: min(680px, calc(100% - 24px));
+    background: var(--bg-card);
+    overflow-x: hidden;
+  }
+  /* 스크롤 영역 밖의 -1px 프레임이 불필요한 가로·세로 스크롤을 만들지 않게 한다. */
+  #graph-root .search-modal::before,
+  #graph-root .graph-bottom-bar::before {
+    inset: 0;
+  }
+  #graph-root .search-modal {
+    max-height: 45%;
+    overflow-y: auto;
+  }
+  #graph-root .graph-bottom-bar {
+    max-height: 35%;
+    overflow-y: auto;
+  }
+  #graph-root .search-modal select,
+  #graph-root .search-modal input,
+  #graph-root .graph-bottom-bar select,
+  #graph-root .graph-bottom-bar input {
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+  #graph-root .compute-numeric-field-row,
+  #graph-root .compute-divisor-row {
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 1279px) and (max-height: 600px) {
+  /* 목록 160px + 위아래 간격 56px 를 남기고 두 폼 내부에서 스크롤한다. */
+  #graph-root .search-modal,
+  #graph-root .graph-bottom-bar {
+    max-height: calc((100% - 216px) / 2);
+  }
+}

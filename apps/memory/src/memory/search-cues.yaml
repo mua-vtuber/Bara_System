@@ -1,0 +1,27 @@
+# search-cues.yaml — 검색 cue 어휘 자유 추가 통로 (공통 인프라 1.1c / spec 5.3.3)
+#
+# query 안 이 어휘가 검출되면 graph 채널에 cue 가중치를 적용한다(값은
+# search-tuning.ts 의 RELATION/TOPIC_CUE_GRAPH_BOOST — 2026-07-10 중립 1.0).
+# builtin 정규식(search-cues.ts 의 RELATION_CUE_REGEX·TOPIC_CUE_REGEX)은 코드 상수라
+# 항상 가동한다. 이 파일은 builtin *외* 추가 어휘만 더한다(합집합). 비어 있어도
+# builtin 이 항상 가동하므로 검색이 정상 작동한다(graceful degradation Level 0).
+#
+# 사용자는 yaml 을 직접 손대지 않아도 된다 — 대시보드 → 설정 페이지 → "검색 cue
+# 어휘" 단락에서 자유 추가하는 통로가 후속 UI 작업(Phase 8)에서 연결된다.
+#
+# 형식:
+#   relation: 관계 cue 추가 정규식 문자열 목록(이전 결정·변경 이유를 묻는 어휘).
+#   topic:    주제 cue 추가 정규식 문자열 목록(한 주제 전부를 넓게 묻는 어휘).
+# 각 항목은 정규식 문자열이다(예: "수정한" 또는 "바꾼\\s*이유"). 정규식이 어긋나면
+# 로더가 구체 에러를 던진다(silent fallback 금지).
+#
+# 예시(주석 — 실제 추가 시 relation:/topic: 아래에 - 로 나열):
+#   relation:
+#     - 수정한
+#     - 고쳤
+#   topic:
+#     - 통째로
+#     - 싹
+
+relation: []
+topic: []

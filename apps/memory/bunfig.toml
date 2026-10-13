@@ -1,0 +1,15 @@
+[test]
+# Bun 1.3.6 은 이 키를 읽지 않는다. scripts/test-suite.ts 가 읽어 기본 스위트의 --timeout 으로 넘긴다
+# (무거운 스위트는 BARA_HEAVY_TEST_TIMEOUT_MS). 러너를 거치지 않는 bun test 는 --timeout 을 직접 줘야 한다.
+timeout = 60000
+smol = true
+pathIgnorePatterns = [
+  "src/api-client.loopback.test.ts",
+  "src/api-client.test.ts",
+  "src/db/**",
+  "src/embedding/**",
+  "src/memory/**",
+  "src/scheduler.test.ts",
+  "src/server-internal/**",
+  "src/server.test.ts",
+]

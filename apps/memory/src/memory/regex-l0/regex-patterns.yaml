@@ -1,0 +1,411 @@
+# regex-patterns.yaml — regex L0 한국어 default 양식 (Phase 6 spec 6.1.2)
+#
+# 메시지 도착 시점에 LLM 호출 없이 이 정규식 양식으로 1차 후보를 추출한다
+# (graceful degradation Level 0). 이 파일은 builtin-patterns.ts 의 코드 상수
+# BUILTIN_PATTERNS 와 같은 내용을 사용자 갱신 진입점으로 보유한다.
+#
+# 코드 상수는 항상 가동하므로 이 파일이 비어 있어도 검색·추출이 정상 작동한다.
+# yaml 로더(후속 task)는 이 파일을 읽어 builtin 외 사용자 추가 양식을 합산한다.
+# 사용자는 yaml 을 직접 손대지 않아도 된다 — 대시보드 → 설정 → "regex 양식"
+# 단락에서 추가하는 통로가 후속 UI(Phase 8/T12)에서 연결된다.
+#
+# 각 항목 칸:
+#   id              양식 식별자(고유)
+#   pattern         정규식 문자열(첫 캡처 그룹이 추출 내용)
+#   score           1차 점수(+1 ~ +3)
+#   category        decision / preference / constraint / status / fact / technical
+#   polarity        positive / negative / neutral (단락 5 정합)
+#   description     사람이 읽는 설명
+#   example_input   양식이 매치하는 예시 입력
+#   example_extracted 추출되는 내용
+#   enabled         가동 여부(false 면 매치에서 제외)
+
+version: 1
+lang: ko
+
+patterns:
+  # ── 결정 양식 (decision, +3) ──
+  - id: "decision_ko_001"
+    pattern: "(?:^|[\\s,])([^,]{2,40})\\s*하기로\\s*(?:했|함|하였|정했)"
+    score: 3
+    category: decision
+    polarity: positive
+    description: "X 하기로 했다 / 하기로 정했다 / 하기로 함"
+    example_input: "매일 정리하기로 했어"
+    example_extracted: "매일 정리"
+    enabled: true
+
+  - id: "decision_ko_002"
+    pattern: "(?:^|[\\s,])([^,]{2,40})\\s+결정(?:했|함|하였)"
+    score: 3
+    category: decision
+    polarity: positive
+    description: "X (으)로 결정했다 / 결정함"
+    example_input: "Bun 런타임으로 결정했어"
+    example_extracted: "Bun 런타임으로"
+    enabled: true
+
+  - id: "decision_ko_003"
+    pattern: "(?:^|[\\s,])([^,]{2,40})\\s*[을를]\\s*선택(?:했|함|하였)"
+    score: 3
+    category: decision
+    polarity: positive
+    description: "X 을 선택했다 / 선택함"
+    example_input: "bge-m3 모델을 선택했어"
+    example_extracted: "bge-m3 모델"
+    enabled: true
+
+  - id: "decision_ko_004"
+    pattern: "(?:^|[\\s,])([^,]{2,40})\\s+정했"
+    score: 3
+    category: decision
+    polarity: positive
+    description: "X (으)로 정했다"
+    example_input: "주 1회 정리로 정했어"
+    example_extracted: "주 1회 정리로"
+    enabled: true
+
+  - id: "decision_ko_005"
+    pattern: "(?:^|[\\s,])([^,]{2,40})\\s*[을를]\\s*쓰기로"
+    score: 3
+    category: decision
+    polarity: positive
+    description: "X 을 쓰기로"
+    example_input: "SQLite를 쓰기로 했어"
+    example_extracted: "SQLite"
+    enabled: true
+
+  - id: "decision_ko_006"
+    pattern: "(?:^|[\\s,])([^,]{2,40})\\s*[을를]\\s*채택(?:했|함|하였)"
+    score: 3
+    category: decision
+    polarity: positive
+    description: "X 을 채택했다 / 채택함"
+    example_input: "RRF 합산 방식을 채택했어"
+    example_extracted: "RRF 합산 방식"
+    enabled: true
+
+  - id: "decision_ko_007"
+    pattern: "앞으로\\s+([^,]{2,40})"
+    score: 3
+    category: decision
+    polarity: positive
+    description: "앞으로 X (선언적 결정)"
+    example_input: "앞으로 디스코드 봇은 수동 입력만 받기"
+    example_extracted: "디스코드 봇은 수동 입력만 받기"
+    enabled: true
+
+  - id: "decision_ko_008"
+    pattern: "(?:^|[\\s,])([^,]{2,40}?)\\s+유지(?:하기로|\\s*확정|\\s*결정|하자|할\\s*것)"
+    score: 3
+    category: decision
+    polarity: positive
+    description: "X 유지하기로 / 유지 확정 (현 결정 보존)"
+    example_input: "MENTION_BOOST 0.05 유지하기로"
+    example_extracted: "MENTION_BOOST 0.05"
+    enabled: true
+
+  - id: "decision_ko_009"
+    pattern: "(?:^|[\\s,])([^,]{2,40})\\s+확정"
+    score: 3
+    category: decision
+    polarity: positive
+    description: "X 확정"
+    example_input: "Phase 5.7.2 정착 확정"
+    example_extracted: "Phase 5.7.2 정착"
+    enabled: true
+
+  - id: "decision_ko_010"
+    pattern: "(?:^|[\\s,])([^,]{2,40})\\s+동결"
+    score: 3
+    category: decision
+    polarity: positive
+    description: "X 동결 (변경 차단 결정)"
+    example_input: "갈래 A 메모리 자율 결정 동결"
+    example_extracted: "갈래 A 메모리 자율 결정"
+    enabled: true
+
+  # ── 선호 양식 (preference, +2) ──
+  - id: "preference_ko_001"
+    pattern: "(?:^|[\\s,])([^,]{2,40})\\s*[가이]\\s+좋[아다]"
+    score: 2
+    category: preference
+    polarity: positive
+    description: "X 가 좋아 / 좋다"
+    example_input: "수채화 톤이 좋아"
+    example_extracted: "수채화 톤"
+    enabled: true
+
+  - id: "preference_ko_002"
+    pattern: "(?:^|[\\s,])([^,]{2,40})\\s+선호"
+    score: 2
+    category: preference
+    polarity: positive
+    description: "X 선호"
+    example_input: "Bun 런타임 선호"
+    example_extracted: "Bun 런타임"
+    enabled: true
+
+  - id: "preference_ko_003"
+    pattern: "(?:^|[\\s,])([^,]{2,40})\\s+마음에\\s+들[어다]"
+    score: 2
+    category: preference
+    polarity: positive
+    description: "X 마음에 들어 / 든다"
+    example_input: "이 색감이 마음에 들어"
+    example_extracted: "이 색감이"
+    enabled: true
+
+  - id: "preference_ko_004"
+    pattern: "(?:^|[\\s,])([^,]{2,40})\\s*[을를이가]\\s+싫[다어]"
+    score: 2
+    category: preference
+    polarity: negative
+    description: "X 싫다 / 싫어"
+    example_input: "한자 표기가 싫어"
+    example_extracted: "한자 표기"
+    enabled: true
+
+  - id: "preference_ko_005"
+    pattern: "(?:^|[\\s,])([^,]{2,40})\\s*[을를이가]\\s+(?:좋아|즐겨)"
+    score: 2
+    category: preference
+    polarity: positive
+    description: "X 을 좋아함 / 즐겨함"
+    example_input: "게임 시나리오를 즐겨"
+    example_extracted: "게임 시나리오"
+    enabled: true
+
+  - id: "preference_ko_006"
+    pattern: "(?:^|[\\s,])([^,]{2,40})\\s*[이가은는]\\s+(?:최고|최애|짱)"
+    score: 2
+    category: preference
+    polarity: positive
+    description: "X 이 최고 / 최애"
+    example_input: "흰머리 토끼귀가 최애"
+    example_extracted: "흰머리 토끼귀"
+    enabled: true
+
+  - id: "preference_ko_007"
+    pattern: "(?:제|내)가?\\s+좋아하는\\s+([^,]{2,40}?)(?:[은는이가]|$)"
+    score: 2
+    category: preference
+    polarity: positive
+    description: "내가 좋아하는 X"
+    example_input: "내가 좋아하는 색감"
+    example_extracted: "색감"
+    enabled: true
+
+  # ── 제약 양식 (constraint, +2) ──
+  - id: "constraint_ko_001"
+    pattern: "(?:^|[\\s,])([^,]{2,40})\\s+해야\\s+(?:한다|함)"
+    score: 2
+    category: constraint
+    polarity: positive
+    description: "X 해야 한다"
+    example_input: "커밋 전에 타입 검사를 해야 한다"
+    example_extracted: "커밋 전에 타입 검사를"
+    enabled: true
+
+  - id: "constraint_ko_002"
+    pattern: "(?:^|[\\s,])([^,]{2,40})\\s+안\\s+된다"
+    score: 2
+    category: constraint
+    polarity: negative
+    description: "X 안 된다"
+    example_input: "옛 코드 수정 안 된다"
+    example_extracted: "옛 코드 수정"
+    enabled: true
+
+  - id: "constraint_ko_003"
+    pattern: "(?:^|[\\s,])([^,]{2,40})\\s+금지"
+    score: 2
+    category: constraint
+    polarity: negative
+    description: "X 금지"
+    example_input: "Mock 객체 사용 금지"
+    example_extracted: "Mock 객체 사용"
+    enabled: true
+
+  - id: "constraint_ko_004"
+    pattern: "(?:^|[\\s,])([^,]{2,40})\\s+필수"
+    score: 2
+    category: constraint
+    polarity: positive
+    description: "X 필수"
+    example_input: "타입 검증 필수"
+    example_extracted: "타입 검증"
+    enabled: true
+
+  - id: "constraint_ko_005"
+    pattern: "(?:^|[\\s,])([^,]{2,40})\\s+불가"
+    score: 2
+    category: constraint
+    polarity: negative
+    description: "X 불가"
+    example_input: "Python 새 코드 추가 불가"
+    example_extracted: "Python 새 코드 추가"
+    enabled: true
+
+  # ── 상태 양식 (status, +1) ──
+  - id: "status_ko_001"
+    pattern: "(?:^|[\\s,])([^,]{2,40})\\s+진행중"
+    score: 1
+    category: status
+    polarity: neutral
+    description: "X 진행중"
+    example_input: "Phase 6 spec 작성 진행중"
+    example_extracted: "Phase 6 spec 작성"
+    enabled: true
+
+  - id: "status_ko_002"
+    pattern: "(?:^|[\\s,])([^,]{2,40})\\s+작업중"
+    score: 1
+    category: status
+    polarity: neutral
+    description: "X 작업중"
+    example_input: "타입 정의 작업중"
+    example_extracted: "타입 정의"
+    enabled: true
+
+  - id: "status_ko_003"
+    pattern: "(?:^|[\\s,])([^,]{2,40})\\s+(?:검토|검증)중"
+    score: 1
+    category: status
+    polarity: neutral
+    description: "X 검토중 / 검증중"
+    example_input: "양식 fixture 검증중"
+    example_extracted: "양식 fixture"
+    enabled: true
+
+  - id: "status_ko_004"
+    pattern: "(?:^|[\\s,])([^,]{2,40})\\s+대기중"
+    score: 1
+    category: status
+    polarity: neutral
+    description: "X 대기중"
+    example_input: "qa 검증 대기중"
+    example_extracted: "qa 검증"
+    enabled: true
+
+  # ── 사실 양식 (fact, +1~2) ──
+  - id: "fact_ko_001"
+    pattern: "(?:^|[\\s,])([^,]{2,40}?)\\s*[은는]\\s+([^,]{2,40})(?:이다|입니다|이에요|예요|이야|야)(?:\\.|$)"
+    score: 2
+    category: fact
+    polarity: neutral
+    description: "X 은 Y 이다 / Y 야"
+    example_input: "bara_system은 메모리 모듈이야"
+    example_extracted: "bara_system"
+    enabled: true
+
+  - id: "fact_ko_002"
+    pattern: "(?:^|[\\s,])([^,]{2,40}?)\\s+이름은\\s+([^,]{2,40})"
+    score: 2
+    category: fact
+    polarity: neutral
+    description: "X 이름은 Y"
+    example_input: "이 캐릭터 이름은 흰머리 토끼귀"
+    example_extracted: "이 캐릭터"
+    enabled: true
+
+  - id: "fact_ko_003"
+    pattern: "(?:저|나|제)는?\\s+([^,]{2,40}?)(?:이에요|입니다|이다|예요|거든요)"
+    score: 1
+    category: fact
+    polarity: neutral
+    description: "저는 / 나는 X 이에요"
+    example_input: "저는 개발자예요"
+    example_extracted: "개발자"
+    enabled: true
+
+  - id: "fact_ko_004"
+    pattern: "(?:저|나|제)는?\\s+([^,]{2,40}?)에\\s+(?:살[아고]|거주)"
+    score: 2
+    category: fact
+    polarity: neutral
+    description: "X 에 거주"
+    example_input: "저는 서울에 거주"
+    example_extracted: "서울"
+    enabled: true
+
+  - id: "fact_ko_005"
+    pattern: "(?:저|나|제)는?\\s+([^,]{2,40}?)\\s+(?:출신|태생)"
+    score: 1
+    category: fact
+    polarity: neutral
+    description: "X 출신"
+    example_input: "저는 부산 출신"
+    example_extracted: "부산"
+    enabled: true
+
+  - id: "fact_ko_006"
+    pattern: "(?:저|나|제)\\s+직업은?\\s+([^,]{2,40}?)(?:이에요|입니다|이다|예요)"
+    score: 2
+    category: fact
+    polarity: neutral
+    description: "직업은 X"
+    example_input: "제 직업은 프로그래머예요"
+    example_extracted: "프로그래머"
+    enabled: true
+
+  - id: "fact_ko_007"
+    pattern: "(?:저|나|제)는?\\s+([^,]{2,40}?)살(?:이에요|입니다|이야)"
+    score: 1
+    category: fact
+    polarity: neutral
+    description: "X 살 (나이)"
+    example_input: "저는 서른여섯살이야"
+    example_extracted: "서른여섯"
+    enabled: true
+
+  # ── 기술 양식 (technical, +2) — default ON (사용자 결정 #1) ──
+  - id: "technical_ko_001"
+    pattern: "(?:^|[\\s,])([^,]{2,40})\\s*[을를]\\s+사용(?:하고|해|합니다|중)"
+    score: 2
+    category: technical
+    polarity: positive
+    description: "X 을 사용함"
+    example_input: "Bun 런타임을 사용중"
+    example_extracted: "Bun 런타임"
+    enabled: true
+
+  - id: "technical_ko_002"
+    pattern: "(?:^|[\\s,])([^,]{2,40})\\s*[으로]?\\s+개발(?:하고|해|합니다|중)"
+    score: 2
+    category: technical
+    polarity: positive
+    description: "X (으)로 개발함"
+    example_input: "TypeScript로 개발중"
+    example_extracted: "TypeScript로"
+    enabled: true
+
+  - id: "technical_ko_003"
+    pattern: "(?:^|[\\s,])([^,]{2,40})\\s+스택[을를으로]?\\s+(?:쓰|사용|씀)"
+    score: 2
+    category: technical
+    polarity: positive
+    description: "X 스택 사용"
+    example_input: "Hono 스택 사용"
+    example_extracted: "Hono"
+    enabled: true
+
+  - id: "technical_ko_004"
+    pattern: "(?:^|[\\s,])([^,]{2,40}?)\\s+(?:프레임워크|라이브러리)[을를]?\\s+(?:쓰|사용|씀)"
+    score: 2
+    category: technical
+    polarity: positive
+    description: "X 프레임워크 / 라이브러리 사용"
+    example_input: "discord.js 라이브러리 사용"
+    example_extracted: "discord.js"
+    enabled: true
+
+  - id: "technical_ko_005"
+    pattern: "(?:^|[\\s,])([^,]{2,40})\\s*[을를]\\s+배우(?:고|는\\s+중)"
+    score: 1
+    category: technical
+    polarity: positive
+    description: "X 을 배우는 중"
+    example_input: "Rust를 배우는 중"
+    example_extracted: "Rust"
+    enabled: true

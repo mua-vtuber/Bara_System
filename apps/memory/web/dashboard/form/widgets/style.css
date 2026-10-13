@@ -1,0 +1,193 @@
+/* 자동 폼 위젯 스타일 (Phase 5.5.2 / spec section 5.1).
+   오로라 재스킨 — tokens.css·frame.css 문법 소비, 새 색·인라인 px 없음. */
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.form-label {
+  font-weight: 600;
+  font-size: 0.92rem;
+  color: var(--text);
+}
+
+.form-required {
+  color: var(--danger);
+}
+
+.form-input,
+.form-select {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 0.95rem;
+  background: var(--field-bg);
+  color: var(--text);
+  font-family: var(--sans);
+}
+
+.form-input:focus,
+.form-select:focus {
+  outline: none;
+  border-color: var(--au-b);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--au-b) 55%, transparent);
+}
+
+textarea.form-input {
+  font-family: inherit;
+  resize: vertical;
+}
+
+.form-description {
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  margin: 2px 0 0;
+}
+
+.form-error {
+  font-size: 0.82rem;
+  color: var(--danger);
+  margin: 2px 0 0;
+  min-height: 1em;
+}
+
+.form-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.form-toggle {
+  width: 18px;
+  height: 18px;
+}
+
+.form-array {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 6px;
+}
+
+.form-array-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.form-array-row .form-input {
+  flex: 1;
+}
+
+.form-array-add,
+.form-array-remove {
+  padding: 4px 10px;
+  border: none;
+  background: var(--au-grad);
+  color: var(--text-on-accent);
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 700;
+  font-family: var(--sans);
+  clip-path: polygon(var(--cut-sm) 0, 100% 0, 100% calc(100% - var(--cut-sm)), calc(100% - var(--cut-sm)) 100%, 0 100%, 0 var(--cut-sm));
+  transition: filter 0.15s ease;
+}
+
+.form-array-add:hover,
+.form-array-remove:hover {
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--au-b) 60%, transparent)) brightness(1.08);
+}
+
+.form-array-add:focus-visible,
+.form-array-remove:focus-visible {
+  outline: 2px solid var(--au-b);
+  outline-offset: 2px;
+}
+
+.form-object {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+}
+
+.form-object-summary {
+  cursor: pointer;
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: var(--text);
+}
+
+.form-object-children {
+  padding-left: 8px;
+  border-left: 2px solid var(--border);
+}
+
+/* ── 토스트 (form/toast.ts — controller 결정, Task 4 조사 결과 편입) ──────────
+   toast.ts 는 클래스만 붙일 뿐 마크업에 브래킷 프레임용 클래스를 추가할 수
+   없으므로(au-panel 등), .au-panel--soft 의 2모서리 브래킷 배경 패턴을 여기
+   직접 기재한다(components.css 의 .card--detail::before 와 같은 방식). */
+.form-toast-host {
+  position: fixed;
+  right: var(--sp-4);
+  bottom: var(--sp-4);
+  z-index: 1300;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  pointer-events: none;
+}
+
+.form-toast {
+  position: relative;
+  min-width: 220px;
+  max-width: min(360px, calc(100vw - 32px));
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--glass-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--panel-glow);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+  pointer-events: auto;
+  animation: form-toast-rise 0.24s ease-out;
+}
+
+.form-toast::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  pointer-events: none;
+  background: var(--frame-bracket-2);
+}
+
+.form-toast-success {
+  box-shadow: inset 3px 0 0 var(--source-fts), var(--panel-glow);
+}
+
+.form-toast-error {
+  background:
+    linear-gradient(160deg, color-mix(in srgb, var(--danger) 16%, transparent), transparent),
+    var(--glass-bg);
+  box-shadow: inset 3px 0 0 var(--danger), var(--panel-glow);
+}
+
+@keyframes form-toast-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .form-toast {
+    animation: none;
+  }
+}

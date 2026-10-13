@@ -1,0 +1,88 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Bara Pet",
+  "version": "0.1.7",
+  "identifier": "app.bara.pet",
+  "build": {
+    "beforeDevCommand": "",
+    "beforeBuildCommand": "bun run check:release-version && bun run build:ui",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "pet",
+        "title": "Bara Pet",
+        "url": "index.html?view=pet",
+        "width": 150,
+        "height": 165,
+        "minWidth": 150,
+        "minHeight": 165,
+        "maxWidth": 150,
+        "maxHeight": 165,
+        "resizable": false,
+        "decorations": false,
+        "shadow": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "visible": false,
+        "skipTaskbar": true
+      },
+      {
+        "label": "main",
+        "title": "Bara Pet",
+        "url": "index.html",
+        "width": 480,
+        "height": 700,
+        "minWidth": 400,
+        "minHeight": 520,
+        "resizable": true,
+        "decorations": false,
+        "shadow": false,
+        "transparent": true,
+        "visible": false
+      },
+      {
+        "label": "quick",
+        "title": "Bara Pet Quick",
+        "url": "index.html?view=quick",
+        "width": 480,
+        "height": 82,
+        "resizable": false,
+        "decorations": false,
+        "shadow": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false
+      },
+      {
+        "label": "bubble",
+        "title": "Bara Pet Feedback",
+        "url": "index.html?view=bubble",
+        "width": 330,
+        "height": 170,
+        "resizable": false,
+        "decorations": false,
+        "shadow": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "focusable": false,
+        "skipTaskbar": true,
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "licenseFile": "../LICENSE",
+    "icon": ["icons/icon.ico"],
+    "resources": { "../resources": "resources" },
+    "windows": { "nsis": { "installerHooks": "windows/installer-hooks.nsh", "installMode": "currentUser", "languages": ["Korean"], "displayLanguageSelector": false } }
+  }
+}

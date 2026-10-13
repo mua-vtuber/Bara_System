@@ -1,0 +1,65 @@
+# dependencies (bun install)
+node_modules
+
+# Kiwi 한국어 형태소 모델 사전 파일 (약 102MB). git 추적 안 함 — 배포 시
+# GitHub Release kiwi_model_v<버전>_base.tgz 에서 받아 이 디렉토리에 푼다.
+# 상세 = src/memory/lang/korean-tokenizer.ts 주석.
+assets/kiwi-model/
+
+# P4 D3-d — transformers.js 모델 캐시 (bun install 생존용 외부화·재다운로드 가능).
+assets/hf-cache/
+
+# output
+out
+dist
+*.tgz
+
+# code coverage
+coverage
+*.lcov
+
+# logs
+logs
+_.log
+report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
+
+# dotenv environment variable files
+.env
+.env.development.local
+.env.test.local
+.env.production.local
+.env.local
+
+# caches
+.eslintcache
+.cache
+*.tsbuildinfo
+
+# IntelliJ based IDEs
+.idea
+
+# Finder (MacOS) folder config
+.DS_Store
+
+# Phase 5.5.5 S8 settings 단위 테스트 임시 디렉토리 (beforeEach 가 case 별 dir 생성, afterEach cleanup)
+src/settings/_tmp/
+
+# Phase 5.5.4 S11 wizard 단위 테스트 임시 디렉토리 (같은 패턴).
+src/wizard/_tmp-wizard-routes/
+src/wizard/_tmp-wizard-state/
+
+# Phase 5.5.5 S9 — 브라우저 빌드 산출 (start-memory-api.bat 가동 시 자동 산출)
+# `bun run build:dashboard` 가 settings.ts 를 같은 디렉토리에 settings.js 로
+# 번들. inline source map 사용 정신이라 별도 *.map 산출은 없지만, 만에 하나
+# 옵션 변경 시 대비해 *.map 도 ignore.
+web/dashboard/settings.js
+web/dashboard/settings.js.map
+web/dashboard/nav-rail.js
+web/dashboard/nav-rail.js.map
+web/dashboard/dashboard-entry.js
+web/dashboard/dashboard-entry.js.map
+web/dashboard/ingest-submission.js
+web/dashboard/ingest-submission.js.map
+# graph-entry.ts 번들 산출 — build:dashboard 두 번째 단계가 자동 생성
+web/dashboard/graph/graph-entry.js
+web/dashboard/graph/graph-entry.js.map

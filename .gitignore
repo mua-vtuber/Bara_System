@@ -1,0 +1,109 @@
+# Dependencies
+node_modules/
+.venv/
+venv/
+
+# Build output
+dist/
+build/
+**/src-tauri/target/
+**/src-tauri/gen/
+*.egg-info/
+*.tsbuildinfo
+
+# Environment & secrets
+**/.env
+**/config.json
+
+# Database
+**/*.db
+**/*.db-wal
+**/*.db-shm
+**/*.sqlite
+**/*.sqlite-wal
+**/*.sqlite-shm
+
+# bara_system runtime data (memory DB lives here by default)
+data/
+
+# SSL certificates
+certs/
+
+# Backups
+backups/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+
+# Kill switch
+STOP_BOT
+
+# Claude Code
+.claude/
+.omc/
+
+# External tool state files (codex / omx)
+.codex/
+.omx/
+
+# Worktrees
+.worktrees/
+
+# Windows artifacts
+nul
+
+# Graphify knowledge graph (local-only, regenerated on demand)
+graphify-out/
+.graphifyignore
+.graphify_python
+# Graphify auto-rebuild git hooks (installed by `graphify hook install`, host-local — Python 경로 탐지 로직이 호스트별로 다름)
+.githooks/post-checkout
+.githooks/post-commit
+
+# 문서는 로컬에 보존. 깃에 커밋하지 않는다
+docs/
+!apps/pet/docs/
+.planning/
+
+# 라이브 게이트 임시 검증 산출물 (sandbox·재실행 가능·디스크 보존·커밋 안 함)
+apps/memory/test-fixtures/sandbox/*
+# 단, eval 손 정답 fixture 는 예외 — 위 규칙이 겨냥한 "재실행하면 다시 나오는
+# 임시 산출물"과 달리, 코퍼스와 정답 라벨은 사람이 손으로 쓴 영구 자산이다.
+# 빠지면 새로 clone 한 저장소에서 answer-map.ts import 가 깨져 빌드가 안 된다.
+!apps/memory/test-fixtures/sandbox/embedding-corpus.txt
+!apps/memory/test-fixtures/sandbox/embedding-corpus-ext.txt
+!apps/memory/test-fixtures/sandbox/enriched-corpus.ts
+!apps/memory/test-fixtures/sandbox/eval-queries.ts
+!apps/memory/test-fixtures/sandbox/eval-queries-ext.ts
+!apps/memory/test-fixtures/sandbox/eval-enriched-queries.ts
+!apps/memory/test-fixtures/sandbox/lexical-corpus.txt
+!apps/memory/test-fixtures/sandbox/lexical-queries.ts
+
+# A1 배포 자산(systemd·스크립트·local) — 로컬 보존, git 추적 안 함
+infra/
+
+# AI 에이전트 작업 지침 — 로컬 전용 (외부 배포·운영 무관, 백업은 본인 몫)
+CLAUDE.md
+AGENTS.md
+!apps/pet/AGENTS.md
+# 시각 동반 도구 목업 (로컬 전용)
+.superpowers/
+
+# 테스트가 실행 중 만드는 임시 작업 폴더 (afterEach 정리 실패 시 잔재) — 소스 트리 오염 방지
+**/src/**/_tmp-*/
+**/src/**/_tmp/

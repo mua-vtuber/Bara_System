@@ -1,0 +1,47 @@
+# image-categories.yaml — Phase 11b T8
+#
+# 이미지 분류 카테고리 키 builtin 동의어 사전.
+# `#category:value` colon 양식 안 category 키를 정규화한다.
+# value 는 정규화 X (값 = 자연 그대로 — 사용자 어휘 보존).
+#
+# 6 카테고리 — character / style / artist / medium / mood / series.
+# 한국어 어휘 + 영어 약식 + 옛 입력 양식 가족 포함.
+# 동의어는 모두 소문자로 적는다 — 로더가 lowercase 비교한다.
+#
+# medium 항목 = 매체 / 형식 가족 한정. "디지털" / "수채" / "연필" 같은
+# 실제 매체 값은 *값* 이라 카테고리 동의어에서 제외 (사용자가 value 로 적음).
+
+synonyms:
+  character:
+    - char
+    - cha
+    - 캐릭터
+    - 캐릭
+    - 인물
+    - 등장인물
+  style:
+    - 스타일
+    - 그림체
+    - 그림스타일
+    - 화풍
+  artist:
+    - 아티스트
+    - 작가
+    - 그린이
+    - 화가
+    - 일러스트레이터
+  medium:
+    - 매체
+    - 매개체
+    - 형식
+    - 재료
+  mood:
+    - 분위기
+    - 감성
+    - 톤
+    - 느낌
+  series:
+    - 시리즈
+    - 작품
+    - 연작
+    - 프랜차이즈

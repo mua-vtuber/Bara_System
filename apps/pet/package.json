@@ -1,0 +1,23 @@
+{
+  "name": "bara-system-pet",
+  "version": "0.1.7",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "repository": { "type": "git", "url": "https://github.com/mua-vtuber/Bara_System" },
+  "scripts": {
+    "test": "bun test src tests",
+    "typecheck": "tsc --noEmit",
+    "build:ui": "bun run scripts/build-ui.ts",
+    "build:service": "bun run scripts/build-service.ts",
+    "package:runtime": "bun run scripts/package-runtime.ts",
+    "package:crt": "bun run scripts/package-crt.ts",
+    "check:native-exe": "bun run scripts/check-native-exe.ts src-tauri/target/release/bara-pet.exe",
+    "dev": "bun run scripts/dev.ts",
+    "tauri": "tauri",
+    "check:release-version": "bun run scripts/check-release-version.ts",
+    "build": "bun run check:release-version && bun run build:service && tauri build && bun run check:native-exe"
+  },
+  "dependencies": { "@esotericsoftware/spine-webgl": "4.3.13", "@tauri-apps/api": "2.11.1" },
+  "devDependencies": { "@tauri-apps/cli": "2.11.4", "@types/bun": "1.3.6", "typescript": "5.9.3" }
+}

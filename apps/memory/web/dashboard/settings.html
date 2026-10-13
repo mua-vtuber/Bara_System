@@ -1,0 +1,2097 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>메모리 설정 — 바라시스템</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/web/dashboard/ui/tokens.css" />
+    <link rel="stylesheet" href="/web/dashboard/ui/frame.css" />
+    <link rel="stylesheet" href="/web/dashboard/ui/components.css" />
+    <link rel="stylesheet" href="/web/dashboard/ui/forms.css" />
+    <link rel="stylesheet" href="./form/widgets/style.css" />
+    <style>
+      body {
+        margin: 0;
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", "Pretendard",
+          system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      .settings-shell {
+        max-width: 1040px;
+        margin: 24px auto;
+        padding: 0 16px 48px;
+      }
+      .settings-header {
+        margin-bottom: 16px;
+      }
+      .settings-header h1 {
+        font-size: 1.35rem;
+        margin: 0 0 4px;
+      }
+      .settings-header p {
+        margin: 0;
+        color: var(--text-dim);
+        font-size: 0.88rem;
+      }
+      .tab-bar {
+        display: flex;
+        gap: 4px;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 16px;
+        flex-wrap: wrap;
+      }
+      .tab-button {
+        background: transparent;
+        border: 0;
+        padding: 8px 14px;
+        font-size: 0.95rem;
+        cursor: pointer;
+        color: var(--text-soft);
+        border-bottom: 2px solid transparent;
+        margin-bottom: -1px;
+      }
+      .tab-button[aria-selected="true"] {
+        color: var(--text);
+        border-bottom-color: var(--accent);
+        font-weight: 600;
+      }
+      .tab-button .tab-health {
+        font-size: 0.75rem;
+        margin-left: 6px;
+        color: var(--text-dim);
+      }
+      .tab-button .tab-health.ok {
+        color: var(--source-fts);
+      }
+      .tab-button .tab-health.down {
+        color: var(--danger);
+      }
+      .tab-panel {
+        background: transparent;
+        border: 0;
+        border-radius: 0;
+        padding: 0;
+      }
+      .memory-settings-layout {
+        display: grid;
+        align-items: start;
+      }
+      .memory-settings-nav {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        position: sticky;
+        top: 12px;
+      }
+      .memory-settings-nav-button {
+        width: 100%;
+        border: 0;
+        background: transparent;
+        color: var(--text-soft);
+        text-align: left;
+        padding: 9px 10px;
+        border-radius: 6px;
+        font-size: 0.92rem;
+        cursor: pointer;
+      }
+      .memory-settings-nav-button:hover {
+        background: var(--panel-hover-bg);
+      }
+      .memory-settings-nav-button[aria-selected="true"] {
+        background: var(--list-selected-bg);
+        color: var(--accent);
+        font-weight: 600;
+      }
+      .memory-settings-content {
+        min-width: 0;
+      }
+      .memory-section-intro {
+        margin-bottom: 14px;
+      }
+      .memory-section-intro h2 {
+        margin: 0 0 4px;
+        font-size: 1.05rem;
+      }
+      .memory-section-intro p,
+      .memory-advanced-note,
+      .memory-info-note {
+        margin: 0;
+        color: var(--text-dim);
+        font-size: 0.86rem;
+        line-height: 1.55;
+      }
+      .memory-info-note {
+        border: 1px solid var(--border);
+        background: color-mix(in srgb, var(--accent) 10%, transparent);
+        color: var(--text-dim);
+        border-radius: 6px;
+        padding: 10px 12px;
+        margin: -2px 0 14px;
+      }
+      .memory-advanced-note {
+        margin-bottom: 14px;
+      }
+      .llm-ollama-advanced {
+        margin: 8px 0 10px;
+        padding: 8px 10px;
+        border: 1px dashed var(--border);
+        border-radius: 4px;
+        background: var(--bg-card);
+      }
+      .llm-ollama-advanced summary {
+        cursor: pointer;
+        color: var(--text-soft);
+        font-size: 0.84rem;
+        font-weight: 600;
+      }
+      .panel-placeholder {
+        color: var(--text-dim);
+        font-size: 0.9rem;
+        line-height: 1.55;
+        margin: 4px 0 0;
+      }
+      .panel-loading {
+        color: var(--text-dim);
+        font-size: 0.9rem;
+        padding: 8px 0;
+      }
+      .panel-error {
+        color: var(--danger);
+        font-size: 0.9rem;
+        padding: 8px 0;
+        white-space: pre-wrap;
+      }
+      .save-status {
+        margin-top: 12px;
+        font-size: 0.85rem;
+        color: var(--source-fts);
+        min-height: 1.2em;
+      }
+      .save-status.error {
+        color: var(--danger);
+      }
+      .form-submit {
+        margin-top: 8px;
+        padding: 8px 18px;
+        font-size: 0.95rem;
+        background: var(--accent);
+        color: var(--text-on-accent);
+        border: 0;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      .form-submit:hover {
+        background: var(--accent);
+      }
+      .form-root-errors {
+        color: var(--danger);
+        font-size: 0.85rem;
+        white-space: pre-wrap;
+        margin: 8px 0;
+      }
+      /* LLM 섹션 — Phase 5.6 W3/W7. W7 본격 두 슬롯 분리. */
+      .llm-section {
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 12px 14px;
+        margin-bottom: 16px;
+        background: var(--bg-card);
+      }
+      .llm-section-title {
+        font-size: 1rem;
+        font-weight: 600;
+        margin: 0 0 4px;
+      }
+      .llm-section-desc {
+        font-size: 0.82rem;
+        color: var(--text-dim);
+        margin: 0 0 12px;
+      }
+      /* W7 — 슬롯 enabled 토글 행. */
+      .llm-enabled-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+      .llm-enabled-row label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-weight: 600;
+        cursor: pointer;
+        font-size: 0.9rem;
+      }
+      /* W7 — extractor mode 라디오 + 분 입력 + cleanup 간격 입력 공통 표현. */
+      .llm-extra-row {
+        margin-top: 10px;
+      }
+      .llm-extra-row > label {
+        display: block;
+        font-size: 0.85rem;
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+      .llm-mode-list {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .llm-mode-list label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        cursor: pointer;
+        font-weight: 400;
+        font-size: 0.9rem;
+      }
+      .llm-mode-list input[type="number"] {
+        width: 80px;
+        padding: 4px 8px;
+        font-size: 0.92rem;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        font-family: inherit;
+        background: var(--bg-card);
+      }
+      .llm-mode-list input[type="number"]:disabled {
+        opacity: 0.5;
+      }
+      .llm-interval-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      /* 정리 주기(일) 제목 옆 "기간마다 / 바로" 선택 — 제목과 한 줄에 둔다. */
+      .cleanup-trigger-head {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 4px 14px;
+        margin-bottom: 4px;
+      }
+      /* 제목 label 이 이 줄 안으로 옮겨져 .llm-extra-row > label 규칙을 못 받으므로 같은 모양을 준다. */
+      .cleanup-trigger-head > label {
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: var(--text-soft);
+      }
+      .cleanup-trigger-choices {
+        display: flex;
+        gap: 12px;
+      }
+      .cleanup-trigger-choice {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        cursor: pointer;
+        font-size: 0.9rem;
+      }
+      .cleanup-trigger-warning {
+        margin-top: 6px;
+      }
+      .llm-interval-row input[type="number"] {
+        width: 80px;
+        padding: 4px 8px;
+        font-size: 0.92rem;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        font-family: inherit;
+        background: var(--bg-card);
+      }
+      .llm-field-row {
+        margin-bottom: 10px;
+      }
+      .llm-field-row label {
+        display: block;
+        font-size: 0.85rem;
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+      .llm-field-row input,
+      .llm-field-row select,
+      .llm-field-row textarea {
+        width: 100%;
+        padding: 6px 10px;
+        font-size: 0.92rem;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        font-family: inherit;
+        background: var(--bg-card);
+        box-sizing: border-box;
+      }
+      .llm-field-row textarea {
+        resize: vertical;
+        line-height: 1.45;
+      }
+      .llm-field-hint {
+        font-size: 0.78rem;
+        color: var(--text-dim);
+        margin-top: 3px;
+      }
+      /* 2026-10-11 공급자 모델 드롭다운 — 드롭다운 + [목록 불러오기] 한 줄, 실패 줄은 위험 색. */
+      .llm-model-picker-controls {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .llm-model-picker-controls select {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+      .llm-model-load-btn {
+        flex: 0 0 auto;
+        padding: 6px 12px;
+        font-size: 0.85rem;
+        font-family: inherit;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        background: var(--bg-card);
+        color: var(--text);
+        cursor: pointer;
+      }
+      .llm-model-load-btn:disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+      }
+      .llm-field-row input[id$="-manual"] {
+        margin-top: 6px;
+      }
+      .llm-field-error {
+        font-size: 0.78rem;
+        margin-top: 3px;
+      }
+      .llm-branch-form {
+        padding: 8px 10px;
+        border-radius: 4px;
+        background: var(--bg-card);
+        border: 1px dashed var(--border);
+      }
+      /* Phase 5.7.1 W5 — backfill sub-object 3 칸 묶음 (mode=backfill 시 펼침). */
+      .llm-backfill-box {
+        margin-top: 10px;
+        padding: 10px 12px;
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+      }
+      .llm-backfill-box .llm-field-row:last-child {
+        margin-bottom: 0;
+      }
+      /* 능동 모드 안내 카드 — Phase 5.7.1 W6 (정적 안내, 입력 칸 0). */
+      .active-mode-notice {
+        margin: 4px 0 14px;
+        padding: 12px 14px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--surface-2);
+      }
+      .active-mode-notice-title {
+        margin: 0 0 6px;
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: var(--text-soft);
+      }
+      .active-mode-notice-body {
+        margin: 0;
+        font-size: 0.85rem;
+        color: var(--text-soft);
+        line-height: 1.55;
+      }
+      .adapter-token-panel {
+        display: block;
+      }
+      .adapter-token-title {
+        margin: 0 0 4px;
+        font-size: 1.05rem;
+      }
+      .adapter-token-intro {
+        margin: 0 0 16px;
+        color: var(--text-dim);
+        font-size: 0.86rem;
+        line-height: 1.55;
+      }
+      .adapter-token-section-title {
+        margin: 18px 0 8px;
+        font-size: 0.95rem;
+        color: var(--text-soft);
+      }
+      .adapter-token-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .adapter-token-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 10px 12px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--bg-card);
+      }
+      .adapter-token-row h3 {
+        margin: 0 0 3px;
+        font-size: 0.94rem;
+        color: var(--text);
+      }
+      .adapter-token-meta,
+      .adapter-token-desc,
+      .adapter-token-empty,
+      .adapter-token-error {
+        margin: 0;
+        font-size: 0.83rem;
+        line-height: 1.45;
+      }
+      .adapter-token-meta,
+      .adapter-token-empty {
+        color: var(--text-dim);
+      }
+      .adapter-token-desc {
+        color: var(--text-soft);
+        margin-top: 4px;
+      }
+      .adapter-token-error {
+        color: var(--danger);
+      }
+      .adapter-token-actions {
+        display: flex;
+        gap: 6px;
+        flex: 0 0 auto;
+      }
+      .adapter-token-primary,
+      .adapter-token-secondary,
+      .adapter-token-danger {
+        padding: 5px 12px;
+        border-radius: 4px;
+        font: inherit;
+        font-size: 0.84rem;
+        cursor: pointer;
+      }
+      .adapter-token-primary {
+        border: 1px solid var(--accent);
+        background: var(--accent);
+        color: var(--text-on-accent);
+      }
+      .adapter-token-primary:hover {
+        background: var(--accent);
+      }
+      .adapter-token-secondary {
+        border: 1px solid var(--border);
+        background: var(--bg-card);
+        color: var(--text-soft);
+      }
+      .adapter-token-secondary:hover {
+        background: var(--panel-hover-bg);
+      }
+      .adapter-token-danger {
+        border: 1px solid color-mix(in srgb, var(--danger) 44%, transparent);
+        background: var(--bg-card);
+        color: var(--danger);
+      }
+      .adapter-token-danger:hover {
+        background: color-mix(in srgb, var(--danger) 14%, transparent);
+      }
+      .adapter-token-primary:disabled,
+      .adapter-token-secondary:disabled,
+      .adapter-token-danger:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+      /* 권한 표시·선택 (WP-B1-14) — 기존 .adapter-token-* 클래스·CSS 변수만 사용. */
+      .adapter-token-scope-block {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        margin-top: 8px;
+        padding: 8px 10px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--field-bg);
+      }
+      .adapter-token-requested-scope,
+      .adapter-token-current-scope {
+        margin: 0;
+        font-size: 0.83rem;
+        color: var(--text-soft);
+      }
+      .adapter-token-existing-warning {
+        margin: 0;
+        font-size: 0.83rem;
+        color: var(--warn);
+        line-height: 1.5;
+      }
+      .adapter-token-existing-choice-label,
+      .adapter-token-scope-select-label {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        font-size: 0.82rem;
+        color: var(--text-dim);
+      }
+      .adapter-token-existing-choice,
+      .adapter-token-scope-select {
+        padding: 4px 6px;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border);
+        background: var(--bg-card);
+        color: var(--text);
+        font: inherit;
+        font-size: 0.85rem;
+      }
+      .adapter-token-existing-applies-notice,
+      .adapter-token-full-confirm-notice {
+        margin: 0;
+        font-size: 0.8rem;
+        color: var(--text-dim);
+      }
+      .adapter-token-full-confirm-notice {
+        color: var(--warn);
+      }
+      .adapter-token-scope-desc {
+        margin: 0;
+        font-size: 0.8rem;
+        color: var(--text-dim);
+        line-height: 1.45;
+      }
+      .adapter-token-scope-change-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-top: 6px;
+      }
+      .document-ocr-settings-panel {
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 12px;
+        margin-bottom: 16px;
+        background: var(--bg-card);
+      }
+      .document-ocr-settings-panel h2 {
+        margin: 0 0 10px;
+        color: var(--text);
+        font-size: 1rem;
+      }
+      .document-ocr-settings-form {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .document-ocr-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 10px;
+      }
+      .document-ocr-field {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        color: var(--text-soft);
+        font-size: 0.84rem;
+      }
+      .document-ocr-field input,
+      .document-ocr-field select,
+      .document-ocr-field textarea {
+        box-sizing: border-box;
+        width: 100%;
+        padding: 7px 8px;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        background: var(--bg-card);
+        font: inherit;
+      }
+      .document-ocr-field textarea {
+        min-height: 86px;
+        resize: vertical;
+      }
+      .document-ocr-mode-panel {
+        border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+        padding-top: 10px;
+      }
+      .document-ocr-panel-title {
+        margin: 0 0 8px;
+        color: var(--text);
+        font-size: 0.92rem;
+      }
+      .document-ocr-note,
+      .document-ocr-token-status {
+        margin: 6px 0;
+        color: var(--text-soft);
+        font-size: 0.84rem;
+        line-height: 1.45;
+      }
+      .document-ocr-token-status.error {
+        color: var(--danger);
+      }
+      .document-ocr-status-checks {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 12px;
+        padding: 7px 8px;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        background: var(--bg-card);
+      }
+      .document-ocr-status-checks label {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .document-processing-panel {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .document-processing-item[aria-current="true"] {
+        outline: 2px solid var(--accent);
+        outline-offset: 3px;
+        scroll-margin-block: 20px;
+      }
+      .connection-diagnostics {
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+      .connection-diagnostics h2,
+      .connection-diagnostics h3 { color: var(--text); }
+      .diagnostics-stages {
+        padding-left: 20px;
+        color: var(--text-soft);
+        line-height: 1.6;
+        overflow-wrap: anywhere;
+      }
+      .mcp-connection-help { margin-top: 28px; }
+      .mcp-connection-help select {
+        padding: 6px 10px;
+        background: var(--bg-card);
+        color: var(--text);
+        border: 1px solid var(--border);
+        font: inherit;
+      }
+      .mcp-connection-help pre {
+        padding: 12px;
+        color: var(--text);
+        background: var(--bg-card);
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        font-size: 0.84rem;
+      }
+      .document-processing-list {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .document-processing-item {
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 12px;
+        background: var(--bg-card);
+      }
+      .document-processing-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+      .document-processing-header h3 {
+        margin: 0;
+        color: var(--text);
+        font-size: 0.98rem;
+        word-break: break-word;
+      }
+      .document-processing-badge {
+        flex: 0 0 auto;
+        padding: 3px 8px;
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--warn) 16%, transparent);
+        color: var(--warn);
+        font-size: 0.78rem;
+        font-weight: 600;
+      }
+      .document-processing-meta,
+      .document-processing-status,
+      .document-processing-empty,
+      .document-processing-error {
+        font-size: 0.84rem;
+        line-height: 1.45;
+      }
+      .document-processing-meta {
+        margin: 6px 0 10px;
+        color: var(--text-soft);
+      }
+      .document-processing-error,
+      .document-processing-status.error,
+      .document-processing-empty.error {
+        color: var(--danger);
+      }
+      .document-processing-actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 8px;
+      }
+      .document-processing-actions a {
+        color: var(--accent);
+        font-size: 0.86rem;
+        text-decoration: none;
+      }
+      .document-processing-actions a:hover {
+        text-decoration: underline;
+      }
+      .document-processing-textarea {
+        box-sizing: border-box;
+        width: 100%;
+        min-height: 130px;
+        padding: 8px 10px;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        background: var(--bg-card);
+        font: inherit;
+        resize: vertical;
+      }
+      .document-processing-submit {
+        margin-top: 8px;
+        padding: 7px 14px;
+        border: 0;
+        border-radius: 4px;
+        background: var(--accent);
+        color: var(--text-on-accent);
+        font: inherit;
+        cursor: pointer;
+      }
+      .document-processing-submit:hover {
+        background: var(--accent);
+      }
+      .document-processing-submit:disabled {
+        cursor: not-allowed;
+        opacity: 0.65;
+      }
+      /* 백업 절 — 상태 표시 + 다운로드 (P4 T6). danger-zone 앞, 중립 톤.
+         au-panel 브래킷 프레임(TS 무변경 원칙이라 클래스 대신 여기 직접 기재). */
+      .backup-section {
+        position: relative;
+        margin-top: 32px;
+        padding: 16px 20px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--glass-bg);
+        box-shadow: var(--panel-glow);
+      }
+      .backup-section::before {
+        content: "";
+        position: absolute;
+        inset: -1px;
+        pointer-events: none;
+        background: var(--frame-bracket-4);
+      }
+      .backup-section h2 {
+        margin: 0 0 8px;
+        font-size: 1rem;
+        color: var(--text);
+      }
+      .backup-section-desc {
+        margin: 0 0 12px;
+        font-size: 0.9rem;
+        color: var(--text-dim);
+        line-height: 1.5;
+      }
+      .backup-section-status {
+        margin: 0 0 8px;
+        font-size: 0.85rem;
+        color: var(--text-dim);
+        min-height: 1.2em;
+      }
+      .backup-section-status.error {
+        color: var(--danger);
+        font-weight: 600;
+      }
+      .backup-section-version {
+        margin: 0 0 8px;
+        font-size: 0.85rem;
+        color: var(--text-dim);
+        min-height: 1.2em;
+      }
+      .backup-section-note {
+        margin: 0 0 12px;
+        font-size: 0.8rem;
+        color: var(--text-dim);
+        line-height: 1.5;
+      }
+      /* 백업 다운로드 버튼 — au-btn 컷코너(오로라 그라디언트). */
+      .backup-section-btn {
+        appearance: none;
+        padding: 8px 16px;
+        font-size: 0.9rem;
+        border: none;
+        cursor: pointer;
+        font-family: var(--sans);
+        font-weight: 700;
+        color: var(--text-on-accent);
+        background: var(--au-grad);
+        clip-path: polygon(var(--cut-sm) 0, 100% 0, 100% calc(100% - var(--cut-sm)), calc(100% - var(--cut-sm)) 100%, 0 100%, 0 var(--cut-sm));
+        transition: filter 0.15s ease;
+      }
+      .backup-section-btn:hover {
+        filter: drop-shadow(0 0 6px color-mix(in srgb, var(--au-b) 60%, transparent)) brightness(1.08);
+      }
+      .backup-section-btn:disabled {
+        cursor: not-allowed;
+        filter: grayscale(0.6) opacity(0.55);
+      }
+      /* 위험 통로 — 데이터 초기화 (2026-05-21).
+         au-panel 브래킷을 danger 톤으로 변형(프레임 색만 로컬 오버라이드).
+         --frame-bracket-4 토큰은 :root 에서 기본 --frame-c1/-c2 로 이미 치환돼
+         상속되므로, 로컬 오버라이드가 반영되도록 여기만 스택 직접 기재 유지. */
+      .danger-zone {
+        position: relative;
+        margin-top: 32px;
+        padding: 16px 20px;
+        border: 1px solid var(--danger);
+        border-radius: var(--radius);
+        background: color-mix(in srgb, var(--danger) 14%, transparent);
+        --frame-c1: var(--danger);
+        --frame-c2: color-mix(in srgb, var(--danger) 60%, var(--au-point));
+      }
+      .danger-zone::before {
+        content: "";
+        position: absolute;
+        inset: -1px;
+        pointer-events: none;
+        background:
+          linear-gradient(90deg, var(--frame-c1) 0 var(--frame-len), transparent var(--frame-len)) top left / 100% var(--frame-w) no-repeat,
+          linear-gradient(180deg, var(--frame-c1) 0 var(--frame-len), transparent var(--frame-len)) top left / var(--frame-w) 100% no-repeat,
+          linear-gradient(270deg, var(--frame-c2) 0 var(--frame-len), transparent var(--frame-len)) bottom right / 100% var(--frame-w) no-repeat,
+          linear-gradient(0deg, var(--frame-c2) 0 var(--frame-len), transparent var(--frame-len)) bottom right / var(--frame-w) 100% no-repeat;
+      }
+      .danger-zone h2 {
+        margin: 0 0 8px;
+        font-size: 1rem;
+        color: var(--danger);
+      }
+      .danger-zone-desc {
+        margin: 0 0 12px;
+        font-size: 0.9rem;
+        color: var(--danger);
+        line-height: 1.5;
+      }
+      /* 위험 버튼 — au-btn--danger 컷코너(danger 그라디언트). */
+      .danger-zone-btn {
+        appearance: none;
+        padding: 8px 16px;
+        font-size: 0.9rem;
+        border: none;
+        cursor: pointer;
+        font-family: var(--sans);
+        font-weight: 700;
+        color: #ffffff;
+        background: linear-gradient(90deg, var(--danger), color-mix(in srgb, var(--danger) 60%, var(--au-point)));
+        clip-path: polygon(var(--cut-sm) 0, 100% 0, 100% calc(100% - var(--cut-sm)), calc(100% - var(--cut-sm)) 100%, 0 100%, 0 var(--cut-sm));
+        transition: filter 0.15s ease;
+      }
+      .danger-zone-btn:hover {
+        filter: drop-shadow(0 0 6px color-mix(in srgb, var(--danger) 60%, transparent)) brightness(1.08);
+      }
+      .danger-zone-btn:disabled {
+        cursor: not-allowed;
+        filter: grayscale(0.6) opacity(0.55);
+      }
+      .danger-zone-status {
+        margin: 12px 0 0;
+        font-size: 0.85rem;
+        color: var(--danger);
+        min-height: 1.2em;
+      }
+      .danger-zone-status.error {
+        color: var(--danger);
+        font-weight: 600;
+      }
+      /* 엔티티 관리 통합 패널 — S6 표 + S7a 추가·수정 모달 (.llm-section 톤 정합). */
+      .entity-management-panel {
+        display: block;
+      }
+      .entity-management-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-bottom: 6px;
+      }
+      .entity-management-title {
+        font-size: 1rem;
+        font-weight: 600;
+        margin: 0;
+      }
+      /* au-btn 컷코너(오로라 그라디언트) — 다른 저장/추가 버튼과 톤 정합. */
+      .entity-management-add-btn {
+        appearance: none;
+        padding: 8px 16px;
+        font-size: 0.9rem;
+        background: var(--au-grad);
+        color: var(--text-on-accent);
+        border: none;
+        cursor: pointer;
+        font-family: var(--sans);
+        font-weight: 700;
+        clip-path: polygon(var(--cut-sm) 0, 100% 0, 100% calc(100% - var(--cut-sm)), calc(100% - var(--cut-sm)) 100%, 0 100%, 0 var(--cut-sm));
+        transition: filter 0.15s ease;
+      }
+      .entity-management-add-btn:hover {
+        filter: drop-shadow(0 0 6px color-mix(in srgb, var(--au-b) 60%, transparent)) brightness(1.08);
+      }
+      .entity-management-intro {
+        font-size: 0.82rem;
+        color: var(--text-dim);
+        line-height: 1.55;
+        margin: 0 0 14px;
+      }
+      .entity-management-table-host {
+        margin-top: 4px;
+      }
+      /* 표 — 헤더 회색 배경·행 구분선·셀 패딩. */
+      .entity-mgmt-table-wrap {
+        overflow-x: auto;
+      }
+      .entity-mgmt-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.88rem;
+      }
+      .entity-mgmt-table th {
+        text-align: left;
+        font-weight: 600;
+        font-size: 0.82rem;
+        color: var(--text-soft);
+        background: var(--bg-card);
+        border-bottom: 1px solid var(--border);
+        padding: 8px 10px;
+      }
+      .entity-mgmt-table td {
+        border-bottom: 1px solid var(--surface-2);
+        padding: 8px 10px;
+        vertical-align: top;
+      }
+      .entity-mgmt-row:hover td {
+        background: var(--bg-card);
+      }
+      .entity-mgmt-th-actions {
+        width: 1%;
+        white-space: nowrap;
+      }
+      .entity-mgmt-name-cell {
+        min-width: 160px;
+      }
+      .entity-mgmt-ko {
+        font-weight: 600;
+        color: var(--text);
+        margin-right: 6px;
+      }
+      .entity-mgmt-key-cell {
+        color: var(--text-dim);
+      }
+      .entity-mgmt-key {
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 0.82rem;
+        color: var(--text-soft);
+      }
+      .entity-mgmt-synonyms {
+        display: inline-flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-top: 4px;
+      }
+      .entity-mgmt-chip-cell {
+        min-width: 120px;
+      }
+      .entity-mgmt-chip-cell .entity-mgmt-chip {
+        margin: 0 4px 4px 0;
+      }
+      .entity-mgmt-column-table-cell .entity-mgmt-column-chip {
+        margin: 0 4px 4px 0;
+      }
+      /* 출처 배지 — 코드/yaml=회색 pill·user=파랑 pill. */
+      .entity-mgmt-source-badge {
+        display: inline-block;
+        font-size: 0.7rem;
+        padding: 1px 7px;
+        border-radius: 9px;
+        background: var(--surface-2);
+        color: var(--text-dim);
+        margin-right: 6px;
+        vertical-align: middle;
+      }
+      .entity-mgmt-source-badge[data-source="user"] {
+        background: color-mix(in srgb, var(--accent) 16%, transparent);
+        color: var(--accent);
+      }
+      /* 칩 — pill 형태. ✕ 삭제는 칩 안 작은 버튼. */
+      .entity-mgmt-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 0.78rem;
+        padding: 2px 4px 2px 8px;
+        border-radius: 9px;
+        background: var(--surface-2);
+        color: var(--text-soft);
+      }
+      .entity-mgmt-chip[data-source="user"] {
+        background: color-mix(in srgb, var(--accent) 16%, transparent);
+        color: var(--accent);
+      }
+      .entity-mgmt-chip-text {
+        line-height: 1.2;
+      }
+      .entity-mgmt-chip-delete {
+        border: 0;
+        background: transparent;
+        color: var(--danger);
+        font-size: 0.7rem;
+        padding: 0 4px;
+        cursor: pointer;
+        border-radius: 9px;
+        line-height: 1.2;
+      }
+      .entity-mgmt-chip-delete:hover {
+        background: color-mix(in srgb, var(--danger) 14%, transparent);
+      }
+      /* 수정·삭제 버튼 — 수정=중립 테두리·삭제=빨강. */
+      .entity-mgmt-action-cell {
+        white-space: nowrap;
+      }
+      .entity-mgmt-edit-type {
+        padding: 3px 10px;
+        font-size: 0.78rem;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        background: var(--bg-card);
+        color: var(--accent);
+        cursor: pointer;
+        margin-right: 6px;
+      }
+      .entity-mgmt-edit-type:hover {
+        background: color-mix(in srgb, var(--accent) 12%, transparent);
+      }
+      .entity-mgmt-delete-type {
+        padding: 3px 10px;
+        font-size: 0.78rem;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        background: var(--bg-card);
+        color: var(--danger);
+        cursor: pointer;
+      }
+      .entity-mgmt-delete-type:hover {
+        background: color-mix(in srgb, var(--danger) 14%, transparent);
+      }
+      .entity-mgmt-empty {
+        font-size: 0.85rem;
+        color: var(--text-dim);
+        margin: 8px 0;
+      }
+      /* 모달 셸 — 오버레이가 화면 위에 뜬다(S6/S7a CSS 누락 버그의 핵심 수정). */
+      .entity-mgmt-modal-overlay {
+        position: fixed;
+        inset: 0;
+        background: color-mix(in srgb, var(--bg) 70%, transparent);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+        padding: 16px;
+        box-sizing: border-box;
+      }
+      .entity-mgmt-modal-box {
+        background: var(--bg-card);
+        border-radius: 8px;
+        max-width: 720px;
+        width: 100%;
+        max-height: 85vh;
+        overflow-y: auto;
+        box-shadow: 0 8px 32px color-mix(in srgb, var(--bg) 70%, transparent);
+        padding: 18px 20px;
+        box-sizing: border-box;
+      }
+      .entity-mgmt-modal-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+      .entity-mgmt-modal-title {
+        font-size: 1.05rem;
+        font-weight: 600;
+        margin: 0;
+      }
+      .entity-mgmt-modal-close {
+        border: 0;
+        background: transparent;
+        color: var(--text-dim);
+        font-size: 1rem;
+        line-height: 1;
+        padding: 4px 8px;
+        cursor: pointer;
+        border-radius: 4px;
+      }
+      .entity-mgmt-modal-close:hover {
+        background: var(--surface-2);
+        color: var(--text-soft);
+      }
+      .entity-mgmt-modal-body {
+        display: block;
+      }
+      .modal-error {
+        color: var(--danger);
+        font-size: 0.85rem;
+        white-space: pre-wrap;
+        margin: 8px 0 0;
+      }
+      /* 모달 텍스트 입력 행 (.llm-field-row 톤). */
+      .entity-mgmt-field {
+        display: block;
+        margin-bottom: 10px;
+      }
+      .entity-mgmt-field-label {
+        display: block;
+        font-size: 0.85rem;
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+      .entity-mgmt-field-input {
+        width: 100%;
+        padding: 6px 10px;
+        font-size: 0.92rem;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        font-family: inherit;
+        background: var(--bg-card);
+        box-sizing: border-box;
+      }
+      /* 추가 모달 칩 묶음 — 라벨 + 칩 에디터. */
+      .entity-mgmt-chip-group {
+        margin-bottom: 12px;
+      }
+      .entity-mgmt-chip-group-label {
+        display: block;
+        font-size: 0.85rem;
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+      .entity-mgmt-chip-editor {
+        display: block;
+      }
+      .entity-mgmt-chip-editor-input {
+        width: 100%;
+        padding: 6px 10px;
+        font-size: 0.92rem;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        font-family: inherit;
+        background: var(--bg-card);
+        box-sizing: border-box;
+      }
+      .entity-mgmt-chip-editor-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-top: 6px;
+      }
+      /* 에디터 칩 — 입력 중 로컬 칩 (.entity-mgmt-chip 톤·파랑). */
+      .entity-mgmt-editor-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 0.78rem;
+        padding: 2px 4px 2px 8px;
+        border-radius: 9px;
+        background: color-mix(in srgb, var(--accent) 16%, transparent);
+        color: var(--accent);
+      }
+      .entity-mgmt-editor-chip-text {
+        line-height: 1.2;
+      }
+      .entity-mgmt-editor-chip-remove {
+        border: 0;
+        background: transparent;
+        color: var(--danger);
+        font-size: 0.7rem;
+        padding: 0 4px;
+        cursor: pointer;
+        border-radius: 9px;
+        line-height: 1.2;
+      }
+      .entity-mgmt-editor-chip-remove:hover {
+        background: color-mix(in srgb, var(--danger) 14%, transparent);
+      }
+      /* 안내 문구 — 작은 회색 글씨 (.llm-field-hint 톤). */
+      .entity-mgmt-relation-note,
+      .entity-mgmt-rename-note {
+        font-size: 0.78rem;
+        color: var(--text-dim);
+        line-height: 1.5;
+        margin: 10px 0;
+      }
+      /* 저장 버튼 — 파랑 (.form-submit 톤). */
+      .entity-mgmt-modal-save {
+        margin-top: 8px;
+        padding: 8px 18px;
+        font-size: 0.95rem;
+        background: var(--accent);
+        color: var(--text-on-accent);
+        border: 0;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      .entity-mgmt-modal-save:hover {
+        background: var(--accent);
+      }
+      .entity-mgmt-modal-save:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+      /* 부분 저장 실패 안내 — 경고 톤 (.danger-zone 약하게). */
+      .entity-mgmt-fail-box {
+        margin-top: 12px;
+        padding: 10px 12px;
+        border: 1px solid var(--danger);
+        border-radius: 4px;
+        background: color-mix(in srgb, var(--danger) 14%, transparent);
+      }
+      .entity-mgmt-fail-head {
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: var(--danger);
+        margin: 0 0 6px;
+      }
+      .entity-mgmt-fail-line {
+        font-size: 0.82rem;
+        color: var(--danger);
+        margin: 2px 0;
+      }
+      /* 수정 모달 slot — 동의어·하위분류·라벨 한 칸씩. */
+      .entity-mgmt-edit-slot {
+        margin-bottom: 14px;
+        padding: 10px 12px;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        background: var(--bg-card);
+      }
+      .entity-mgmt-edit-slot-label {
+        display: block;
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: var(--text-soft);
+        margin-bottom: 6px;
+      }
+      .entity-mgmt-edit-chip-wrap {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-bottom: 8px;
+      }
+      .entity-mgmt-edit-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 0.78rem;
+        padding: 2px 4px 2px 8px;
+        border-radius: 9px;
+        background: var(--surface-2);
+        color: var(--text-soft);
+      }
+      .entity-mgmt-edit-chip[data-source="user"] {
+        background: color-mix(in srgb, var(--accent) 16%, transparent);
+        color: var(--accent);
+      }
+      .entity-mgmt-edit-chip-text {
+        line-height: 1.2;
+      }
+      .entity-mgmt-edit-chip-remove {
+        border: 0;
+        background: transparent;
+        color: var(--danger);
+        font-size: 0.7rem;
+        padding: 0 4px;
+        cursor: pointer;
+        border-radius: 9px;
+        line-height: 1.2;
+      }
+      .entity-mgmt-edit-chip-remove:hover {
+        background: color-mix(in srgb, var(--danger) 14%, transparent);
+      }
+      .entity-mgmt-edit-empty {
+        font-size: 0.8rem;
+        color: var(--text-dim);
+      }
+      .entity-mgmt-edit-add {
+        display: flex;
+        gap: 6px;
+      }
+      .entity-mgmt-edit-add-input {
+        flex: 1;
+        padding: 6px 10px;
+        font-size: 0.9rem;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        font-family: inherit;
+        background: var(--bg-card);
+        box-sizing: border-box;
+      }
+      .entity-mgmt-edit-add-btn {
+        padding: 6px 14px;
+        font-size: 0.88rem;
+        border: 0;
+        border-radius: 4px;
+        background: var(--accent);
+        color: var(--text-on-accent);
+        cursor: pointer;
+      }
+      .entity-mgmt-edit-add-btn:hover {
+        background: var(--accent);
+      }
+      /* ── S7b 끈 칩(가림표·tombstone) + 끄기/되살리기 토글 ──────────────────── */
+      /* 끈 칩 — 흐리게 + 취소선 + 회색조 배경(켜진 칩과 한눈에 구분). */
+      .entity-mgmt-chip--disabled {
+        opacity: 0.5;
+        background: var(--surface-2);
+        color: var(--text-dim);
+      }
+      .entity-mgmt-chip--disabled .entity-mgmt-edit-chip-text {
+        text-decoration: line-through;
+      }
+      /* 끄기/되살리기 토글 — 칩 우측 작은 보조 버튼. */
+      .entity-mgmt-chip-toggle {
+        border: 0;
+        background: transparent;
+        color: var(--text-dim);
+        font-size: 0.7rem;
+        padding: 0 4px;
+        cursor: pointer;
+        border-radius: 9px;
+        line-height: 1.2;
+      }
+      .entity-mgmt-chip-toggle:hover {
+        background: color-mix(in srgb, var(--border) 70%, transparent);
+      }
+      /* 되살리기 강조색 — 끈 칩을 다시 켜는 동작이라 파랑 강조. */
+      .entity-mgmt-chip-toggle--restore {
+        color: var(--accent);
+      }
+      .entity-mgmt-chip-toggle--restore:hover {
+        background: color-mix(in srgb, var(--accent) 16%, transparent);
+      }
+      /* ── S7b 관계 설정 칸(종류 수정 모달 안·칩 3칸 아래) ─────────────────── */
+      .entity-mgmt-relation-section {
+        margin-top: 20px;
+        padding-top: 16px;
+        border-top: 1px solid var(--border);
+      }
+      .entity-mgmt-relation-title {
+        font-size: 1.05rem;
+        margin: 0 0 6px;
+        color: var(--text);
+      }
+      .entity-mgmt-relation-intro {
+        font-size: 0.85rem;
+        color: var(--text-soft);
+        line-height: 1.5;
+        margin: 0 0 14px;
+      }
+      .entity-mgmt-relation-add-form {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        padding: 12px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--bg-card);
+        margin-bottom: 16px;
+      }
+      .entity-mgmt-relation-add-title {
+        flex-basis: 100%;
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: var(--text-soft);
+        margin: 0 0 4px;
+      }
+      .entity-mgmt-relation-key-input,
+      .entity-mgmt-relation-name-input {
+        padding: 6px 10px;
+        font-size: 0.9rem;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        font-family: inherit;
+        background: var(--bg-card);
+        box-sizing: border-box;
+      }
+      .entity-mgmt-relation-field-label {
+        font-size: 0.82rem;
+        color: var(--text-soft);
+      }
+      .entity-mgmt-relation-select {
+        padding: 6px 8px;
+        font-size: 0.88rem;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        font-family: inherit;
+        background: var(--bg-card);
+      }
+      .entity-mgmt-relation-add-btn {
+        padding: 6px 14px;
+        font-size: 0.88rem;
+        border: 0;
+        border-radius: 4px;
+        background: var(--accent);
+        color: var(--text-on-accent);
+        cursor: pointer;
+      }
+      .entity-mgmt-relation-add-btn:hover {
+        background: var(--accent);
+      }
+      .entity-mgmt-relation-add-btn:disabled {
+        background: color-mix(in srgb, var(--border) 70%, transparent);
+        cursor: default;
+      }
+      .entity-mgmt-relation-list-title {
+        font-size: 0.92rem;
+        font-weight: 600;
+        color: var(--text-soft);
+        margin: 0 0 8px;
+      }
+      .entity-mgmt-relation-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 10px;
+        border-radius: 4px;
+      }
+      .entity-mgmt-relation-row:hover {
+        background: var(--surface-2);
+      }
+      .entity-mgmt-relation-key {
+        font-weight: 600;
+        color: var(--text);
+      }
+      .entity-mgmt-relation-colon {
+        color: var(--text-dim);
+      }
+      .entity-mgmt-relation-name {
+        color: var(--text-soft);
+      }
+      .entity-mgmt-relation-types {
+        font-size: 0.82rem;
+        color: var(--text-dim);
+      }
+      .entity-mgmt-relation-source-badge {
+        font-size: 0.72rem;
+        padding: 2px 8px;
+        border-radius: 9px;
+        background: var(--surface-2);
+        color: var(--text-dim);
+      }
+      .entity-mgmt-relation-source-badge[data-source="user"] {
+        background: color-mix(in srgb, var(--accent) 16%, transparent);
+        color: var(--accent);
+      }
+      .entity-mgmt-relation-delete {
+        margin-left: auto;
+        padding: 4px 10px;
+        font-size: 0.8rem;
+        border: 1px solid color-mix(in srgb, var(--danger) 44%, transparent);
+        border-radius: 4px;
+        background: var(--bg-card);
+        color: var(--danger);
+        cursor: pointer;
+      }
+      .entity-mgmt-relation-delete:hover {
+        background: color-mix(in srgb, var(--danger) 14%, transparent);
+      }
+      .entity-mgmt-relation-empty {
+        font-size: 0.85rem;
+        color: var(--text-dim);
+        padding: 8px 10px;
+      }
+      .entity-mgmt-relation-error {
+        font-size: 0.85rem;
+        color: var(--danger);
+        padding: 8px 10px;
+      }
+      /* ── S8 칸 설정 칸(종류 수정 모달 안·관계 칸 아래) ───────────────────────── */
+      .entity-mgmt-column-section {
+        margin-top: 20px;
+        padding-top: 16px;
+        border-top: 1px solid var(--border);
+      }
+      .entity-mgmt-column-section-label {
+        font-size: 1.05rem;
+        margin: 0 0 6px;
+        color: var(--text);
+      }
+      .entity-mgmt-column-hint {
+        font-size: 0.85rem;
+        color: var(--text-soft);
+        line-height: 1.5;
+        margin: 0 0 14px;
+      }
+      .entity-mgmt-column-readonly {
+        font-size: 0.85rem;
+        color: var(--text-dim);
+        margin: 0 0 12px;
+      }
+      .entity-mgmt-column-add {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        padding: 12px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--bg-card);
+        margin-bottom: 16px;
+      }
+      .entity-mgmt-column-add-title {
+        flex-basis: 100%;
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: var(--text-soft);
+        margin: 0 0 4px;
+      }
+      .entity-mgmt-column-input {
+        padding: 6px 10px;
+        font-size: 0.9rem;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        font-family: inherit;
+        background: var(--bg-card);
+        box-sizing: border-box;
+      }
+      .entity-mgmt-column-radio-wrap {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+      }
+      .entity-mgmt-column-radio {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 0.88rem;
+        color: var(--text-soft);
+        cursor: pointer;
+      }
+      .entity-mgmt-column-radio-text {
+        line-height: 1.2;
+      }
+      .entity-mgmt-column-add-btn {
+        padding: 6px 14px;
+        font-size: 0.88rem;
+        border: 0;
+        border-radius: 4px;
+        background: var(--accent);
+        color: var(--text-on-accent);
+        cursor: pointer;
+      }
+      .entity-mgmt-column-add-btn:hover {
+        background: var(--accent);
+      }
+      .entity-mgmt-column-add-btn:disabled {
+        background: color-mix(in srgb, var(--border) 70%, transparent);
+        cursor: default;
+      }
+      .entity-mgmt-column-fail {
+        font-size: 0.83rem;
+        color: var(--danger);
+        background: color-mix(in srgb, var(--danger) 14%, transparent);
+        border: 1px solid color-mix(in srgb, var(--danger) 44%, transparent);
+        border-radius: 4px;
+        padding: 8px 10px;
+        margin-bottom: 12px;
+      }
+      .entity-mgmt-column-list-title {
+        font-size: 0.92rem;
+        font-weight: 600;
+        color: var(--text-soft);
+        margin: 0 0 8px;
+      }
+      .entity-mgmt-column-chip-wrap {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .entity-mgmt-column-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 0.82rem;
+        padding: 3px 6px 3px 10px;
+        border-radius: 9px;
+        background: var(--surface-2);
+        color: var(--text-soft);
+      }
+      .entity-mgmt-column-chip-text {
+        line-height: 1.2;
+      }
+      .entity-mgmt-column-type-badge {
+        font-size: 0.7rem;
+        padding: 1px 7px;
+        border-radius: 9px;
+      }
+      .entity-mgmt-column-type-badge--number {
+        background: color-mix(in srgb, var(--accent) 16%, transparent);
+        color: var(--accent);
+      }
+      .entity-mgmt-column-type-badge--date {
+        background: color-mix(in srgb, var(--source-fts) 16%, transparent);
+        color: var(--source-fts);
+      }
+      .entity-mgmt-column-type-badge--alias {
+        background: color-mix(in srgb, var(--warn) 16%, transparent);
+        color: var(--warn);
+      }
+      .entity-mgmt-column-type-badge--text {
+        background: var(--surface-2);
+        color: var(--text-dim);
+      }
+      .entity-mgmt-column-chip-remove {
+        border: 0;
+        background: transparent;
+        color: var(--danger);
+        font-size: 0.72rem;
+        padding: 0 4px;
+        cursor: pointer;
+        border-radius: 9px;
+        line-height: 1.2;
+      }
+      .entity-mgmt-column-chip-remove:hover {
+        background: color-mix(in srgb, var(--danger) 14%, transparent);
+      }
+      .entity-mgmt-column-empty {
+        font-size: 0.85rem;
+        color: var(--text-dim);
+      }
+      /* Graph shell 정합 레이어 — 위 오래된 라이트 규칙보다 뒤에 두어 실제 화면은
+         tokens.css / components.css 값으로 렌더한다. */
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        min-height: 100%;
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--sans);
+        font-size: var(--fs-base);
+      }
+      .settings-app-shell {
+        min-height: 100vh;
+        display: flex;
+        align-items: stretch;
+        background: var(--bg);
+        color: var(--text);
+      }
+      .settings-nav-rail {
+        flex: 0 0 56px;
+        width: 56px;
+        align-self: stretch;
+        z-index: 20;
+      }
+      .settings-nav-rail > .nav-rail {
+        position: sticky;
+        top: 0;
+        height: 100vh;
+        min-height: 100vh;
+      }
+      .settings-shell {
+        flex: 1;
+        min-width: 0;
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: var(--sp-6) var(--sp-5) calc(var(--sp-6) * 2);
+      }
+      .settings-header {
+        margin-bottom: var(--sp-5);
+      }
+      .settings-header h1 {
+        color: var(--text);
+        font-size: var(--fs-xl);
+        letter-spacing: 0;
+        margin: 0 0 var(--sp-1);
+      }
+      .settings-header p {
+        color: var(--text-dim);
+        font-size: var(--fs-sm);
+      }
+      .tab-bar {
+        gap: var(--sp-1);
+        padding: var(--sp-1);
+        margin-bottom: var(--sp-4);
+        border: 1px solid var(--border);
+        border-radius: var(--hud-radius);
+        background: var(--bg-elev);
+        box-shadow: var(--panel-glow);
+      }
+      .tab-button {
+        min-height: 34px;
+        margin: 0;
+        padding: 0 var(--sp-3);
+        border: 1px solid transparent;
+        border-radius: var(--hud-radius);
+        color: var(--text-dim);
+        font-family: var(--sans);
+        font-size: var(--fs-sm);
+      }
+      .tab-button:hover,
+      .tab-button:focus-visible {
+        color: var(--text);
+        background: var(--panel-hover-bg);
+        border-color: var(--panel-hover-line);
+        outline: none;
+      }
+      .tab-button[aria-selected="true"] {
+        color: var(--text-on-selected);
+        background: var(--list-selected-bg);
+        border-color: var(--list-selected-line);
+        font-weight: 700;
+      }
+      .tab-button .tab-health,
+      .tab-button .tab-health.ok,
+      .tab-button .tab-health.down {
+        color: currentColor;
+      }
+      /* 설정 섹션 카드 — au-panel 브래킷 프레임(4모서리 그라디언트 스트라이프)을
+         TS 무변경 원칙에 따라 클래스 대신 여기 직접 기재(.memory-panel 과 동일 패턴). */
+      .llm-section,
+      .document-ocr-settings-panel,
+      .document-processing-item,
+      .adapter-token-row,
+      .entity-mgmt-section,
+      .entity-mgmt-edit-slot,
+      .entity-mgmt-relation-add-form,
+      .entity-mgmt-column-add,
+      .active-mode-notice,
+      .memory-info-note {
+        position: relative;
+        background: var(--glass-bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        color: var(--text);
+      }
+      .llm-section::before,
+      .document-ocr-settings-panel::before,
+      .document-processing-item::before,
+      .adapter-token-row::before,
+      .entity-mgmt-section::before,
+      .entity-mgmt-edit-slot::before,
+      .entity-mgmt-relation-add-form::before,
+      .entity-mgmt-column-add::before,
+      .active-mode-notice::before,
+      .memory-info-note::before {
+        content: "";
+        position: absolute;
+        inset: -1px;
+        pointer-events: none;
+        background: var(--frame-bracket-4);
+      }
+      .tab-panel {
+        padding: 0;
+        box-shadow: none;
+      }
+      .memory-settings-layout {
+        grid-template-columns: 190px minmax(0, 1fr);
+        gap: var(--sp-5);
+      }
+      .memory-settings-nav {
+        gap: var(--sp-1);
+        top: var(--sp-5);
+        padding: var(--sp-1);
+        border: 1px solid var(--border);
+        border-radius: var(--hud-radius);
+        background: var(--bg-elev);
+      }
+      .memory-settings-nav-button {
+        min-height: 34px;
+        color: var(--text-dim);
+        border-radius: var(--hud-radius);
+        font-size: var(--fs-sm);
+      }
+      .memory-settings-nav-button:hover,
+      .memory-settings-nav-button:focus-visible {
+        color: var(--text);
+        background: var(--panel-hover-bg);
+        outline: none;
+      }
+      .memory-settings-nav-button[aria-selected="true"] {
+        color: var(--text-on-selected);
+        background: var(--list-selected-bg);
+        font-weight: 700;
+      }
+      .memory-section-intro h2,
+      .llm-section-title,
+      .adapter-token-title,
+      .document-ocr-settings-panel h2,
+      .document-processing-header h3,
+      .entity-mgmt-section-title,
+      .entity-mgmt-modal-title,
+      .entity-mgmt-relation-title,
+      .entity-mgmt-column-section-label {
+        color: var(--text);
+      }
+      .memory-section-intro p,
+      .memory-advanced-note,
+      .memory-info-note,
+      .llm-section-desc,
+      .llm-field-hint,
+      .adapter-token-intro,
+      .adapter-token-meta,
+      .adapter-token-desc,
+      .adapter-token-empty,
+      .document-ocr-note,
+      .document-ocr-token-status,
+      .document-processing-meta,
+      .document-processing-empty,
+      .entity-mgmt-empty,
+      .entity-mgmt-relation-intro,
+      .entity-mgmt-column-hint,
+      .panel-placeholder,
+      .panel-loading {
+        color: var(--text-dim);
+      }
+      .panel-error,
+      .save-status.error,
+      .adapter-token-error,
+      .document-processing-error,
+      .document-processing-status.error,
+      .modal-error,
+      .form-error,
+      .llm-field-error {
+        color: var(--danger);
+      }
+      .save-status {
+        color: var(--source-fts);
+      }
+      /* 보조 카드 — 섹션 안에 중첩되는 2차 카드라 위 2모서리 소프트 브래킷만. */
+      .llm-ollama-advanced,
+      .llm-branch-form,
+      .llm-backfill-box,
+      .document-ocr-mode-panel,
+      .document-ocr-status-checks,
+      .entity-mgmt-table,
+      .entity-mgmt-modal-box,
+      .entity-mgmt-fail-box,
+      .form-object {
+        position: relative;
+        background: var(--bg-elev);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        color: var(--text);
+      }
+      .llm-ollama-advanced::before,
+      .llm-branch-form::before,
+      .llm-backfill-box::before,
+      .document-ocr-mode-panel::before,
+      .document-ocr-status-checks::before,
+      .entity-mgmt-table::before,
+      .entity-mgmt-modal-box::before,
+      .entity-mgmt-fail-box::before,
+      .form-object::before {
+        content: "";
+        position: absolute;
+        inset: -1px;
+        pointer-events: none;
+        background: var(--frame-bracket-2);
+      }
+      .form-object-children {
+        border-left: 0;
+      }
+      .form-label,
+      .llm-enabled-row label,
+      .llm-extra-row > label,
+      .llm-field-row label,
+      .document-ocr-field,
+      .entity-mgmt-field-label,
+      .entity-mgmt-chip-group-label,
+      .entity-mgmt-edit-slot-label {
+        color: var(--text-soft);
+      }
+      .form-input,
+      .form-select,
+      .llm-mode-list input[type="number"],
+      .llm-interval-row input[type="number"],
+      .llm-field-row input,
+      .llm-field-row select,
+      .llm-field-row textarea,
+      .document-ocr-field input,
+      .document-ocr-field select,
+      .document-ocr-field textarea,
+      .document-processing-textarea,
+      .entity-mgmt-field-input,
+      .entity-mgmt-chip-editor-input,
+      .entity-mgmt-edit-add-input,
+      .entity-mgmt-relation-key-input,
+      .entity-mgmt-relation-name-input,
+      .entity-mgmt-relation-select,
+      .entity-mgmt-column-input {
+        background: var(--field-bg);
+        border: 1px solid var(--border);
+        border-radius: var(--hud-radius);
+        color: var(--text);
+        font-family: var(--sans);
+      }
+      .form-input:focus,
+      .form-select:focus,
+      .llm-mode-list input[type="number"]:focus,
+      .llm-interval-row input[type="number"]:focus,
+      .llm-field-row input:focus,
+      .llm-field-row select:focus,
+      .llm-field-row textarea:focus,
+      .document-ocr-field input:focus,
+      .document-ocr-field select:focus,
+      .document-ocr-field textarea:focus,
+      .document-processing-textarea:focus,
+      .entity-mgmt-field-input:focus,
+      .entity-mgmt-chip-editor-input:focus,
+      .entity-mgmt-edit-add-input:focus,
+      .entity-mgmt-relation-key-input:focus,
+      .entity-mgmt-relation-name-input:focus,
+      .entity-mgmt-relation-select:focus,
+      .entity-mgmt-column-input:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+      /* 저장/추가 버튼 — au-btn 컷코너(오로라 그라디언트 + clip-path). */
+      .form-submit,
+      .document-processing-submit,
+      .entity-mgmt-modal-save,
+      .entity-mgmt-edit-add-btn,
+      .entity-mgmt-relation-add-btn,
+      .entity-mgmt-column-add-btn,
+      .adapter-token-primary {
+        appearance: none;
+        border: none;
+        cursor: pointer;
+        font-family: var(--sans);
+        font-weight: 700;
+        color: var(--text-on-accent);
+        background: var(--au-grad);
+        clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
+        transition: filter 0.15s ease;
+      }
+      .form-submit:hover,
+      .document-processing-submit:hover,
+      .entity-mgmt-modal-save:hover,
+      .entity-mgmt-edit-add-btn:hover,
+      .entity-mgmt-relation-add-btn:hover,
+      .entity-mgmt-column-add-btn:hover,
+      .adapter-token-primary:hover {
+        background: var(--au-grad);
+        color: var(--text-on-accent);
+        filter: drop-shadow(0 0 6px color-mix(in srgb, var(--au-b) 60%, transparent)) brightness(1.08);
+      }
+      /* 보조 버튼 — 컷코너 유지, 고스트 톤(테두리만). */
+      .adapter-token-secondary,
+      .entity-mgmt-edit-type,
+      .form-array-add,
+      .form-array-remove {
+        clip-path: polygon(var(--cut-sm) 0, 100% 0, 100% calc(100% - var(--cut-sm)), calc(100% - var(--cut-sm)) 100%, 0 100%, 0 var(--cut-sm));
+        background: color-mix(in srgb, var(--au-a) 8%, transparent);
+        box-shadow: inset 0 0 0 1px var(--border);
+        border: none;
+        color: var(--accent-2);
+      }
+      /* 위험 버튼 — 컷코너 + danger 그라디언트. */
+      .adapter-token-danger,
+      .entity-mgmt-delete-type,
+      .entity-mgmt-relation-delete {
+        clip-path: polygon(var(--cut-sm) 0, 100% 0, 100% calc(100% - var(--cut-sm)), calc(100% - var(--cut-sm)) 100%, 0 100%, 0 var(--cut-sm));
+        background: transparent;
+        border: none;
+        box-shadow: inset 0 0 0 1px var(--danger);
+        color: var(--danger);
+      }
+      .adapter-token-secondary:hover,
+      .entity-mgmt-edit-type:hover,
+      .form-array-add:hover,
+      .form-array-remove:hover {
+        filter: drop-shadow(0 0 5px color-mix(in srgb, var(--au-a) 50%, transparent));
+        color: var(--text);
+      }
+      .adapter-token-danger:hover,
+      .entity-mgmt-delete-type:hover,
+      .entity-mgmt-relation-delete:hover {
+        background: color-mix(in srgb, var(--danger) 14%, transparent);
+      }
+      .form-description,
+      .entity-mgmt-source-badge,
+      .entity-mgmt-relation-source-badge,
+      .entity-mgmt-column-empty {
+        color: var(--text-dim);
+      }
+      .entity-mgmt-source-badge,
+      .entity-mgmt-relation-source-badge,
+      .entity-mgmt-chip,
+      .entity-mgmt-edit-chip,
+      .entity-mgmt-editor-chip,
+      .entity-mgmt-column-chip {
+        background: var(--surface-2);
+        color: var(--text-soft);
+      }
+      .entity-mgmt-source-badge[data-source="user"],
+      .entity-mgmt-relation-source-badge[data-source="user"],
+      .entity-mgmt-chip[data-source="user"],
+      .entity-mgmt-edit-chip[data-source="user"] {
+        background: color-mix(in srgb, var(--accent) 16%, transparent);
+        color: var(--accent);
+      }
+      .entity-mgmt-modal-overlay {
+        background: color-mix(in srgb, var(--bg) 70%, transparent);
+      }
+      @media (max-width: 720px) {
+        .settings-app-shell {
+          align-items: stretch;
+        }
+        .settings-nav-rail {
+          flex-basis: 56px;
+        }
+        .settings-shell {
+          padding: var(--sp-5) var(--sp-4) calc(var(--sp-6) * 2);
+        }
+        .tab-panel {
+          padding: 0;
+        }
+        .memory-settings-layout {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .memory-settings-nav {
+          position: static;
+          flex-direction: row;
+          overflow-x: auto;
+          padding-bottom: 4px;
+        }
+        .memory-settings-nav-button {
+          flex: 0 0 auto;
+          white-space: nowrap;
+          width: auto;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="settings-app-shell">
+      <div id="settings-nav-rail" class="settings-nav-rail"></div>
+      <main class="settings-shell">
+        <header class="settings-header">
+          <h1>메모리 설정</h1>
+          <p>메모리 저장과 자동 처리 방식을 설정하고, 연결된 앱을 관리합니다.</p>
+        </header>
+        <nav class="tab-bar" id="tab-bar" role="tablist"></nav>
+        <section class="tab-panel" id="tab-panel" role="tabpanel"></section>
+      </main>
+    </div>
+    <script type="module" src="./settings.js"></script>
+  </body>
+</html>

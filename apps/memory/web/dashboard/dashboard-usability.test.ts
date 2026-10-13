@@ -1,0 +1,152 @@
+import { afterAll, beforeAll, expect, test } from "bun:test";
+import { registerHappyDom } from "./test-happy-dom.ts";
+import { _resetTokenCacheForTest } from "./api-fetch.ts";
+import { skipNodeDetailTypewriter } from "./ui/node-detail.ts";
+registerHappyDom();
+
+const originalFetch = globalThis.fetch;
+const longText = "첫 줄\n" + "긴 기억의 본문입니다. ".repeat(70) + "\n마지막 문장까지 읽기";
+const deferred = new Map<string, (response: Response) => void>();
+let lastEdit: Record<string, unknown> | undefined;
+const autoRegisterReads = { availability: 0, records: 0 };
+const autoRegisterRecord = {
+  id: 7, itemKind: "entity_created", targetType: "person", targetId: "psn_7", name: "민수", sourceNodeId: 1,
+  memoContent: "민수가 왔다", date: null, runId: "run_1", createdAt: "2026-10-10 09:00:00",
+};
+const json = (value: unknown) => Response.json(value);
+const query = <T extends Element = HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
+async function until(condition: () => boolean): Promise<void> {
+  for (let i = 0; i < 100; i++) {
+    if (condition()) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error("화면 상태 변경을 기다렸지만 완료되지 않았습니다.");
+}
+async function startSearch(value: string): Promise<void> {
+  query<HTMLInputElement>("#dashboard-search").value = value;
+  query<HTMLButtonElement>("[data-so-search-btn]").click();
+  await until(() => deferred.has(value));
+}
+function finishSearch(value: string): void {
+  deferred.get(value)!(json({ query: value, count: 1, results: [{ id: 2, content: value, score: 1, sources: [], components: {} }] }));
+}
+beforeAll(async () => {
+  document.body.innerHTML = '<div id="app-nav-rail"></div><main id="dashboard-root"></main>';
+  window.history.replaceState(null, "", "/");
+  window.sessionStorage.setItem("bara.dashboard.token", "fixture-token");
+  _resetTokenCacheForTest();
+  globalThis.fetch = (async (input, init) => {
+    const path = String(input);
+    if (path === "/dashboard/sse-token") return json({token: "fixture-token"});
+    if (path === "/stats") return json({ totalMemories: 1 });
+    if (path === "/ingest") return json({ok: true, type: "text", originNodeId: 3});
+    if (path === "/memories/1" && init?.method === "PATCH") {
+      lastEdit = JSON.parse(String(init.body));
+      return json({memory: {id: 1, content: lastEdit!.content, sourceType: "user_input", metadata: {sharedMemory: {revision: 1}}}});
+    }
+    if (path.startsWith("/memories?")) return json({ memories: [{id: 1, content: longText, sourceType: "user_input"}], count: 1 });
+    if (path === "/memories/1") return json({memory: {id: 1, content: longText, sourceType: "user_input", metadata: {}}});
+    if (path === "/memories/2") return json({memory: {id: 2, content: "검색 상세", sourceType: "user_input"}});
+    if (path.startsWith("/api/date-occurrences")) return json({upcoming: [], past: []});
+    if (path.startsWith("/graph/overview")) return json({nodes: [], edges: []});
+    if (path === "/search") {
+      const value = JSON.parse(String(init?.body)).query as string;
+      return await new Promise<Response>((resolve) => deferred.set(value, resolve));
+    }
+    if (path === "/api/cleanup-runs/availability") {
+      autoRegisterReads.availability += 1;
+      return json({ available: true, running: false, reasons: [] });
+    }
+    if (path === "/api/entity-register/records/7/revert") return Response.json({ error: "db locked" }, { status: 500 });
+    if (path.startsWith("/api/entity-register/records")) {
+      autoRegisterReads.records += 1;
+      return json({ records: [autoRegisterRecord], total: 1 });
+    }
+    if (path.startsWith("/api/entity-types")) return json({entityTypes: []});
+    if (path.startsWith("/api/tag-suggest")) return json({tags: []});
+    return json({});
+  }) as typeof fetch;
+  await import("./dashboard-entry.ts");
+  await until(() => Boolean(document.querySelector('.dash-panel--list [data-node-id="node:1"]')));
+});
+afterAll(() => {
+  skipNodeDetailTypewriter(query<HTMLElement>(".dash-detail"));
+  document.body.replaceChildren();
+  globalThis.fetch = originalFetch;
+  window.sessionStorage.clear();
+  _resetTokenCacheForTest();
+});
+
+test("홈 자동 정리 칸은 처음 열 때 한 번만 읽고, 메모를 눌러도 다시 읽지 않으며 되돌리기 실패 문구를 지우지 않는다", async () => {
+  await until(() => Boolean(document.querySelector(".auto-register-revert")));
+  expect(autoRegisterReads).toEqual({ availability: 1, records: 1 });
+  query<HTMLButtonElement>(".auto-register-revert").click();
+  await until(() => (query(".auto-register-note").textContent ?? "").includes("db locked"));
+  query<HTMLButtonElement>('.dash-panel--list [data-node-id="node:1"]').click();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(autoRegisterReads).toEqual({ availability: 1, records: 1 });
+  expect(query(".auto-register-note").textContent).toContain("db locked");
+});
+
+test("홈 일반 메모 상세는 줄바꿈과 마지막 문장을 포함한 전체 원문을 보여준다", async () => {
+  query<HTMLButtonElement>('.dash-panel--list [data-node-id="node:1"]').click();
+  await until(() => Boolean(document.querySelector(".detail-trash-btn")));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  skipNodeDetailTypewriter(query<HTMLElement>(".dash-detail"));
+  expect(query(".node-detail__snippet").textContent).toBe(longText);
+});
+
+test("홈에서 전체 메모를 수정하고 기존 revision 조건으로 저장할 수 있다", async () => {
+  const edit = document.querySelector<HTMLButtonElement>(".dash-detail .node-window__edit-toggle");
+  expect(edit).not.toBeNull();
+  edit!.click();
+  const input = query<HTMLTextAreaElement>(".node-edit-modal__textarea");
+  expect(input.value).toBe(longText.replace(/ +\n/g, "\n"));
+  input.value = "홈에서 수정한 기억";
+  query<HTMLFormElement>(".node-edit-modal__form").dispatchEvent(new Event("submit", {bubbles: true, cancelable: true}));
+  await until(() => Boolean(lastEdit));
+  await until(() => !document.querySelector(".node-edit-modal"));
+  expect(lastEdit!.content).toBe("홈에서 수정한 기억");
+  expect(lastEdit!.expectedRevision).toBe(0);
+});
+
+test("늦은 이전 검색 응답이 최신 검색 결과를 덮지 않는다", async () => {
+  await startSearch("이전 검색");
+  await startSearch("최신 검색");
+  finishSearch("최신 검색");
+  await until(() => query(".dash-panel--list").textContent!.includes("최신 검색"));
+  finishSearch("이전 검색");
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  expect(query(".dash-panel--list").textContent).toContain("최신 검색");
+  expect(query(".dash-panel--list").textContent).not.toContain("이전 검색");
+});
+
+test("검색 초기화 뒤 도착한 응답이 결과를 다시 표시하지 않는다", async () => {
+  await startSearch("초기화할 검색");
+  query<HTMLButtonElement>('[aria-label="검색 초기화"]').click();
+  finishSearch("초기화할 검색");
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  expect(query(".dash-panel--list").textContent).not.toContain("초기화할 검색");
+  expect(query(".dash-panel--list").textContent).toContain("첫 줄");
+});
+
+test("다음 검색이 실패하면 이전 검색의 상세와 쓰기 버튼을 남기지 않는다", async () => {
+  await startSearch("성공 검색");
+  finishSearch("성공 검색");
+  await until(() => query(".dash-panel--list").textContent!.includes("성공 검색"));
+  query<HTMLButtonElement>('.dash-panel--list [data-node-id="node:2"]').click();
+  await until(() => Boolean(document.querySelector(".detail-trash-btn")));
+  await startSearch("실패 검색");
+  deferred.get("실패 검색")!(new Response("{}", {status:503}));
+  await until(() => query(".dash-panel--list").textContent!.includes("검색 실패"));
+  expect(Boolean(document.querySelector(".detail-trash-btn"))).toBe(false);
+  expect(Boolean(document.querySelector(".dash-detail .node-window__edit-toggle"))).toBe(false);
+  const input = query<HTMLTextAreaElement>("[data-ingest-input]");
+  input.value = "검색 중 다른 메모 저장";
+  input.dispatchEvent(new Event("input", {bubbles: true}));
+  query<HTMLButtonElement>("[data-ingest-send]").click();
+  await until(() => query("[data-ingest-result]").textContent!.includes("저장됨"));
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  expect(query(".dash-panel--list").textContent).toContain("검색 실패");
+  expect(query(".dash-panel--list").textContent).not.toContain("성공 검색");
+});
