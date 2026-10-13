@@ -28,8 +28,13 @@ struct Contract {
     /// What an `answer` feedback says about how the answer came out (`contracts.ts`
     /// `ANSWER_OUTCOMES`); `feedback::parse_feedback` accepts no other value.
     answer_outcomes: Vec<String>,
+    /// The `HostError` codes the screen may receive; the host only checks in its tests that this
+    /// list equals `code::ALL`. Declared because `deny_unknown_fields` refuses an unknown key.
+    #[cfg_attr(not(test), allow(dead_code))]
     host_error_codes: Vec<String>,
-    /// How often the service sends `{"event":"alive"}` while it has work in progress.
+    /// How often the service sends `{"event":"alive"}` while it has work in progress. The service
+    /// reads it; the host only checks in its tests that `service_silence_limit_ms` covers it.
+    #[cfg_attr(not(test), allow(dead_code))]
     service_heartbeat_ms: u64,
     /// How long the host lets a waiting request go without any line from the service before it
     /// stops the service as unresponsive.
@@ -77,6 +82,9 @@ struct Text {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct FeedbackMask {
+    /// The screen's text for a link it drops (`src/ui/feedback-model.ts`); the host masks only
+    /// credentials, so it reads this one only in its tests.
+    #[cfg_attr(not(test), allow(dead_code))]
     omitted_link: String,
     omitted_credential: String,
 }
@@ -274,7 +282,6 @@ pub fn host_notice_text(error_code: &str) -> &str {
 }
 
 pub struct FeedbackMaskLabels {
-    pub omitted_link: &'static str,
     pub omitted_credential: &'static str,
 }
 
@@ -283,7 +290,6 @@ pub struct FeedbackMaskLabels {
 pub fn feedback_mask_labels() -> FeedbackMaskLabels {
     let mask = &catalog().text.feedback_mask;
     FeedbackMaskLabels {
-        omitted_link: &mask.omitted_link,
         omitted_credential: &mask.omitted_credential,
     }
 }
@@ -444,9 +450,8 @@ mod tests {
 
     #[test]
     fn feedback_mask_labels_and_sensitive_markers_are_not_empty() {
-        let mask = feedback_mask_labels();
-        assert!(!mask.omitted_link.is_empty());
-        assert!(!mask.omitted_credential.is_empty());
+        assert!(!catalog().text.feedback_mask.omitted_link.is_empty());
+        assert!(!feedback_mask_labels().omitted_credential.is_empty());
         assert!(!sensitive_markers().is_empty());
         assert!(!sensitive_query_keys().is_empty());
     }

@@ -134,7 +134,7 @@ test("a failure between the restore and the switch is recorded as failed, not ta
   // The restart did not mark it interrupted, so the screen does not say the app ended mid-restore.
   expect((await h.service.list()).last).toBeNull();
   expectUntouched(f);
-});
+}, 20_000); // Same real restore as the tests above; it took 3.6s on a hosted Windows runner.
 
 test("a settings backup is refused while a restore runs", async () => {
   const f = fixture();

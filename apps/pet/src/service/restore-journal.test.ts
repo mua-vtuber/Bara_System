@@ -14,6 +14,10 @@ import { checkPlaced, markStarted, readRestoreJournal, recoverRestore, RESTORE_S
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 const NOW = () => new Date("2026-10-07T09:05:03.000Z");
+/** Every record write is flushed to the drive (`handle.sync()`) and renamed into place, and the tests that walk every
+ * crash point make 14 to 28 of them besides the moves. On a hosted Windows runner's temporary folder one switch took
+ * 3.6s and these walks went past Bun's 5s default; on a desktop drive the same tests take well under a second. */
+const DISK_TEST_TIMEOUT_MS = 60_000;
 
 const ORIGINAL = { db: "original database", wal: "original log", shm: "original index", pairing: "{\"format\":1,\"pairingId\":\"old\"}", attachment: "old picture" };
 const RESTORED = { db: "restored database", pairing: "{\"format\":1,\"pairingId\":\"new\"}", attachments: { "x.png": "restored picture", "y.pdf": "restored document" } };
@@ -115,7 +119,7 @@ test("a switch moves the store aside and the restored one in, and the next start
   expect(await recoverRestore(f.dataDir, NOW)).toBe("none");
   expect(await markStarted(f.dataDir, NOW)).toBe(false);
   expectSwitched(f);
-});
+}, DISK_TEST_TIMEOUT_MS);
 
 test("a crash at any point of the switch is finished by the next start, and a second recovery changes nothing", async () => {
   for (let made = 0; made <= 6; made++) {
@@ -130,7 +134,7 @@ test("a crash at any point of the switch is finished by the next start, and a se
     expect(await recoverRestore(f.dataDir, NOW)).toBe("switched");
     expectSwitched(f);
   }
-});
+}, DISK_TEST_TIMEOUT_MS);
 
 test("a crash while the restore was still building its copy leaves the store as it was", async () => {
   const f = fixture();
@@ -163,7 +167,7 @@ test("a failed move undoes the moves made before it: the store is as it was and 
     // The before-restore folder is removed once empty; nothing else of it was ever there.
     expect(existsSync(f.before)).toBe(false);
   }
-});
+}, DISK_TEST_TIMEOUT_MS);
 
 test("a restored copy that changed before the switch is caught after the moves and the switch is rolled back", async () => {
   const f = fixture();
@@ -211,7 +215,7 @@ test("a crash at any point of a rollback is finished by the next start", async (
     expectOriginal(f);
     expect(await recoverRestore(f.dataDir, NOW)).toBe("none");
   }
-});
+}, DISK_TEST_TIMEOUT_MS);
 
 test("a switch that can be neither finished nor undone stops the start and touches nothing", async () => {
   const f = fixture();

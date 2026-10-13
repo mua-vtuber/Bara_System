@@ -118,6 +118,10 @@ test("the real executable lookup answers without running anything", () => {
 
 // --- probe reasons ---------------------------------------------------------------------------------
 
+/** These checks save settings through the real Windows DPAPI vault, one PowerShell process per secret. The first
+ * PowerShell start on a fresh hosted runner took over 5s; later ones took about 0.4s. */
+const DPAPI_TEST_TIMEOUT_MS = 30_000;
+
 async function probeWith(settings: { ai?: { provider: "ollama" | "openai-compatible"; baseUrl: string; model: string }; cleanupProvider?: CleanupProvider }, target: "answer" | "cleanup" = "answer"): Promise<AiProbeResult> {
   const dir = mkdtempSync(join(tmpdir(), "pet-ai-reason-"));
   try {
@@ -131,28 +135,28 @@ async function probeWith(settings: { ai?: { provider: "ollama" | "openai-compati
 
 test("a cleanup check with no cleanup AI chosen is not-configured", async () => {
   expect(await probeWith({}, "cleanup")).toEqual({ available: false, models: [], message: messages.aiService.probe.pickCleanupAi, reason: "not-configured" });
-});
+}, DPAPI_TEST_TIMEOUT_MS);
 
 test("a server check without a selected model is model-missing, and lists the models", async () => {
   const { baseUrl } = ollama(["qwen"]);
   expect(await probeWith({ ai: { provider: "ollama", baseUrl, model: "" } })).toEqual({ available: false, models: ["qwen"], message: messages.aiService.modelNeeded, reason: "model-missing" });
-});
+}, DPAPI_TEST_TIMEOUT_MS);
 
 test("a server check whose model is not listed is model-missing", async () => {
   const { baseUrl } = ollama(["qwen"]);
   expect(await probeWith({ ai: { provider: "ollama", baseUrl, model: "other" } })).toMatchObject({ available: false, reason: "model-missing", message: messages.aiService.probe.modelNotFound });
-});
+}, DPAPI_TEST_TIMEOUT_MS);
 
 test("a server that cannot be reached is connection-failed", async () => {
   expect(await probeWith({ ai: { provider: "ollama", baseUrl: refusing(), model: "qwen" } })).toMatchObject({ available: false, reason: "connection-failed", message: messages.aiService.probe.networkFailed });
-});
+}, DPAPI_TEST_TIMEOUT_MS);
 
 test("a server that lists the selected model carries no reason", async () => {
   const { baseUrl } = ollama(["qwen"]);
   const result = await probeWith({ ai: { provider: "ollama", baseUrl, model: "qwen" } });
   expect(result.available).toBe(true);
   expect(result.reason).toBeUndefined();
-});
+}, DPAPI_TEST_TIMEOUT_MS);
 
 test("a CLI that is not on PATH is not-installed, with an install text for that CLI, without running anything", async () => {
   for (const provider of ["claude", "codex"] as const) {

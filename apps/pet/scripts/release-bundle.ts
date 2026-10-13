@@ -2,7 +2,7 @@
  * one adapter. `package-runtime.ts` (the Pet installer) and `deploy-a1.ts` call the same functions. */
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, statSync } from "node:fs";
-import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { BUNDLED_BUN_VERSION } from "../src/shared/bundled-runtime.ts";
 import { adapterSource, adapterStartFile } from "../src/service/install/adapter-registry.ts";
@@ -142,9 +142,12 @@ async function copyInto(coreRoot: string, stageDir: string, files: readonly stri
 /** How many of the lock lines a prune newly introduced the refusal names, so the cause is visible in a CI log. */
 const UNAPPROVED_LOCK_LINES_SHOWN = 5;
 
-/** Bun's frozen install rejects workspaces absent from the bundle; prune them without resolving new versions. */
+/** Bun's frozen install rejects workspaces absent from the bundle; prune them without resolving new versions.
+ * Bun runs in the stage's canonical path: it writes each workspace path relative to its working folder, but resolves
+ * the workspace folders themselves to their long names. A working folder spelled with a Windows 8.3 short name (a
+ * `%TEMP%` such as `C:\Users\RUNNER~1\...`) would make those paths climb out and back in under the long name. */
 async function pruneLock(coreRoot: string, stageDir: string): Promise<void> {
-  run([process.execPath, "install", "--lockfile-only"], stageDir);
+  run([process.execPath, "install", "--lockfile-only"], await realpath(stageDir));
   const original = new Set((await readFile(join(coreRoot, "bun.lock"), "utf8")).split(/\r?\n/));
   const introduced = (await readFile(join(stageDir, "bun.lock"), "utf8")).split(/\r?\n/).filter((line) => line && !original.has(line));
   if (introduced.length > 0)

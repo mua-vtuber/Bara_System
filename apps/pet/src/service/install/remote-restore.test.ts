@@ -77,7 +77,7 @@ test("a backup folder is packed into one archive whose digest is its bytes' and 
   expect(Bun.spawnSync([tarExecutable(), "-xzf", packed.file, "-C", out]).exitCode).toBe(0);
   expect(readFileSync(join(out, "manifest.json"), "utf8")).toBe(readFileSync(join(archive, "manifest.json"), "utf8"));
   expect(readFileSync(join(out, "attachments", "content", "0.png"), "utf8")).toBe("picture");
-});
+}, 30_000); // Two real tar.exe runs on a temporary folder; on a hosted Windows runner they went past the 5s default.
 
 test("a backup folder that cannot be packed stops before anything is sent and leaves no partial archive", async () => {
   const dir = scratch("pack-missing");
