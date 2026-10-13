@@ -26,9 +26,11 @@ Windows x64, Bun 1.3.6, Rust 1.93 이상, MSVC C++ 빌드 도구와 Windows SDK�
 bun install --frozen-lockfile          # 저장소 루트: 대시보드 빌드용
 cd apps/pet
 bun install --frozen-lockfile          # 펫 자체 의존성
-bun run package:runtime                # 저장소 루트를 읽어 resources를 만듦
-bun run build
+cd ../..
+bun run build:pet                      # 저장소 루트에서 설치 파일까지 한 번에
 ```
+
+`bun run build:pet`은 `apps/pet`의 `bun run build`를 실행하고, `build`는 버전 검사 → `package:runtime`(저장소 루트를 읽어 resources를 만듦, 대시보드 빌드 포함) → 서비스 번들 → Tauri 빌드 → 실행 파일 검사를 순서대로 돌립니다. `package:runtime`이 빌드 안에 들어 있으므로 서버 원본이 빠진 불완전한 설치 파일이 나오지 않습니다. `package:runtime`은 서버 쪽 코드에 커밋하지 않은 변경이 있으면 거절하므로, 설치 파일 빌드 전에 커밋합니다. `bun run dev`용 실행 환경만 준비할 때는 `apps/pet`에서 `bun run package:runtime`을 따로 실행할 수 있습니다.
 
 번들 Bun 버전(`src/shared/bundled-runtime.ts`의 `BUNDLED_BUN_VERSION`)을 바꿀 때는 저장소 루트 `.github/workflows/pet-ci.yml`의 `bun-version` 값과 이 문서의 버전 표기도 함께 바꿉니다. 세 곳이 다르면 CI가 검증한 Bun과 설치 파일에 실제로 들어가는 Bun이 달라집니다.
 

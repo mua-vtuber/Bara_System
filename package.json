@@ -10,6 +10,7 @@
     "test:heavy": "bun run scripts/test-suite.ts heavy",
     "test:all": "bun run scripts/test-suite.ts all",
     "test:list": "bun run scripts/test-suite.ts list",
+    "build:pet": "bun run --cwd apps/pet build",
     "deploy:a1": "bun run apps/pet/scripts/deploy-a1.ts",
     "version:bump": "bun run apps/pet/scripts/bump-version.ts"
   }

@@ -16,7 +16,7 @@
     "dev": "bun run scripts/dev.ts",
     "tauri": "tauri",
     "check:release-version": "bun run scripts/check-release-version.ts",
-    "build": "bun run check:release-version && bun run build:service && tauri build && bun run check:native-exe"
+    "build": "bun run check:release-version && bun run package:runtime && bun run build:service && tauri build && bun run check:native-exe"
   },
   "dependencies": { "@esotericsoftware/spine-webgl": "4.3.13", "@tauri-apps/api": "2.11.1" },
   "devDependencies": { "@tauri-apps/cli": "2.11.4", "@types/bun": "1.3.6", "typescript": "5.9.3" }

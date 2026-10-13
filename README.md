@@ -58,7 +58,7 @@ bara_system/
 
 일반 사용자용 경로다. Windows 설치 파일 하나로 펫과 메모리 서버를 준비하며, Git·Bun·터미널 명령을 요구하지 않는다.
 
-1. **설치 파일 준비**: 설치 파일 이름은 `Bara Pet_<버전>_x64-setup.exe` 다(현재 0.1.6). 미리 빌드한 설치 파일은 아직 공개 배포하지 않으므로, 지금은 이 저장소에서 직접 만든다. 저장소 루트에서 `bun install --frozen-lockfile` 후 `apps/pet` 에서 `bun install --frozen-lockfile` → `bun run package:runtime` → `bun run build` 순서로 실행하면 `apps/pet/src-tauri/target/release/bundle/nsis/` 에 생긴다. `package:runtime` 을 빼먹으면 서버 원본과 Bun 이 빠진 불완전한 설치 파일이 나온다. 빌드 환경(Windows x64, Bun, Rust, MSVC 빌드 도구)은 [펫 개발 문서](apps/pet/docs/development.md)를 따른다.
+1. **설치 파일 준비**: [Releases 페이지](https://github.com/mua-vtuber/Bara_System/releases/latest)에서 최신 `Bara.Pet_<버전>_x64-setup.exe` 를 받는다. 직접 만들려면 저장소 루트에서 `bun install --frozen-lockfile`, `apps/pet` 에서 `bun install --frozen-lockfile` 로 의존성을 한 번 설치한 뒤, 저장소 루트에서 `bun run build:pet` 하나를 실행하면 `apps/pet/src-tauri/target/release/bundle/nsis/` 에 생긴다. 이 명령이 서버 원본·대시보드·Bun 묶기(`package:runtime`)부터 설치 파일 만들기까지 순서대로 돌린다. 빌드 환경(Windows x64, Bun, Rust, MSVC 빌드 도구)은 [펫 개발 문서](apps/pet/docs/development.md)를 따른다.
 2. **설치**: 설치 파일은 코드 서명이 되어 있지 않아 Windows SmartScreen 경고가 뜰 수 있다. 출처를 확인했다면 "추가 정보 → 실행"을 눌러 진행한다.
 3. **첫 실행**: "바라 시작하기" 안내가 열린다. 기억을 둘 곳으로 "이 컴퓨터", "내 외부 서버"(이미 만들어 둔 Ubuntu 서버에 SSH 로 원격 설치), "기존 바라" 중 하나를 고른다. "이 컴퓨터"를 고르면 처음 실행 때 검색용 모델 4개(글 검색 bge-m3, 결과 정렬 bge-reranker-v2-m3, 이미지 검색 SigLIP2, 한국어 형태소 분석 Kiwi, 합계 약 1.7GB)를 받으므로 인터넷 연결과 약 2.7GB 의 여유 공간(모델 + DB·임시 파일 여유 1GB)이 필요하다. 질문에 답하는 AI(Ollama·LM Studio 등)는 펫이 받지 않으며, 따로 설치해 두면 연결만 한다.
 4. **AI 연결(선택)**: 이 PC 에서 실행 중인 Ollama, LM Studio, Jan, llama.cpp 서버를 찾아 고를 수 있다. 건너뛰어도 기억 저장·검색은 동작한다.
@@ -166,7 +166,8 @@ AGPL-3.0-only. 전문은 [LICENSE](LICENSE). 이 라이선스 아래에서 이 �
 
 1. 저장소 루트에서 `bun run version:bump <버전>` 을 실행한다(SemVer). 펫(`apps/pet/package.json`, `src-tauri/tauri.conf.json`, `Cargo.toml`, `Cargo.lock`)과 메모리 서버(`apps/memory/package.json`, `bun.lock`)의 버전을 한꺼번에 바꾼다. 여섯 곳의 버전이 서로 다르면 아무것도 바꾸지 않고 멈춘다. 펫과 서버 버전은 항상 같이 움직인다 — 펫이 원격 서버를 올릴지 이 버전으로 판단하기 때문이다.
 2. `CHANGELOG.md` 의 `[Unreleased]` 를 새 버전 절로 옮기고 커밋한다.
-3. 펫 설치 파일을 만든다: `apps/pet` 에서 `bun run package:runtime` → `bun run build`. `build` 는 시작할 때 `check:release-version` 으로 펫 세 파일의 버전이 같은지 확인한다.
-4. 소유자 운영 서버에 반영할 때는 `bun run deploy:a1` 을 실행한다. 버전 확인은 `GET /health`(인증 없음) 또는 인증 뒤 `GET /stats` 의 `version`.
+3. 펫 설치 파일을 만든다: 저장소 루트에서 `bun run build:pet`. 서버 원본 묶기(`package:runtime`)부터 설치 파일까지 한 번에 돌며, 시작할 때 `check:release-version` 으로 펫 세 파일의 버전이 같은지 확인한다.
+4. 만든 설치 파일(`apps/pet/src-tauri/target/release/bundle/nsis/`)을 공개 저장소의 GitHub Releases 에 `v<버전>` 태그로 올린다.
+5. 소유자 운영 서버에 반영할 때는 `bun run deploy:a1` 을 실행한다. 버전 확인은 `GET /health`(인증 없음) 또는 인증 뒤 `GET /stats` 의 `version`.
 
 주의: 버전·CHANGELOG 정합은 체크리스트와 위 스크립트로만 지킨다(별도 CI 강제 없음 — 개인 규모 결정).
