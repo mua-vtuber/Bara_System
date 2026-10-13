@@ -1,8 +1,0 @@
-[Unit]
-Description=bara 운영 서버 자동 배포 (origin/main 확인 후 새 커밋이면 받아서 서비스 재시작)
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-ExecStart=/home/bara/bara_system/scripts/a1-auto-deploy.sh

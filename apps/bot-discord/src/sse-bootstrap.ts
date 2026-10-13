@@ -41,12 +41,63 @@ import {
   type MemoryApiClient,
 } from "../../memory/src/api-client.ts";
 import type { TokenScope } from "../../memory/src/federation/sse-tokens.ts";
+import { ADAPTER_ENROLL_ERROR_CODES } from "../../memory/src/federation/adapter-enroll-limits.ts";
 import {
   clearAdapterToken,
   isStoredTokenForEndpoint,
   loadAdapterToken,
   saveAdapterToken,
 } from "./adapter-token-store.ts";
+import {
+  clearPendingEnrollment,
+  loadPendingEnrollment,
+  savePendingEnrollment,
+} from "./adapter-enrollment-store.ts";
+
+/**
+ * 승인 대기 요청의 토큰 회수(pickup) 응답 중 "그 요청은 끝났다"는 두 status.
+ * 403 = 소유자가 이 봇의 요청을 거절했다 — 다시 등록하면 소유자 뜻을 거스르므로 재시도를 멈춘다.
+ * 404 = 서버가 수명이 지난 요청을 지웠거나 모른다 — 보관한 요청을 버리고 다음 시도에서 새로 등록한다.
+ */
+const PICKUP_REJECTED_STATUS = 403;
+const PICKUP_GONE_STATUS = 404;
+
+/**
+ * 소유자가 대시보드에서 이 봇의 승인 요청을 거절했다(회수 확인이 403). startSseWithRetry 는
+ * 다시 등록하지 않고 재시도를 멈춘다 — 다시 연결하려면 봇을 재시작해야 한다.
+ */
+export class AdapterEnrollmentRejectedError extends Error {
+  readonly adapterId: string;
+
+  constructor(adapterId: string, serverMessage: string) {
+    super(`어댑터 ${adapterId} 승인 요청이 거절됨 — 다시 연결하려면 봇을 재시작하세요 (서버 응답: ${serverMessage})`);
+    this.name = "AdapterEnrollmentRejectedError";
+    this.adapterId = adapterId;
+  }
+}
+
+/**
+ * 서버에 이 어댑터의 옛 승인 대기 요청이 남아 있는데(409 ADAPTER_ENROLL_PENDING_EXISTS),
+ * 봇에는 그 요청을 회수할 비밀값이 없는 상태. 그 요청은 승인해도 봇이 토큰을 받을 수 없다.
+ * startSseWithRetry 는 이 상태에 들어설 때 안내를 한 번만 남기고, 그 뒤로는
+ * SSE_BOOTSTRAP_BLOCKED_RECHECK_MS 간격으로 조용히 다시 확인한다. 소유자가 대시보드에서
+ * 그 요청을 거절하면(또는 서버가 수명이 지나 지우면) 다음 확인에서 봇이 스스로 새로 등록한다.
+ */
+export class AdapterEnrollmentBlockedError extends Error {
+  readonly adapterId: string;
+
+  constructor(adapterId: string, serverMessage: string) {
+    super(
+      `어댑터 ${adapterId} 의 옛 승인 대기 요청이 서버에 남아 있어 새로 등록할 수 없습니다. ` +
+        `봇은 그 요청의 토큰을 회수할 비밀값이 없어 그 요청은 승인해도 쓸 수 없습니다. ` +
+        `대시보드 설정 > 어댑터 관리에서 ${adapterId} 의 대기 요청이 본인 것인지(주소·시각) 확인한 뒤 거절하세요. ` +
+        `거절하면 봇이 다음 확인 때 스스로 새로 등록합니다. ` +
+        `(서버 응답: ${serverMessage})`,
+    );
+    this.name = "AdapterEnrollmentBlockedError";
+    this.adapterId = adapterId;
+  }
+}
 
 /**
  * 재시도해도 같은 결과가 나오는 인증 실패 status. 401 = 토큰 자체가 무효(회수·만료 등) —
@@ -115,6 +166,13 @@ export const SSE_BOOTSTRAP_INITIAL_DELAY_MS = 1000;
  * 재시도한다 — 무한 재시도여도 로그 도배를 막는 핵심 장치다.
  */
 export const SSE_BOOTSTRAP_MAX_DELAY_MS = 30_000;
+
+/**
+ * 옛 승인 대기 요청에 막힌 동안(AdapterEnrollmentBlockedError)의 재확인 간격(ms). 소유자가
+ * 대시보드에서 그 요청을 거절할 때까지 기다리는 동안 서버에 등록 요청을 몰아 보내지 않는다.
+ */
+const MS_PER_MINUTE = 60 * 1000;
+export const SSE_BOOTSTRAP_BLOCKED_RECHECK_MS = 10 * MS_PER_MINUTE;
 
 /** 재시도할 때마다 대기를 늘리는 배수. 상한(MAX_DELAY)까지만 늘어난다. */
 export const SSE_BOOTSTRAP_BACKOFF_FACTOR = 2;
@@ -344,6 +402,12 @@ async function defaultVerifyAdminTokenRegistration(
  * 이후 호출은 보관한 pending 요청을 polling 한다. 승인 전에는 Error 를 던져
  * startSseWithRetry 의 backoff 재시도에 맡기고, 승인·pickup 성공 시 토큰을 저장한
  * 뒤 반환한다. 재시도 중에도 pending 요청이 매번 새로 쌓이지 않는다.
+ *
+ * 대기 요청은 토큰 파일 옆 파일(adapter-enrollment-store.ts)에도 남겨, 봇이 재시작돼도 같은
+ * 요청을 이어 확인한다. 회수 확인이 404(서버가 지움)면 그 요청을 버리고 다음 시도에서 새로
+ * 등록하고, 403(소유자가 거절)이면 AdapterEnrollmentRejectedError 로 재시도를 멈춘다.
+ * 비밀값이 없는 옛 대기 요청이 서버에 남아 등록이 409 로 막히면 AdapterEnrollmentBlockedError
+ * 를 던진다 — startSseWithRetry 가 안내를 한 번 남기고 느린 간격으로 다시 확인한다.
  */
 export function createAdapterApprovalTokenIssuer(
   options: AdapterApprovalTokenIssuerOptions,
@@ -357,6 +421,56 @@ export function createAdapterApprovalTokenIssuer(
   let storeProbed = false;
   const log = options.log ?? (() => {});
   const endpoint = options.endpoint ?? "";
+
+  /**
+   * 승인 대기 요청을 파일에 남긴다 — 재시작 뒤에도 같은 요청의 토큰을 회수하기 위해서다.
+   * 저장 실패는 이번 실행의 회수를 막지 않으므로 경고만 남긴다(재시작하면 회수할 수 없게 됨을 알린다).
+   */
+  const rememberPending = (next: { requestId: string; pickupSecret: string; adapterId: string }): void => {
+    pending = next;
+    try {
+      savePendingEnrollment(
+        { ...next, baseUrl: options.client().apiBaseUrl },
+        options.tokenStorePath,
+      );
+    } catch (err) {
+      log(
+        `승인 대기 요청 저장 실패(대기 중 재시작하면 이 요청을 회수할 수 없음) — ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  };
+
+  /**
+   * 보관한 대기 요청을 버린다(토큰 회수 성공·요청 종료). 파일 삭제 실패는 연결을 막지 않도록
+   * 경고만 남긴다 — 남은 파일은 다음 확인에서 끝난 요청(404·403)으로 드러나 다시 지워진다.
+   */
+  const forgetPending = (): void => {
+    pending = null;
+    try {
+      clearPendingEnrollment(options.tokenStorePath);
+    } catch (err) {
+      log(`승인 대기 요청 파일 삭제 실패 — ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  /**
+   * 지난 실행이 남긴 대기 요청을 이어받는다. 다른 어댑터·다른 서버 주소의 요청이거나 깨진
+   * 파일이면 회수할 수 없으므로 지우고 null 을 돌려준다(새로 등록).
+   */
+  const resumeSavedPending = (): { requestId: string; pickupSecret: string; adapterId: string } | null => {
+    const saved = loadPendingEnrollment(options.tokenStorePath);
+    if (saved === null) {
+      clearPendingEnrollment(options.tokenStorePath);
+      return null;
+    }
+    if (saved.adapterId !== options.adapterId || saved.baseUrl !== options.client().apiBaseUrl) {
+      clearPendingEnrollment(options.tokenStorePath);
+      log("저장된 승인 대기 요청이 다른 어댑터·서버 주소의 것이라 폐기 — 새로 등록 진행");
+      return null;
+    }
+    log(`지난 실행의 승인 대기 요청을 이어서 확인 — requestId=${saved.requestId}`);
+    return { requestId: saved.requestId, pickupSecret: saved.pickupSecret, adapterId: saved.adapterId };
+  };
 
   /** 저장 토큰이 유효한지 확인하는 probe. 스텁 우선, 없으면 기본 probe. */
   const probe = async (token: string): Promise<boolean> => {
@@ -390,20 +504,29 @@ export function createAdapterApprovalTokenIssuer(
   const enrollAndMaybePickup = async (
     existingToken?: string,
   ): Promise<{ token: string }> => {
-    const enrolled = await options.client().enrollAdapterToken({
-      adapterId: options.adapterId,
-      displayName: options.displayName,
-      description: options.description,
-      endpoint: options.endpoint,
-      // 저장 토큰이 유효한 경우, 그 토큰 소유를 증명해 endpoint/adminToken 메타를
-      // 수동 승인 없이 갱신한다. 응답·로그에는 이 값이 다시 나오지 않는다.
-      existingToken,
-      // 봇 로컬 관리 토큰을 코어에 등록(I1) — 코어→봇 프록시 hop 부착용.
-      adminToken: options.adminToken,
-      // 이 어댑터가 실제로 쓰는 권한(WP-B1-15). 표시·경고용일 뿐 권한을 직접 주지는
-      // 않는다 — 관리자가 승인 화면에서 최종적으로 고른다.
-      requestedScope: options.requestedScope,
-    });
+    let enrolled: Awaited<ReturnType<MemoryApiClient["enrollAdapterToken"]>>;
+    try {
+      enrolled = await options.client().enrollAdapterToken({
+        adapterId: options.adapterId,
+        displayName: options.displayName,
+        description: options.description,
+        endpoint: options.endpoint,
+        // 저장 토큰이 유효한 경우, 그 토큰 소유를 증명해 endpoint/adminToken 메타를
+        // 수동 승인 없이 갱신한다. 응답·로그에는 이 값이 다시 나오지 않는다.
+        existingToken,
+        // 봇 로컬 관리 토큰을 코어에 등록(I1) — 코어→봇 프록시 hop 부착용.
+        adminToken: options.adminToken,
+        // 이 어댑터가 실제로 쓰는 권한(WP-B1-15). 표시·경고용일 뿐 권한을 직접 주지는
+        // 않는다 — 관리자가 승인 화면에서 최종적으로 고른다.
+        requestedScope: options.requestedScope,
+      });
+    } catch (err) {
+      // 옛 대기 요청이 서버에 남아 있고 그 비밀값은 봇에 없다 — 재시도해도 같은 409 라 멈춘다.
+      if (err instanceof MemoryApiError && err.code === ADAPTER_ENROLL_ERROR_CODES.pendingExists) {
+        throw new AdapterEnrollmentBlockedError(options.adapterId, err.message);
+      }
+      throw err;
+    }
 
     if (enrolled.status === "approved") {
       // D6 자동 승인 — 즉시 pickup.
@@ -416,22 +539,22 @@ export function createAdapterApprovalTokenIssuer(
         return { token: picked.token };
       }
       // 자동승인 응답 뒤 pickup 이 approved 가 아니면(경합 등) pending 흐름으로.
-      pending = {
+      rememberPending({
         requestId: enrolled.requestId,
         pickupSecret: enrolled.pickupSecret,
         adapterId: enrolled.adapterId,
-      };
+      });
       throw new Error(
         `어댑터 토큰 승인 대기 중 — settings 어댑터 관리에서 ${enrolled.adapterId} 요청을 승인해야 한다`,
       );
     }
 
-    // pending — 보관 후 재시도 루프로.
-    pending = {
+    // pending — 파일에도 보관한 뒤 재시도 루프로(재시작 뒤 이어서 회수).
+    rememberPending({
       requestId: enrolled.requestId,
       pickupSecret: enrolled.pickupSecret,
       adapterId: enrolled.adapterId,
-    };
+    });
     log(
       `어댑터 토큰 승인 요청 등록(승인 대기) — adapterId=${enrolled.adapterId}, requestId=${enrolled.requestId}`,
     );
@@ -440,7 +563,10 @@ export function createAdapterApprovalTokenIssuer(
     );
   };
 
-  /** pickup 성공 토큰을 저장한다. 저장 실패는 loud warn 하되 흐름을 막지 않는다. */
+  /**
+   * pickup 성공 토큰을 저장한다. 저장 실패는 loud warn 하되 흐름을 막지 않는다.
+   * 토큰을 먼저 저장한 뒤 끝난 대기 요청을 지운다(지우기 실패는 경고만 — forgetPending).
+   */
   const saveIssuedToken = (
     token: string,
     requestId: string,
@@ -466,6 +592,7 @@ export function createAdapterApprovalTokenIssuer(
         `어댑터 토큰 저장 실패(다음 재시작 시 재승인 필요) — ${err instanceof Error ? err.message : String(err)}`,
       );
     }
+    forgetPending();
   };
 
   return async () => {
@@ -523,6 +650,8 @@ export function createAdapterApprovalTokenIssuer(
               }
             }
             log("저장된 토큰 유효 — 재승인 없이 사용");
+            // 유효한 토큰이 있으면 남아 있던 대기 요청 파일은 쓸 일이 없다.
+            forgetPending();
             storeProbed = true;
             return { token: stored.token };
           }
@@ -534,13 +663,35 @@ export function createAdapterApprovalTokenIssuer(
     }
 
     // ── enroll 또는 pending polling ──────────────────────────────────────────
+    if (pending === null) pending = resumeSavedPending();
     if (pending === null) {
       return enrollAndMaybePickup();
     }
 
-    const picked = await options
-      .client()
-      .pickupAdapterToken(pending.requestId, pending.pickupSecret);
+    let picked: Awaited<ReturnType<MemoryApiClient["pickupAdapterToken"]>>;
+    try {
+      picked = await options
+        .client()
+        .pickupAdapterToken(pending.requestId, pending.pickupSecret);
+    } catch (err) {
+      if (err instanceof MemoryApiError && err.status === PICKUP_REJECTED_STATUS) {
+        // 소유자가 거절했다 — 다시 등록하지 않는다. 파일을 지우고 재시도를 멈추게 한다.
+        const rejected = pending;
+        forgetPending();
+        log(`승인 대기 요청 ${rejected.requestId} 이(가) 거절됨 — 다시 연결하려면 봇을 재시작하세요`);
+        throw new AdapterEnrollmentRejectedError(rejected.adapterId, err.message);
+      }
+      if (err instanceof MemoryApiError && err.status === PICKUP_GONE_STATUS) {
+        // 서버가 수명이 지난 요청을 지웠다 — 같은 요청은 다시 물어도 같으니 버리고 새로 등록한다.
+        const gone = pending;
+        forgetPending();
+        log(`승인 대기 요청 ${gone.requestId} 이(가) 서버에서 사라짐(대기 시간 만료 등) — 다음 시도에서 새로 등록 요청`);
+        throw new Error(
+          `어댑터 ${gone.adapterId} 승인 대기 요청이 서버에서 사라짐(대기 시간 만료 등) — 다음 시도에서 새로 등록한다: ${err.message}`,
+        );
+      }
+      throw err;
+    }
     if (picked.status === "approved") {
       saveIssuedToken(picked.token, pending.requestId, pending.pickupSecret);
       log(`어댑터 토큰 승인 완료 — adapterId=${picked.adapterId}`);
@@ -591,6 +742,8 @@ export async function startSseWithRetry(
 
   let delay = SSE_BOOTSTRAP_INITIAL_DELAY_MS;
   let attempt = 0;
+  // 옛 대기 요청에 막힌 상태에 들어선 뒤 안내를 이미 남겼는가(재확인마다 반복하지 않는다).
+  let blockedNotified = false;
 
   while (!abort.cancelled) {
     attempt += 1;
@@ -616,6 +769,25 @@ export async function startSseWithRetry(
       return { consumer };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      if (err instanceof AdapterEnrollmentBlockedError) {
+        // 옛 대기 요청이 남아 새 등록이 막혔다 — 안내는 처음 한 번만 남기고, 소유자가 그 요청을
+        // 거절할 때까지 느린 간격으로 조용히 다시 확인한다(거절되면 다음 확인에서 스스로 등록).
+        if (!blockedNotified) {
+          warn(
+            `정리 제안 SSE 구독 토큰 발급 대기 — ${Math.round(SSE_BOOTSTRAP_BLOCKED_RECHECK_MS / MS_PER_MINUTE)}분 간격으로 다시 확인: ${message}`,
+          );
+          blockedNotified = true;
+        }
+        if (abort.cancelled) return { consumer: null };
+        await sleep(SSE_BOOTSTRAP_BLOCKED_RECHECK_MS);
+        continue;
+      }
+      blockedNotified = false;
+      if (err instanceof AdapterEnrollmentRejectedError) {
+        // 소유자가 거절했다 — 다시 등록하지 않고 멈춘다.
+        warn(`정리 제안 SSE 구독 토큰 발급 중단: ${message}`);
+        return { consumer: null };
+      }
       if (isNonRetryableTokenError(err)) {
         // 401(토큰 무효) 은 재시도해도 같은 결과 — loud 경고만 남기고 멈춘다.
         warn(

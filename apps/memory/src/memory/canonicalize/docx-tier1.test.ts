@@ -1,7 +1,26 @@
 import { describe, test, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { docxTier1 } from "./docx-tier1.ts";
+import { unzipSync, zipSync } from "fflate";
+import { DOCX_ZIP_LIMITS, docxTier1 } from "./docx-tier1.ts";
+
+const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+/** central directory 에서 name 엔트리의 풀린 크기 칸(offset 24)만 declared 로 바꾼다. */
+function declareEntrySize(zip: Uint8Array, name: string, declared: number): Uint8Array {
+  const out = zip.slice();
+  const view = new DataView(out.buffer, out.byteOffset, out.byteLength);
+  const target = new TextEncoder().encode(name);
+  for (let i = 0; i + 46 <= out.length; i++) {
+    if (view.getUint32(i, true) !== 0x02014b50) continue;
+    const nameLength = view.getUint16(i + 28, true);
+    const entryName = out.subarray(i + 46, i + 46 + nameLength);
+    if (entryName.length === target.length && entryName.every((b, k) => b === target[k])) {
+      view.setUint32(i + 24, declared, true);
+    }
+  }
+  return out;
+}
 
 function fixture(name: string): Buffer {
   return readFileSync(join(import.meta.dir, "__fixtures__", name));
@@ -62,5 +81,47 @@ describe("docxTier1", () => {
         originalName: "garbage.docx",
       }),
     ).rejects.toThrow(/docx Tier 1/);
+  });
+
+  test("zip bomb — 풀린 크기 합계 상한을 넘는 docx 는 mammoth 전에 상한 이름을 담아 거절", async () => {
+    const entries = unzipSync(new Uint8Array(fixture("minimal.docx")));
+    const filler = new Uint8Array(DOCX_ZIP_LIMITS.maxEntryUncompressedBytes);
+    const bomb = zipSync(
+      { ...entries, "word/media/pad1.bin": filler, "word/media/pad2.bin": filler, "word/media/pad3.bin": filler },
+      { level: 9 },
+    );
+    // 압축본은 업로드 상한보다 훨씬 작다 — 그래서 업로드 상한만으로는 못 막는다.
+    expect(bomb.length).toBeLessThan(2 * 1024 * 1024);
+    await expect(
+      docxTier1({ bytes: bomb, mimeType: DOCX_MIME, originalName: "bomb.docx" }),
+    ).rejects.toThrow(/docx Tier 1 zip 파싱 실패: bomb\.docx — .*maxTotalUncompressedBytes/);
+  });
+
+  test("zip 목록에 적힌 크기만으로 엔트리 상한을 판정한다 — 풀기 전에 거절", async () => {
+    const zip = declareEntrySize(
+      new Uint8Array(fixture("minimal.docx")),
+      "word/document.xml",
+      DOCX_ZIP_LIMITS.maxEntryUncompressedBytes + 1,
+    );
+    await expect(
+      docxTier1({ bytes: zip, mimeType: DOCX_MIME, originalName: "declared.docx" }),
+    ).rejects.toThrow(/maxEntryUncompressedBytes/);
+  });
+
+  test("엔트리 수 상한을 넘는 docx 거절", async () => {
+    const entries: Record<string, Uint8Array> = unzipSync(new Uint8Array(fixture("minimal.docx")));
+    for (let i = 0; i <= DOCX_ZIP_LIMITS.maxEntries; i++) entries[`word/media/e${i}.bin`] = new Uint8Array(0);
+    await expect(
+      docxTier1({ bytes: zipSync(entries), mimeType: DOCX_MIME, originalName: "many.docx" }),
+    ).rejects.toThrow(/maxEntries/);
+  });
+
+  test("상한 안의 docx 는 다시 묶은 zip 으로 mammoth 변환이 그대로 된다(이미지 수 포함)", async () => {
+    const entries = unzipSync(new Uint8Array(fixture("minimal.docx")));
+    const withMedia = zipSync({ ...entries, "word/media/image1.png": new Uint8Array(16) });
+    const r = await docxTier1({ bytes: withMedia, mimeType: DOCX_MIME, originalName: "media.docx" });
+    expect(r.markdown).toContain("셀A");
+    expect(r.detection.embeddedImageCount).toBe(1);
+    expect(r.warnings).toEqual(["포함된 이미지 1개는 검색 안 됨 (OCR·캡션 없음)."]);
   });
 });

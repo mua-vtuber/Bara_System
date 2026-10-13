@@ -30,7 +30,7 @@ bun run apps/setup/src/client-token.ts --url http://127.0.0.1:<PORT>/ --tokens-f
 
 기존 서버 연결은 `POST /adapter-enroll`에서 새 요청 ID와 pickup secret을 받는다. 소유자 `full` 토큰이 있으면 그 **요청 ID에만** `POST /adapter-tokens/:requestId/approve`와 `{"scope":"mcp-standard"}`를 보낸 뒤, `GET /adapter-enroll/:requestId/token?pickupSecret=...`으로 일상용 토큰을 회수한다. pickup secret과 두 Bearer 토큰은 Windows 네이티브 DPAPI vault에 보관하고 웹 렌더러에는 비밀값을 뺀 설정만 돌려준다. 관리자 대시보드 링크의 `full` 토큰을 일상용 Pet 토큰으로 쓰지 않는다.
 
-서버 프로세스에는 `managed-prepare`가 반환한 `env`와 빌드된 `MEMORY_STATIC` 경로를 전달한다. 원격 신규 설치는 Ubuntu x64/ARM64 호스트에서 SSH 지문 승인, `sudo -n` 권한, app-owned 경로, 소스/런타임 SHA-256, Linux 네이티브 의존성 설치를 검증한 뒤 `bara-pet-memory.service`만 등록한다. 기존 `bara-memory.service`와 DB, Git 자동 배포 타이머를 덮어쓰지 않는다. SSH 터널의 외부 접속점과 서버 bind는 모두 loopback이다.
+서버 프로세스에는 `managed-prepare`가 반환한 `env`와 빌드된 `MEMORY_STATIC` 경로를 전달한다. 원격 신규 설치는 Ubuntu x64/ARM64 호스트에서 SSH 지문 승인, `sudo -n` 권한, app-owned 경로, 소스/런타임 SHA-256, Linux 네이티브 의존성 설치를 검증한 뒤 `bara-pet-memory.service`만 등록한다. 직접 설치된 코어(`bara-memory.service`, `bara-deploy.timer`)가 있는 호스트는 거부하고 덮어쓰지 않는다(`REMOTE_EXISTING_CORE`). 서비스 파일은 `<서버 폴더>/current`를 실행하고 `BARA_ADAPTERS_DIR=<서버 폴더>/adapters`를 넘기며, 업데이트는 펫 업데이트와 `bun run deploy:a1`이 같은 교체 절차로 한다. SSH 터널의 외부 접속점과 서버 bind는 모두 loopback이다.
 
 SSH 전달(SSH port forwarding)을 쓸 때 클라이언트가 접근하는 주소의 포트는 서버 bind 포트와 달라도 된다. 예를 들어 로컬 PC의 `:3001` 포트를 원격 서버의 `:3000` 포트로 전달하는 경우, 클라이언트는 `http://127.0.0.1:3001/`(로컬 전달 포트)로 접속하고 서버는 `:3000`(실제 bind 포트)에서 듣는다. 이 경우 Origin 헤더는 클라이언트가 실제로 접속한 주소인 `http://127.0.0.1:3001`과 정확히 일치해야 하고(loopback 주소·포트가 다르면 거부), 인증 게이트는 그대로 적용된다.
 

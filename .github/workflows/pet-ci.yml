@@ -1,4 +1,4 @@
-name: Windows 검증
+name: 펫 Windows 검증
 on:
   push:
     branches: [main]
@@ -10,8 +10,13 @@ permissions:
   contents: read
 jobs:
   check:
+    # 비공개 저장소(보관용)에서는 돌리지 않는다. Windows 실행기는 비공개 저장소의 무료 사용 시간을 두 배로 쓴다.
+    if: ${{ !github.event.repository.private }}
     runs-on: windows-latest
     timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: apps/pet
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:

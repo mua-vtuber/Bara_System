@@ -3,7 +3,8 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { openMemoryDatabase } from "../../memory/src/db/migrations.ts";
+import { BASELINE_VERSION } from "../../memory/src/db/baseline-schema.ts";
+import { CURRENT_SCHEMA_VERSION, openMemoryDatabase } from "../../memory/src/db/migrations.ts";
 import { getMemorySettings } from "../../memory/src/settings/memory-settings.ts";
 import { APP_VERSION } from "../../memory/src/version.ts";
 import { MANAGED_PREPARE_FAILURE_LINE, managedOpenOptions, withLogsOnStderr, type ManagedPrepared } from "./managed-prepare.ts";
@@ -74,7 +75,9 @@ function stderrLines(error: string): string[] {
 test("an old schema_version stops with the generic line followed by the named error message", () => {
   const dbPath = seedBaselineDb();
   const db = new Database(dbPath);
-  db.run("UPDATE schema_version SET version = 46");
+  // schema_version 은 적용된 버전마다 한 행이다. 기준 스키마보다 옛 DB 를 흉내 내려면 행을 모두 지우고 하나만 남긴다.
+  db.run("DELETE FROM schema_version");
+  db.run("INSERT INTO schema_version (version) VALUES (?)", [BASELINE_VERSION - 1]);
   db.close();
 
   const result = runPrepare(dir, 44123);
@@ -83,21 +86,22 @@ test("an old schema_version stops with the generic line followed by the named er
   expect(result.output).toBe("");
   expect(lines[0]).toBe(MANAGED_PREPARE_FAILURE_LINE);
   expect(lines).toHaveLength(2);
-  expect(lines[1]).toContain("schema_version v46");
+  expect(lines[1]).toContain(`schema_version v${BASELINE_VERSION - 1}`);
   expect(lines[1]).toContain(dbPath);
 });
 
 test("a newer schema_version stops with the named error message", () => {
   const dbPath = seedBaselineDb();
   const db = new Database(dbPath);
-  db.run("UPDATE schema_version SET version = 48");
+  // 이 코드가 아는 최고 버전보다 한 단계 새 DB — 행을 하나 더 얹는다(기존 행을 바꾸면 PRIMARY KEY 가 겹친다).
+  db.run("INSERT INTO schema_version (version) VALUES (?)", [CURRENT_SCHEMA_VERSION + 1]);
   db.close();
 
   const result = runPrepare(dir, 44123);
   const lines = stderrLines(result.error);
   expect(result.code).toBe(1);
   expect(lines[0]).toBe(MANAGED_PREPARE_FAILURE_LINE);
-  expect(lines[1]).toContain("schema_version v48");
+  expect(lines[1]).toContain(`schema_version v${CURRENT_SCHEMA_VERSION + 1}`);
 });
 
 test("a SQLite file without schema_version stops with the named error message", () => {

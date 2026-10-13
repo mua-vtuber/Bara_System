@@ -4,6 +4,11 @@
  * 공개 경로:
  * - POST /adapter-enroll: 어댑터가 토큰을 신청한다. requestedScope(선택)는 저장·표시만
  *   하고 권한을 주지 않는다. scope 칸은 거부한다(관리자만 지정).
+ *   같은 접속 주소의 요청 빈도 상한을 넘으면 본문을 읽기 전에 429(code
+ *   ADAPTER_ENROLL_RATE_LIMITED, Retry-After 초)로 거절한다. 같은 adapterId 의 승인 대기
+ *   요청이 이미 있으면 409(ADAPTER_ENROLL_PENDING_EXISTS), 주소별 대기 요청 상한이면
+ *   429(ADAPTER_ENROLL_ADDRESS_PENDING_LIMIT), 전체 대기 요청 상한이면
+ *   429(ADAPTER_ENROLL_PENDING_LIMIT) — 상한 값은 federation/adapter-enroll-limits.ts.
  * - GET /adapter-enroll/:requestId/token?pickupSecret=...: 승인 후 토큰을 회수한다.
  *
  * 보호 경로:
@@ -28,12 +33,40 @@ import {
   isTokenScope,
   TOKEN_SCOPES,
 } from "../../federation/sse-tokens.ts";
+import {
+  ADAPTER_ENROLL_ERROR_CODES,
+  ADAPTER_ENROLL_RATE_LIMITS,
+  AdapterEnrollRefusedError,
+  type AdapterEnrollErrorCode,
+} from "../../federation/adapter-enroll-limits.ts";
 import { DASHBOARD_ADAPTER_ID, MCP_TOKEN_SCOPE_VAR } from "../auth-gate.ts";
+import { ClientRateLimiter } from "../client-rate-limiter.ts";
 
 interface AdapterTokenRoutesDeps {
   sseTokens: SseTokenStore;
   remoteAddrOf?: (c: Context) => string | undefined;
+  /**
+   * POST /adapter-enroll 의 접속 주소별 빈도 상한. 생략하면 이 라우트 묶음 전용으로
+   * ADAPTER_ENROLL_RATE_LIMITS 값의 제한기를 만든다. 테스트는 시각을 정한 제한기를 넘긴다.
+   */
+  enrollRateLimiter?: ClientRateLimiter;
 }
+
+/**
+ * 빈도 계산에 쓰는 접속 주소 키. 주소를 알 수 없는 요청(remoteAddrOf 미주입·Bun 이 주소를
+ * 주지 않은 경우)은 모두 한 칸을 함께 쓴다 — 상한이 느슨해지지 않고 오히려 더 빡빡해진다.
+ */
+const UNKNOWN_CLIENT_KEY = "(unknown)";
+
+/** 등록 거절 사유 → HTTP 상태. */
+const ENROLL_REFUSAL_STATUS: Record<AdapterEnrollErrorCode, 409 | 429> = {
+  [ADAPTER_ENROLL_ERROR_CODES.pendingExists]: 409,
+  [ADAPTER_ENROLL_ERROR_CODES.pendingLimit]: 429,
+  [ADAPTER_ENROLL_ERROR_CODES.addressPendingLimit]: 429,
+  [ADAPTER_ENROLL_ERROR_CODES.rateLimited]: 429,
+};
+
+const MS_PER_SECOND = 1000;
 
 function asObject(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -59,8 +92,22 @@ function error(c: Context, status: 400 | 403 | 404 | 409, message: string): Resp
 
 export function createAdapterTokenRoutes(deps: AdapterTokenRoutesDeps): Hono {
   const app = new Hono({ strict: false });
+  const enrollRateLimiter = deps.enrollRateLimiter ?? new ClientRateLimiter(ADAPTER_ENROLL_RATE_LIMITS);
 
   app.post("/adapter-enroll", async (c) => {
+    // 본문을 읽기 전에 센다 — 상한을 넘은 요청은 파싱·파일 쓰기 비용을 만들지 못한다.
+    const decision = enrollRateLimiter.consume(deps.remoteAddrOf?.(c) || UNKNOWN_CLIENT_KEY);
+    if (!decision.allowed) {
+      const retryAfterSeconds = Math.max(1, Math.ceil(decision.retryAfterMs / MS_PER_SECOND));
+      c.header("Retry-After", String(retryAfterSeconds));
+      return c.json(
+        {
+          error: `등록 요청이 너무 잦습니다. ${retryAfterSeconds}초 뒤에 다시 시도하세요.`,
+          code: ADAPTER_ENROLL_ERROR_CODES.rateLimited,
+        },
+        429,
+      );
+    }
     const body = await readJsonObject(c);
     if (!body) return error(c, 400, "JSON 객체 body 필요");
     if ("scope" in body) return error(c, 400, "scope는 관리자만 지정할 수 있습니다.");
@@ -103,6 +150,9 @@ export function createAdapterTokenRoutes(deps: AdapterTokenRoutesDeps): Hono {
         approved ? 200 : 202,
       );
     } catch (e) {
+      if (e instanceof AdapterEnrollRefusedError) {
+        return c.json({ error: e.message, code: e.code }, ENROLL_REFUSAL_STATUS[e.code]);
+      }
       return error(c, 400, e instanceof Error ? e.message : String(e));
     }
   });
@@ -116,7 +166,7 @@ export function createAdapterTokenRoutes(deps: AdapterTokenRoutesDeps): Hono {
 
     const picked = deps.sseTokens.pickupApprovedToken(requestId, pickupSecret);
     if (picked === null) {
-      return error(c, 404, "토큰 요청을 찾을 수 없거나 pickupSecret 이 맞지 않습니다.");
+      return error(c, 404, "토큰 요청을 찾을 수 없거나(대기 시간이 지나 지워진 요청 포함) pickupSecret 이 맞지 않습니다. 등록 요청을 다시 시작하세요.");
     }
     if (picked.status === "pending") {
       return c.json(

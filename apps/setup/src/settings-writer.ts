@@ -199,12 +199,11 @@ export function writeSettingsAndMigrateDb(
       partial.assets = previous.assets;
       partial.backup = previous.backup;
       // launch.ts and Bara Launcher send local/desktop users back through setup whenever
-      // the completion marker is not current, and server-a1 preparation can also rerun
-      // after the fact. None of those reruns imply the user actually chose a new AI
+      // the completion marker is not current. None of those reruns imply the user actually chose a new AI
       // answer in *this* run — only an explicit choice (interactive answer, --ollama/
       // --lmstudio/--no-ai, or a launcher profile button) does, tracked via
       // `selection.explicit`. A rerun that carries no explicit choice (bare --yes)
-      // always preserves the configured llm slot, in every mode including server-a1 —
+      // always preserves the configured llm slot, in every mode —
       // the dashboard LLM settings screen remains the normal channel for changing it.
       if (!selection.explicit) {
         partial.llm = previous.llm;

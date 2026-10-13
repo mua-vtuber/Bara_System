@@ -7,10 +7,12 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SseTokenStore } from "../../federation/sse-tokens.ts";
+import { ADAPTER_ENROLL_ERROR_CODES, ADAPTER_ENROLL_LIMITS } from "../../federation/adapter-enroll-limits.ts";
+import { ClientRateLimiter } from "../client-rate-limiter.ts";
 import { Hono } from "hono";
 import { MemoryApiClient } from "../../api-client.ts";
 import { createAuthGate } from "../auth-gate.ts";
@@ -109,24 +111,104 @@ describe("POST /adapter-enroll", () => {
     expect(res.status).toBe(400);
   });
 
-  test("같은 adapterId 재신청은 이전 pending 을 대기열에서 정리한다", async () => {
+  test("같은 adapterId 무인증 재신청은 409 — 기존 pending 은 그대로 남아 회수할 수 있다", async () => {
     const first = await enroll();
-    const second = await enroll();
+    const res = await app.request("/adapter-enroll", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ adapterId: "bot-discord", displayName: "Impostor" }),
+    });
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: string; code: string };
+    expect(body.code).toBe(ADAPTER_ENROLL_ERROR_CODES.pendingExists);
+    expect(body.error).toContain("bot-discord");
+    // 먼저 와 있는 요청이 남의 것일 수 있다 — 승인하라가 아니라 본인 것인지 확인하라고 안내한다.
+    expect(body.error).toContain("본인 요청인지");
 
-    expect(first.requestId).not.toBe(second.requestId);
-    const list = await app.request("/adapter-tokens");
-    const body = (await list.json()) as {
-      requests: Array<{ requestId: string; status: string }>;
+    const list = (await (await app.request("/adapter-tokens")).json()) as {
+      requests: Array<{ requestId: string; status: string; displayName: string }>;
     };
-    const pending = body.requests.filter((r) => r.status === "pending");
-    expect(pending.map((r) => r.requestId)).toEqual([second.requestId]);
+    expect(list.requests).toHaveLength(1);
+    expect(list.requests[0]).toMatchObject({ requestId: first.requestId, status: "pending", displayName: "Discord Bot" });
 
-    const oldPickup = await app.request(
-      `/adapter-enroll/${first.requestId}/token?pickupSecret=${encodeURIComponent(
-        first.pickupSecret,
-      )}`,
+    const stillPending = await app.request(
+      `/adapter-enroll/${first.requestId}/token?pickupSecret=${encodeURIComponent(first.pickupSecret)}`,
     );
-    expect(oldPickup.status).toBe(403);
+    expect(stillPending.status).toBe(202);
+  });
+
+  test("대기 요청 상한에 닿으면 429 + ADAPTER_ENROLL_PENDING_LIMIT, 파일은 다시 쓰지 않는다", async () => {
+    const limited = new SseTokenStore(tokenPath, { ...ADAPTER_ENROLL_LIMITS, maxPendingRequests: 2 });
+    const limitedApp = createAdapterTokenRoutes({ sseTokens: limited, remoteAddrOf: () => "10.0.0.8" });
+    const post = (adapterId: string) => limitedApp.request("/adapter-enroll", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ adapterId }),
+    });
+    expect((await post("adapter-a")).status).toBe(202);
+    expect((await post("adapter-b")).status).toBe(202);
+    const before = readFileSync(tokenPath, "utf8");
+    const refused = await post("adapter-c");
+    expect(refused.status).toBe(429);
+    const body = (await refused.json()) as { error: string; code: string };
+    expect(body.code).toBe(ADAPTER_ENROLL_ERROR_CODES.pendingLimit);
+    expect(body.error).toContain("2개");
+    expect(readFileSync(tokenPath, "utf8")).toBe(before);
+  });
+
+  test("한 주소의 대기 요청이 주소별 상한에 닿으면 429 + ADAPTER_ENROLL_ADDRESS_PENDING_LIMIT", async () => {
+    const post = (adapterId: string) => app.request("/adapter-enroll", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ adapterId }),
+    });
+    for (let i = 0; i < ADAPTER_ENROLL_LIMITS.maxPendingPerAddress; i++) {
+      expect((await post(`adapter-${i}`)).status).toBe(202);
+    }
+    const refused = await post("adapter-extra");
+    expect(refused.status).toBe(429);
+    expect(((await refused.json()) as { code: string }).code).toBe(ADAPTER_ENROLL_ERROR_CODES.addressPendingLimit);
+  });
+
+  test("같은 주소의 요청 빈도 상한을 넘으면 본문을 읽기 전에 429 + Retry-After, 다른 주소는 통과", async () => {
+    let nowMs = 1_000_000;
+    let remote = "203.0.113.5";
+    const limiter = new ClientRateLimiter(
+      { maxRequestsPerWindow: 2, windowMs: 60_000, maxTrackedClients: 100 },
+      () => nowMs,
+    );
+    const limitedApp = createAdapterTokenRoutes({ sseTokens: tokens, remoteAddrOf: () => remote, enrollRateLimiter: limiter });
+    const post = (adapterId: string) => limitedApp.request("/adapter-enroll", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ adapterId }),
+    });
+    expect((await post("adapter-a")).status).toBe(202);
+    expect((await post("adapter-b")).status).toBe(202);
+    const refused = await limitedApp.request("/adapter-enroll", {
+      method: "POST", headers: { "content-type": "application/json" }, body: "not json",
+    });
+    // 깨진 본문이어도 400 이 아니라 429 — 빈도 검사가 본문 해석보다 먼저다.
+    expect(refused.status).toBe(429);
+    expect(refused.headers.get("Retry-After")).toBe("60");
+    const body = (await refused.json()) as { error: string; code: string };
+    expect(body.code).toBe(ADAPTER_ENROLL_ERROR_CODES.rateLimited);
+    expect(tokens.listTokenRequests()).toHaveLength(2);
+
+    remote = "203.0.113.6";
+    expect((await post("adapter-c")).status).toBe(202);
+
+    remote = "203.0.113.5";
+    nowMs += 60_000;
+    expect((await post("adapter-d")).status).toBe(202);
+  });
+
+  test("수명이 지나 지워진 요청의 pickup 은 404 이고 다시 시작하라고 알린다", async () => {
+    const first = await enroll();
+    const stored = JSON.parse(readFileSync(tokenPath, "utf8"));
+    stored.requests[first.requestId].createdAt = new Date(Date.now() - ADAPTER_ENROLL_LIMITS.pendingTtlMs - 1).toISOString();
+    writeFileSync(tokenPath, JSON.stringify(stored));
+    const reloaded = new SseTokenStore(tokenPath);
+    const reloadedApp = createAdapterTokenRoutes({ sseTokens: reloaded, remoteAddrOf: () => "10.0.0.8" });
+    const res = await reloadedApp.request(
+      `/adapter-enroll/${first.requestId}/token?pickupSecret=${encodeURIComponent(first.pickupSecret)}`,
+    );
+    expect(res.status).toBe(404);
+    expect(((await res.json()) as { error: string }).error).toContain("다시 시작");
   });
 });
 

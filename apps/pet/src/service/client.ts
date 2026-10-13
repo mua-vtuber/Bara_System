@@ -137,11 +137,12 @@ async function fetchGuarded(baseUrl: string, token: string | null, method: strin
   return { response, bodyText };
 }
 
-/** Reads what a 409 body says about the conflict: the server's own `code` ("CONFLICT" for a stale
+/** Reads what a 409 (or 429) body says about the refusal: the server's own `code` ("CONFLICT" for a stale
  * revision, "CAPTURE_CONFLICT" for an AI classification over a user one) and the node's `currentRevision`
  * (bara `routes/memories-edit.ts`). A 409 whose body is not JSON or names neither (e.g. the "source type
  * is not directly editable" answer, which carries only `error`) yields no detail; the caller still throws
- * the same generic CONFLICT error for it, so nothing here turns a refusal into anything else. */
+ * the same generic CONFLICT error for it, so nothing here turns a refusal into anything else. A 429 carries
+ * only a `code` (the enrollment limits below). */
 function conflictDetail(bodyText: string): ServerErrorDetail {
   let parsed: unknown;
   try { parsed = JSON.parse(bodyText); } catch { return {}; }
@@ -178,7 +179,7 @@ export async function requestJson(baseUrl: string, token: string | null, method:
     const { code, message } = httpStatusFailure(response.status);
     const ingest = method === "POST" && new URL(path, `${baseUrl}/`).pathname === "/ingest";
     const writeNotStarted = ingest && (response.status === 401 || response.status === 403 || response.headers.get("X-Ingest-Retryable") === "true");
-    throw serviceError(code, message, writeNotStarted, response.status === 409 ? conflictDetail(bodyText) : {});
+    throw serviceError(code, message, writeNotStarted, response.status === 409 || response.status === 429 ? conflictDetail(bodyText) : {});
   }
   try { return JSON.parse(bodyText); } catch { throw serviceError("SERVER_RESPONSE", messages.serverClient.responseUnreadable); }
 }
@@ -199,6 +200,23 @@ function editConflictError(error: unknown): unknown {
 export async function requestRaw(baseUrl: string, token: string | null, path: string, signal: AbortSignal, timeoutMs = 15_000): Promise<{ status: number; bodyText: string }> {
   const { response, bodyText } = await fetchGuarded(baseUrl, token, "GET", path, undefined, signal, timeoutMs);
   return { status: response.status, bodyText };
+}
+
+/** The codes bara's POST /adapter-enroll names when it refuses a request (`federation/adapter-enroll-limits.ts`):
+ * a request for this adapter already waits for approval (409), the approval queue is full or holds too
+ * many requests from this address (429), or this address asked too often (429). Each becomes its own Pet code and sentence; any other refusal passes through. */
+const ENROLLMENT_PENDING_EXISTS = "ENROLLMENT_PENDING_EXISTS";
+const ENROLLMENT_REFUSALS: Readonly<Record<string, { code: string; message: () => string }>> = {
+  ADAPTER_ENROLL_PENDING_EXISTS: { code: ENROLLMENT_PENDING_EXISTS, message: () => messages.serverClient.enrollmentPendingExists },
+  ADAPTER_ENROLL_ADDRESS_PENDING_LIMIT: { code: "ENROLLMENT_ADDRESS_QUEUE_FULL", message: () => messages.serverClient.enrollmentAddressQueueFull },
+  ADAPTER_ENROLL_PENDING_LIMIT: { code: "ENROLLMENT_QUEUE_FULL", message: () => messages.serverClient.enrollmentQueueFull },
+  ADAPTER_ENROLL_RATE_LIMITED: { code: "ENROLLMENT_RATE_LIMITED", message: () => messages.serverClient.enrollmentRateLimited },
+};
+
+export function enrollmentRefusal(error: unknown): unknown {
+  if (!(error instanceof ServiceError) || error.serverCode === undefined) return error;
+  const refusal = ENROLLMENT_REFUSALS[error.serverCode];
+  return refusal ? serviceError(refusal.code, refusal.message(), false, { serverCode: error.serverCode }) : error;
 }
 
 export class MemoryClient {
@@ -385,16 +403,50 @@ export class MemoryClient {
   async enrollmentStart(ctx: RequestContext): Promise<Enrollment> {
     const { settings, token: existingToken, ownerToken: owner } = await this.config.snapshot();
     await this.assertSendable(settings.connection);
-    const body = asRecord(await requestJson(settings.connection.baseUrl, null, "POST", "/adapter-enroll", { adapterId: "bara-pet", displayName: messages.nativeHost.productTitle, endpoint: settings.connection.baseUrl, ...(existingToken ? { existingToken } : {}) }, ctx.signal, 15_000));
+    let body: Record<string, unknown> | null;
+    try { body = asRecord(await requestJson(settings.connection.baseUrl, null, "POST", "/adapter-enroll", { adapterId: "bara-pet", displayName: messages.nativeHost.productTitle, endpoint: settings.connection.baseUrl, ...(existingToken ? { existingToken } : {}) }, ctx.signal, 15_000)); }
+    catch (error) {
+      const refusal = enrollmentRefusal(error);
+      // The waiting request the server keeps may be this Pet's own: resume it instead of asking the owner.
+      if (refusal instanceof ServiceError && refusal.code === ENROLLMENT_PENDING_EXISTS) {
+        const resumed = await this.resumeSavedEnrollment(settings.connection, owner, refusal, ctx);
+        if (resumed) return resumed;
+      }
+      throw refusal;
+    }
     if (!body || typeof body.requestId !== "string" || typeof body.pickupSecret !== "string") throw serviceError("SERVER_RESPONSE", messages.serverClient.enrollmentRequestUnconfirmed);
     await this.config.setEnrollment(JSON.stringify({ requestId: body.requestId, pickupSecret: body.pickupSecret, baseUrl: settings.connection.baseUrl }), settings.connection);
     if (body.status === "approved") return this.enrollmentPoll(ctx);
-    if (owner) {
-      await this.assertSendable(settings.connection);
-      await requestJson(settings.connection.baseUrl, owner, "POST", `/adapter-tokens/${encodeURIComponent(body.requestId)}/approve`, { scope: "mcp-standard" }, ctx.signal, 15_000);
-      return this.enrollmentPoll(ctx);
-    }
+    if (owner) return this.approveAsOwnerAndPoll(settings.connection, owner, body.requestId, ctx);
     return { state: "pending", requestId: body.requestId, message: messages.serverClient.enrollmentApprovePending };
+  }
+
+  /** With the owner token this Pet approves its own request, then picks the token up. */
+  private async approveAsOwnerAndPoll(connection: ConnectionSettings, owner: string, requestId: string, ctx: RequestContext): Promise<Enrollment> {
+    await this.assertSendable(connection);
+    await requestJson(connection.baseUrl, owner, "POST", `/adapter-tokens/${encodeURIComponent(requestId)}/approve`, { scope: "mcp-standard" }, ctx.signal, 15_000);
+    return this.enrollmentPoll(ctx);
+  }
+
+  /** The server already keeps a waiting request for this Pet. When the request this Pet saved is for the
+   * same server address, that request is ours: approve it with the owner token (when this Pet holds one)
+   * or check it once more. Answers null when nothing usable is saved, so the caller reports the refusal.
+   * When the owner approval finds the saved request gone (404), the saved request was not the one the
+   * server keeps: it is cleared and `refusal` (the 409 guidance) is thrown rather than a bare NOT_FOUND. */
+  private async resumeSavedEnrollment(connection: ConnectionSettings, owner: string | null | undefined, refusal: ServiceError, ctx: RequestContext): Promise<Enrollment | null> {
+    const { enrollment: stored } = await this.config.enrollmentSnapshot();
+    if (!stored) return null;
+    let saved: Record<string, unknown> | null;
+    try { saved = asRecord(JSON.parse(stored)); } catch { return null; }
+    if (!saved || saved.baseUrl !== connection.baseUrl || typeof saved.requestId !== "string" || typeof saved.pickupSecret !== "string") return null;
+    if (owner) {
+      try { return await this.approveAsOwnerAndPoll(connection, owner, saved.requestId, ctx); }
+      catch (error) {
+        if (error instanceof ServiceError && error.code === HTTP_STATUS_FAILURE_CODES.notFound) { await this.config.clearEnrollment(); throw refusal; }
+        throw error;
+      }
+    }
+    return this.enrollmentPoll(ctx);
   }
 
   async enrollmentPoll(ctx: RequestContext): Promise<Enrollment> {
@@ -414,6 +466,8 @@ export class MemoryClient {
     try { await this.assertSendable(settings.connection); result = asRecord(await requestJson(settings.connection.baseUrl, null, "GET", path, undefined, ctx.signal, 15_000)); }
     catch (error) {
       if (error instanceof ServiceError && error.code === "FORBIDDEN") { await this.config.clearEnrollment(); return { state: "rejected", message: messages.serverClient.enrollmentRejected }; }
+      // The server drops a request nobody approved within its waiting time; the stored one can never be picked up.
+      if (error instanceof ServiceError && error.code === "NOT_FOUND") { await this.config.clearEnrollment(); throw serviceError("ENROLLMENT_EXPIRED", messages.serverClient.enrollmentExpired); }
       throw error;
     }
     if (result?.status === "pending") return { state: "pending", requestId: pending.requestId, message: messages.serverClient.enrollmentWaiting };

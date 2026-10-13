@@ -1,9 +1,0 @@
-[Unit]
-Description=Bara 백업 오프-트리 복사 — 일 1회 04:30 (서버 내장 백업 04:00 뒤 여유)
-
-[Timer]
-OnCalendar=*-*-* 04:30:00
-Persistent=true
-
-[Install]
-WantedBy=timers.target

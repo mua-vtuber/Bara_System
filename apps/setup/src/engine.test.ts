@@ -88,7 +88,6 @@ describe("runSetupEngine dry-run", () => {
     try {
       const result = await runSetupEngine({ mode: "local", repoRoot: root, dryRun: true, ai: { useAi: false, localProvider: "none" } });
       expect(result.commands.some(command => command.command.includes("systemctl"))).toBe(false);
-      expect(result.sshTunnelCommand).toBeUndefined();
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
@@ -110,28 +109,20 @@ describe("runSetupEngine dry-run", () => {
       expect(state.failedStep).toBe("dashboard-build");
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
-  test("A1 서버 dry-run 은 core systemd enable 계획에 bara-bot 을 넣지 않는다", async () => {
+  test("local dry-run 은 모델 준비 명령에 저장소 assets 경로를 넘기고 옛 systemd 단계가 없다", async () => {
     const root = mkdtempSync(join(tmpdir(), "bara-setup-engine-"));
     try {
       const result = await runSetupEngine({
-        mode: "server-a1",
+        mode: "local",
         repoRoot: root,
         dryRun: true,
         ai: { useAi: false, localProvider: "none" },
       });
-      const systemd = result.commands.find((c) => c.label === "systemd-enable-core");
-      expect(systemd).toBeDefined();
-      expect(systemd!.command).toContain("bara-memory");
-      expect(systemd!.command).toContain("bara-deploy.timer");
-      expect(systemd!.command).toContain("bara-backup.timer");
-      expect(systemd!.command).toContain("bara-monitor.timer");
-      expect(systemd!.command).not.toContain("bara-bot");
-      const restart = result.commands.find(
-        (c) => c.label === "systemd-restart-memory",
-      );
-      const health = result.commands.find((c) => c.label === "health-check-memory");
-      expect(restart?.command).toEqual(["sudo", "systemctl", "restart", "bara-memory"]);
-      expect(health?.command.join(" ")).toContain("http://127.0.0.1:3001/health");
+      expect(result.commands.map((c) => c.label)).toEqual([
+        "dashboard-build",
+        "fetch-kiwi-model",
+        "prefetch-core-models",
+      ]);
       const fetchKiwi = result.commands.find((c) => c.label === "fetch-kiwi-model");
       const prefetch = result.commands.find((c) => c.label === "prefetch-core-models");
       expect(fetchKiwi?.env?.BARA_KIWI_MODEL_DIR).toContain(
@@ -140,7 +131,6 @@ describe("runSetupEngine dry-run", () => {
       expect(prefetch?.env?.BARA_HF_CACHE_DIR).toContain(
         join("apps", "memory", "assets", "hf-cache"),
       );
-      expect(result.sshTunnelCommand).toContain("ssh -L 3001:127.0.0.1:3001");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

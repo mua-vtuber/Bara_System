@@ -262,7 +262,7 @@ mod tests {
 
     #[test]
     fn masks_a_whole_pem_block_and_an_unclosed_one_to_the_end() {
-        let pem = "key:\n-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA\nAAAABG5vbmU=\n-----END OPENSSH PRIVATE KEY-----\nsaved";
+        let pem = "key:\n-----BEGIN OPENSSH PRIVATE KEY-----\nFAKE-KEY-BODY\nNOT-A-REAL-KEY\n-----END OPENSSH PRIVATE KEY-----\nsaved";
         assert_eq!(mask_sensitive(pem), "key:\n[인증정보 생략]\nsaved");
         assert_eq!(
             mask_sensitive("a -----BEGIN RSA PRIVATE KEY----- MIIEow b\nc"),

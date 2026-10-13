@@ -1,13 +1,13 @@
 # Changelog
 
 이 파일은 Keep a Changelog (https://keepachangelog.com/ko/1.1.0/) 형식과 SemVer 를 따른다.
-버전 단일 출처 = `apps/memory/package.json` `version`. 릴리스 = 버전 bump + 이 파일 갱신 + git tag `vX.Y.Z`.
+펫과 메모리 서버의 버전은 항상 같이 움직이며 저장소 루트의 `bun run version:bump <버전>` 이 여섯 곳(펫 `apps/pet/package.json`·`src-tauri/tauri.conf.json`·`Cargo.toml`·`Cargo.lock`, 메모리 서버 `apps/memory/package.json`·`bun.lock`)을 한꺼번에 바꾼다. 릴리스 = `version:bump` + 이 파일의 `[Unreleased]` 를 새 버전 절로 옮겨 커밋 + 펫 설치 파일 빌드(자세한 순서는 `README.md` "릴리스 절차").
 
 ## [Unreleased]
 
 ### Changed
 - 마이그레이션 v1~v47을 기준 스키마(v47) 하나로 접었다. 빈 DB는 `apps/memory/src/db/schema/`의 SQL 파일 넷으로 만들고 `schema_version`에 47을 기록하며, 이후 마이그레이션은 v48부터 쌓는다. 기억 데이터를 비우고 새로 시작한다는 결정에 따라 47 미만 DB를 변환하거나 내용을 추측해 옮기는 경로는 없다. 사용자 사전(정규식 사용자 양식·강조어, 동의어, 분류 어휘, 관계 이름, 새 엔티티 종류)도 새 DB에서는 비어서 시작한다.
-- DB를 열 때 `schema_version`을 먼저 판정한다. 47 미만이면 `SchemaVersionTooOldError`, 이 코드가 아는 최고 버전보다 높으면 `SchemaVersionTooNewError`, 표는 있는데 `schema_version` 기록이 없으면 `UnversionedDatabaseError`로 시작이 멈춘다. 판정은 읽기만 하므로 표·행·첨부 파일은 바뀌지 않는다(DB 옆에 `-wal`이 남아 있었다면 멈추며 연결을 닫을 때 SQLite가 그 내용을 DB 파일에 합치고 `-wal`·`-shm`을 지울 수 있다. 데이터는 같다). 이전 버전의 설정 페이지 '데이터 초기화'로 비운 DB도 옛 `schema_version`이 남아 멈추므로, 서버를 멈춘 뒤 DB 파일(`-wal`·`-shm` 포함)과 첨부 파일 폴더(`assets.dir`, env `BARA_ASSET_DIR`)를 함께 옮겨야 한다 (`apps/memory/README.md` "기준 스키마(v47)와 옛 DB" 절, A1 순서는 `scripts/README.md` "기준 스키마(v47) 첫 배포" 절).
+- DB를 열 때 `schema_version`을 먼저 판정한다. 47 미만이면 `SchemaVersionTooOldError`, 이 코드가 아는 최고 버전보다 높으면 `SchemaVersionTooNewError`, 표는 있는데 `schema_version` 기록이 없으면 `UnversionedDatabaseError`로 시작이 멈춘다. 판정은 읽기만 하므로 표·행·첨부 파일은 바뀌지 않는다(DB 옆에 `-wal`이 남아 있었다면 멈추며 연결을 닫을 때 SQLite가 그 내용을 DB 파일에 합치고 `-wal`·`-shm`을 지울 수 있다. 데이터는 같다). 이전 버전의 설정 페이지 '데이터 초기화'로 비운 DB도 옛 `schema_version`이 남아 멈추므로, 서버를 멈춘 뒤 DB 파일(`-wal`·`-shm` 포함)과 첨부 파일 폴더(`assets.dir`, env `BARA_ASSET_DIR`)를 함께 옮겨야 한다 (`apps/memory/README.md` "기준 스키마(v47)와 옛 DB" 절. 펫 방식 서버(A1 포함)도 같은 절의 순서를 따른다).
 - 47 미만 DB의 백업(회차·다운로드 ZIP)은 이 버전에서 복원을 거부한다. 옛 백업은 압축 이전 커밋의 앱 버전으로만 복원한다.
 - DB와 첨부 파일 폴더에는 같은 짝 표시(기준 스키마의 `asset_folder_pairing`과 폴더의 `bara-asset-pairing.json`)가 있어, 서버는 짝이 맞지 않는 폴더를 만나면 아무 파일도 지우지 않고 멈춘다 — DB만 옮기고 폴더를 그대로 두면 새 DB의 시작이 멈춘다 (`apps/memory/README.md` "DB·첨부 폴더 짝" 절).
 

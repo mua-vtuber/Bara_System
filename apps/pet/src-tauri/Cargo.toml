@@ -1,6 +1,6 @@
 [package]
 name = "bara-pet"
-version = "0.1.7"
+version = "0.1.8"
 description = "Bara Pet desktop host"
 authors = ["Bara contributors"]
 license = "AGPL-3.0-only"

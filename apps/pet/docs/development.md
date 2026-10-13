@@ -30,7 +30,7 @@ bun run package:runtime                # 저장소 루트를 읽어 resources를
 bun run build
 ```
 
-번들 Bun 버전(`src/shared/bundled-runtime.ts`의 `BUNDLED_BUN_VERSION`)을 바꿀 때는 `.github/workflows/ci.yml`의 `bun-version` 값과 이 문서의 버전 표기도 함께 바꿉니다. 세 곳이 다르면 CI가 검증한 Bun과 설치 파일에 실제로 들어가는 Bun이 달라집니다.
+번들 Bun 버전(`src/shared/bundled-runtime.ts`의 `BUNDLED_BUN_VERSION`)을 바꿀 때는 저장소 루트 `.github/workflows/pet-ci.yml`의 `bun-version` 값과 이 문서의 버전 표기도 함께 바꿉니다. 세 곳이 다르면 CI가 검증한 Bun과 설치 파일에 실제로 들어가는 Bun이 달라집니다.
 
 `package:runtime`은 `apps/pet/scripts`에서 세 단계 위인 저장소 루트만 읽으며, 다른 체크아웃을 가리키는 옵션이나 환경 변수는 없습니다. 루트에 `apps/memory/package.json` 또는 `apps/pet/package.json`이 없으면 없는 경로를 적고 멈춥니다. 출력(`apps/pet/resources`)이 저장소 루트이거나 `apps/memory`·`apps/setup` 안이면 거절합니다. 서버 소스, 대시보드 번들, Windows 의존성, 플랫폼별 Bun을 준비하고 파일 해시를 기록합니다. 모델과 사용자 데이터·비밀값은 소스 패키지에 포함하지 않습니다. Visual Studio의 x64 Release CRT를 찾아 Microsoft 서명과 파일 형식을 확인한 뒤 번들 Bun과 ONNX 옆에 포함합니다. 이후 CRT 보안 업데이트는 새 설치 파일로 전달해야 합니다.
 
@@ -50,7 +50,7 @@ cargo build --manifest-path src-tauri/Cargo.toml --features tauri/custom-protoco
 
 ## 검증
 
-펫 CI(`.github/workflows/ci.yml`)는 아직 이 저장소 루트의 `.github/`로 옮겨지지 않았습니다. `apps/pet/.github/`는 GitHub가 읽지 않으므로 자동으로 돌지 않으며, 그동안 아래 명령을 `apps/pet`에서 직접 실행합니다.
+펫 CI(저장소 루트 `.github/workflows/pet-ci.yml`)는 공개 저장소에 push 하거나 PR 을 열 때 Windows 실행기에서 아래 검사를 `apps/pet` 기준으로 돌립니다. 비공개 저장소에서는 돌지 않습니다. 로컬에서는 같은 명령을 `apps/pet`에서 직접 실행합니다.
 
 ```powershell
 bun run typecheck

@@ -44,15 +44,15 @@ bara_system/
 │   ├── pet/           # Windows 데스크톱 펫 + 설치 파일 빌드 (자기 bun.lock, 루트 workspace 밖)
 │   ├── launcher/      # 개발용 Windows 런처 (아래 "개발자 경로" 참고)
 │   └── bot-discord/   # 디스코드 어댑터 (reference 구현)
-├── scripts/           # 루트 테스트 러너 + 옛 A1 자동 배포 스크립트(현재 쓰지 않음)
-├── deploy/            # 옛 A1 systemd 유닛·운영 스크립트(현재 쓰지 않음)
+├── scripts/           # 루트 테스트 러너
+├── deploy/            # 옛 직접 설치 방식이 정리됐다는 안내(README 하나)
 ├── *.bat              # Windows + WSL2 개발용 가동 스크립트
 ├── package.json       # Bun workspace (apps/*, apps/pet 제외)
 ├── LICENSE, LICENSE-EXCEPTION.md, THIRD-PARTY-NOTICES.md
 └── bun.lock
 ```
 
-런타임 데이터(`data/`, `*.sqlite`), 개인 설정과 인증 정보는 커밋하지 않는다. `deploy/` 와 `scripts/a1-auto-deploy.sh` 는 예전 배포 방식(서버에서 `git pull` 을 5분마다 돌리는 방식)의 자료로 남아 있을 뿐, 지금의 설치·배포 경로가 아니다(아래 "서버 운영과 배포").
+런타임 데이터(`data/`, `*.sqlite`), 개인 설정과 인증 정보는 커밋하지 않는다. 예전 배포 방식(서버에서 `git pull` 을 5분마다 돌리는 방식)의 systemd 유닛과 스크립트는 삭제했다. 지금의 설치·배포 경로는 아래 "서버 운영과 배포" 하나다.
 
 ## 빠른 시작 1 — 펫 설치 파일로 쓰기 (Windows)
 
@@ -60,7 +60,7 @@ bara_system/
 
 1. **설치 파일 준비**: 설치 파일 이름은 `Bara Pet_<버전>_x64-setup.exe` 다(현재 0.1.6). 미리 빌드한 설치 파일은 아직 공개 배포하지 않으므로, 지금은 이 저장소에서 직접 만든다. 저장소 루트에서 `bun install --frozen-lockfile` 후 `apps/pet` 에서 `bun install --frozen-lockfile` → `bun run package:runtime` → `bun run build` 순서로 실행하면 `apps/pet/src-tauri/target/release/bundle/nsis/` 에 생긴다. `package:runtime` 을 빼먹으면 서버 원본과 Bun 이 빠진 불완전한 설치 파일이 나온다. 빌드 환경(Windows x64, Bun, Rust, MSVC 빌드 도구)은 [펫 개발 문서](apps/pet/docs/development.md)를 따른다.
 2. **설치**: 설치 파일은 코드 서명이 되어 있지 않아 Windows SmartScreen 경고가 뜰 수 있다. 출처를 확인했다면 "추가 정보 → 실행"을 눌러 진행한다.
-3. **첫 실행**: "바라 시작하기" 안내가 열린다. 기억을 둘 곳으로 "이 컴퓨터", "내 외부 서버"(이미 만들어 둔 Ubuntu 서버에 SSH 로 원격 설치), "기존 바라" 중 하나를 고른다. 처음 모델을 준비할 때 인터넷 연결과 수 GB 의 저장 공간이 필요하다.
+3. **첫 실행**: "바라 시작하기" 안내가 열린다. 기억을 둘 곳으로 "이 컴퓨터", "내 외부 서버"(이미 만들어 둔 Ubuntu 서버에 SSH 로 원격 설치), "기존 바라" 중 하나를 고른다. "이 컴퓨터"를 고르면 처음 실행 때 검색용 모델 4개(글 검색 bge-m3, 결과 정렬 bge-reranker-v2-m3, 이미지 검색 SigLIP2, 한국어 형태소 분석 Kiwi, 합계 약 1.7GB)를 받으므로 인터넷 연결과 약 2.7GB 의 여유 공간(모델 + DB·임시 파일 여유 1GB)이 필요하다. 질문에 답하는 AI(Ollama·LM Studio 등)는 펫이 받지 않으며, 따로 설치해 두면 연결만 한다.
 4. **AI 연결(선택)**: 이 PC 에서 실행 중인 Ollama, LM Studio, Jan, llama.cpp 서버를 찾아 고를 수 있다. 건너뛰어도 기억 저장·검색은 동작한다.
 
 자세한 설치·사용법은 [펫 설치와 사용 안내](apps/pet/docs/user-guide.md)에 있다.
@@ -75,7 +75,7 @@ bara_system/
 4. 빌드와 서버 준비가 끝나면 **인증된 대시보드**가 브라우저에 열린다. 첫 메모를 저장하고 검색한다. 서버 창은 계속 열어 둔다.
 5. 디스코드는 선택 사항이다. 봇 토큰·앱 ID와 코어 연결을 설정한 뒤 `start-bot-discord.bat`을 실행한다. 이후 두 서버를 함께 시작할 때 `start-all.bat`을 쓴다.
 
-WSL 이나 Linux 터미널에서 먼저 준비하려면 저장소 루트에서 `bun run setup -- --local`을 실행한다. `--local`은 systemd를 변경하지 않는다. Ollama를 선택하면 설치·모델 다운로드에 별도로 동의해야 하며, 거절하거나 무인 실행에서 `--yes`를 생략하면 준비 완료로 기록하지 않는다. 명시적으로 동의한 무인 실행은 `bun run setup -- --local --ollama --yes`를 사용한다. `--lmstudio`는 LM Studio 를, `--no-ai`는 선택적인 LLM 보강을 끄며 어느 쪽이든 검색용 임베딩 모델은 준비한다. 모델 다운로드 시간은 네트워크와 캐시에 따라 몇 분 이상 걸릴 수 있다. `--server`는 옛 A1 설치 방식(`bara-memory`·`bara-deploy.timer` 등 `deploy/` 의 systemd 유닛을 켬)이라 지금은 쓰지 않는다. 원격 서버는 펫의 "내 외부 서버" 설치를 쓴다.
+WSL 이나 Linux 터미널에서 먼저 준비하려면 저장소 루트에서 `bun run setup -- --local`을 실행한다. `--local`은 systemd를 변경하지 않는다. Ollama를 선택하면 설치·모델 다운로드에 별도로 동의해야 하며, 거절하거나 무인 실행에서 `--yes`를 생략하면 준비 완료로 기록하지 않는다. 명시적으로 동의한 무인 실행은 `bun run setup -- --local --ollama --yes`를 사용한다. `--lmstudio`는 LM Studio 를, `--no-ai`는 선택적인 LLM 보강을 끄며 어느 쪽이든 검색용 임베딩 모델은 준비한다. 모델 다운로드 시간은 네트워크와 캐시에 따라 몇 분 이상 걸릴 수 있다. 옛 A1 설치 방식이던 `--server`는 없앴다(넘기면 대신 쓸 경로를 알리는 오류로 멈춘다). 원격 서버는 펫의 "내 외부 서버" 설치를 쓰고, 소유자 운영 서버 반영은 `bun run deploy:a1` 이다.
 
 WSL에서 직접 시작할 때는 `cd apps/memory` 후 `bun run ../setup/src/launch.ts --local`을 실행한다. 이 위치에서 Bun이 `.env`를 읽으므로 서버와 동일한 `MEMORY_SETTINGS_PATH`, `MEMORY_PORT`, `SSE_TOKEN_PATH` 설정을 사용한다.
 

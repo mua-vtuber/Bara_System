@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { join, resolve } from "node:path";
-import { isInstallationConsent } from "./index.ts";
+import { isInstallationConsent, SERVER_MODE_REMOVED_MESSAGE } from "./index.ts";
 
 describe("setup CLI --help", () => {
   test("only explicit affirmative install consent authorizes installation", () => {
@@ -19,6 +19,17 @@ describe("setup CLI --help", () => {
     expect(JSON.stringify(dry.commands)).not.toContain("systemctl");
     expect(proc.stdout.toString()).not.toContain("bara-token=");
   });
+  test("--server 는 다른 모드로 넘어가지 않고 대신 쓸 경로를 알리며 멈춘다", () => {
+    const proc = Bun.spawnSync(
+      [process.execPath, join(import.meta.dir, "index.ts"), "--server", "--dry-run", "--no-ai", "--json-events"],
+      { stdout: "pipe", stderr: "pipe" },
+    );
+    expect(proc.exitCode).toBe(1);
+    expect(proc.stdout.toString()).toBe("");
+    expect(proc.stderr.toString().trim()).toBe(SERVER_MODE_REMOVED_MESSAGE);
+    expect(SERVER_MODE_REMOVED_MESSAGE).toContain("내 외부 서버");
+    expect(SERVER_MODE_REMOVED_MESSAGE).toContain("bun run deploy:a1");
+  });
   test("help 문구는 실재하는 플래그만 안내한다 (--repair 제거)", () => {
     const proc = Bun.spawnSync(
       ["bun", join(import.meta.dir, "index.ts"), "--help"],
@@ -28,5 +39,6 @@ describe("setup CLI --help", () => {
     const stdout = proc.stdout.toString();
     expect(stdout).toContain("flags: --yes, --dry-run, --json-events");
     expect(stdout).not.toContain("--repair");
+    expect(stdout).not.toContain("--server");
   });
 });

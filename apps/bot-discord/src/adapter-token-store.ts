@@ -32,6 +32,9 @@ const FILE_NAME = "bot-adapter-token.json";
 /** at-rest 파일 권한(소유자만 읽기·쓰기). 다른 봇 저장소와 같은 상수. */
 const FILE_MODE = 0o600;
 
+/** 저장 폴더를 새로 만들 때의 권한(소유자만). */
+const DIR_MODE = 0o700;
+
 /** 저장 파일 버전. 스키마 변경 시 올린다. */
 const FILE_VERSION = 1;
 
@@ -64,6 +67,11 @@ export interface AdapterTokenInput {
   requestId: string;
   pickupSecret: string;
   adminTokenHash?: string;
+}
+
+/** 어댑터 토큰 파일 경로. 등록 대기 파일(adapter-enrollment-store.ts)이 이 파일 옆에 놓인다. */
+export function resolveAdapterTokenPath(filePath?: string): string {
+  return resolvePath(filePath);
 }
 
 function resolvePath(filePath?: string): string {
@@ -148,14 +156,22 @@ export function saveAdapterToken(
     savedAt: new Date().toISOString(),
   };
 
+  writePrivateJsonAtomic(path, record, "bot-adapter-token");
+}
+
+/**
+ * value 를 JSON 으로 0600 파일에 atomic 저장한다(tmp + rename + chmod 600). 폴더가 없으면
+ * 소유자 전용(0700)으로 만든다. 실패는 label·경로를 담아 던진다(값은 넣지 않는다).
+ */
+export function writePrivateJsonAtomic(path: string, value: unknown, label: string): void {
   const dir = dirname(path);
   if (dir && dir !== "." && !existsSync(dir)) {
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    mkdirSync(dir, { recursive: true, mode: DIR_MODE });
   }
 
   const tmpPath = `${path}.tmp-${process.pid}-${Date.now()}`;
   try {
-    writeFileSync(tmpPath, `${JSON.stringify(record, null, 2)}\n`, {
+    writeFileSync(tmpPath, `${JSON.stringify(value, null, 2)}\n`, {
       encoding: "utf-8",
       mode: FILE_MODE,
     });
@@ -170,9 +186,7 @@ export function saveAdapterToken(
         // 원래 저장 실패를 가리지 않는다.
       }
     }
-    throw new Error(
-      `bot-adapter-token 저장 실패: ${path} — ${(err as Error).message}`,
-    );
+    throw new Error(`${label} 저장 실패: ${path} — ${(err as Error).message}`);
   }
 }
 

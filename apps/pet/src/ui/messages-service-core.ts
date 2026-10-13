@@ -155,6 +155,11 @@ export const serviceCoreMessages = {
     enrollmentRejected: "연결 요청이 거절되었습니다.",
     enrollmentWaiting: "서버 승인을 기다리고 있습니다.",
     enrollmentResultUnreadable: "승인 결과를 읽을 수 없습니다.",
+    enrollmentPendingExists: "서버에 이 펫 이름으로 된 연결 요청이 이미 승인을 기다리고 있는데, 이 펫에는 그 요청 정보가 없습니다. 서버 대시보드의 어댑터 관리에서 그 요청의 접속 주소와 요청 시각을 보고 본인 요청인지 확인해 주세요. 본인 요청이 아니면 거절한 뒤 다시 시도해 주세요.",
+    enrollmentAddressQueueFull: "이 기기 주소에서 보낸 연결 요청이 너무 많이 승인을 기다리고 있습니다. 서버 대시보드의 어댑터 관리에서 대기 요청을 승인하거나 거절한 뒤 다시 시도해 주세요.",
+    enrollmentQueueFull: "서버에 승인을 기다리는 연결 요청이 너무 많습니다. 서버 대시보드의 어댑터 관리에서 대기 요청을 정리한 뒤 다시 시도해 주세요.",
+    enrollmentRateLimited: "연결 요청을 너무 자주 보냈습니다. 몇 분 뒤에 다시 시도해 주세요.",
+    enrollmentExpired: "연결 요청이 만료되었거나 서버에서 찾을 수 없습니다. 연결 요청을 다시 시작해 주세요.",
   },
   /** What `assistant.ts` answers when no AI wrote the answer. */
   assistant: {

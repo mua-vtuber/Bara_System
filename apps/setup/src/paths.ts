@@ -1,7 +1,7 @@
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 
-export type SetupMode = "desktop-windows" | "server-a1" | "local";
+export type SetupMode = "desktop-windows" | "local";
 
 export interface SetupPathEnv {
   LOCALAPPDATA?: string;

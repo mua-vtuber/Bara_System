@@ -66,12 +66,18 @@ export class MemoryApiError extends Error {
   readonly status: number;
   /** HTTP statusText(예: "Unauthorized"). status 와 짝으로 보존한다. */
   readonly statusText: string;
+  /**
+   * 서버가 오류 body 에 `code` 칸으로 이름 붙인 거절 사유(예: ADAPTER_ENROLL_PENDING_EXISTS).
+   * 서버가 이름을 붙이지 않은 오류는 undefined.
+   */
+  readonly code: string | undefined;
 
-  constructor(status: number, statusText: string, message: string) {
+  constructor(status: number, statusText: string, message: string, code?: string) {
     super(message);
     this.name = "MemoryApiError";
     this.status = status;
     this.statusText = statusText;
+    this.code = code;
   }
 }
 
@@ -83,6 +89,11 @@ export class MemoryApiClient {
     opts: MemoryApiClientOptions = {},
   ) {
     this.token = opts.token;
+  }
+
+  /** 이 클라이언트가 부르는 memory-api 주소. 저장해 둔 등록 요청이 같은 서버 것인지 대조할 때 쓴다. */
+  get apiBaseUrl(): string {
+    return this.baseUrl;
   }
 
   /**
@@ -600,9 +611,11 @@ export class MemoryApiClient {
   private async unwrap<T>(res: Response): Promise<T> {
     if (!res.ok) {
       let detail = `${res.status} ${res.statusText}`;
+      let code: string | undefined;
       try {
-        const errBody = (await res.json()) as { error?: string };
+        const errBody = (await res.json()) as { error?: string; code?: unknown };
         if (errBody.error) detail = `${detail} — ${errBody.error}`;
+        if (typeof errBody.code === "string" && errBody.code.length > 0) code = errBody.code;
       } catch {
         // ignore — non-JSON error body
       }
@@ -613,6 +626,7 @@ export class MemoryApiClient {
         res.status,
         res.statusText,
         `memory-api request failed: ${detail}`,
+        code,
       );
     }
     return (await res.json()) as T;

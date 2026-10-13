@@ -31,7 +31,6 @@ export interface SetupEngineResult {
   paths: SetupPaths;
   commands: SetupCommandPlan[];
   warnings: string[];
-  sshTunnelCommand?: string;
   dashboardUrl: string;
   schemaVersion?: number;
   /**
@@ -74,14 +73,10 @@ function ollamaInstallCommand(mode: SetupMode): SetupCommandPlan {
 }
 
 function baseCommandPlan(
-  mode: SetupMode,
   repoRoot: string,
   paths: SetupPaths,
 ): SetupCommandPlan[] {
   const assetEnv = paths.env;
-  const dashboardUrl = existsSync(paths.settingsPath)
-    ? resolveDashboardLinkOptions(paths.memoryAppDir, { ...process.env, ...paths.env }).url
-    : "http://127.0.0.1:3001/";
   return [
     {
       label: "dashboard-build",
@@ -100,47 +95,6 @@ function baseCommandPlan(
       cwd: repoRoot,
       env: assetEnv,
     },
-    ...(mode === "server-a1"
-      ? [
-          {
-            label: "systemd-enable-core",
-            command: [
-              "sudo",
-              "systemctl",
-              "enable",
-              "--now",
-              "bara-memory",
-              "bara-deploy.timer",
-              "bara-backup.timer",
-              "bara-monitor.timer",
-            ],
-            cwd: repoRoot,
-          },
-          {
-            label: "systemd-restart-memory",
-            command: ["sudo", "systemctl", "restart", "bara-memory"],
-            cwd: repoRoot,
-          },
-          {
-            label: "health-check-memory",
-            command: [
-              "bun",
-              "-e",
-              [
-                "for (let i = 0; i < 180; i++) {",
-                "  try {",
-                `    const r = await fetch(${JSON.stringify(new URL("/health", dashboardUrl).toString())}, { signal: AbortSignal.timeout(2000) });`,
-                "    if (r.ok) process.exit(0);",
-                "  } catch {}",
-                "  await new Promise((resolve) => setTimeout(resolve, 1000));",
-                "}",
-                "process.exit(1);",
-              ].join("\n"),
-            ],
-            cwd: repoRoot,
-          },
-        ]
-      : []),
   ];
 }
 
@@ -183,7 +137,7 @@ export async function runSetupEngine(
     cleanupEnabled: false,
   };
   const warnings: string[] = [];
-  const commands = baseCommandPlan(opts.mode, opts.repoRoot, paths);
+  const commands = baseCommandPlan(opts.repoRoot, paths);
 
   emit(opts.jsonEvents ?? false, "setup.start", {
     message: `[setup] mode=${opts.mode}`,
@@ -251,7 +205,7 @@ export async function runSetupEngine(
       if (ai.useAi && ai.localProvider === "ollama" && !opts.yes) {
         failedStep = "provider-consent";
         emit(opts.jsonEvents ?? false, "setup.progress", { message: "Ollama 설치·모델 준비 동의가 필요합니다.", step: failedStep });
-        const modeFlag = opts.mode === "desktop-windows" ? "--desktop" : opts.mode === "server-a1" ? "--server" : "--local";
+        const modeFlag = opts.mode === "desktop-windows" ? "--desktop" : "--local";
         throw new Error(`Ollama 설치·모델 다운로드에 동의하지 않아 준비를 완료하지 않았습니다. 동의하면 저장소 루트에서 bun run setup -- ${modeFlag} --ollama --yes 를 실행하세요. AI 없이 쓰려면 --no-ai 로 다시 준비하세요.`);
       }
       emit(opts.jsonEvents ?? false, "setup.progress", { message: `[setup] ${failedStep}`, step: failedStep });
@@ -287,16 +241,10 @@ export async function runSetupEngine(
     ? resolveDashboardLinkOptions(paths.memoryAppDir, { ...process.env, ...paths.env })
     : { url: "http://127.0.0.1:3001/", tokensFile: paths.env.SSE_TOKEN_PATH };
   dashboardUrl ??= linkOptions.url;
-  const port = new URL(linkOptions.url).port;
-  const sshTunnelCommand =
-    opts.mode === "server-a1"
-      ? `ssh -L ${port}:127.0.0.1:${port} bara@<A1_HOST>`
-      : undefined;
 
   emit(opts.jsonEvents ?? false, opts.dryRun ? "setup.plan" : "setup.complete", {
     message: `[setup] ${opts.dryRun ? "계획 확인 완료" : "준비 완료"}. 대시보드는 서버 준비 후 인증 링크로 열어 주세요.`,
     dashboardBaseUrl: linkOptions.url,
-    sshTunnelCommand,
     warnings,
   });
 
@@ -305,7 +253,6 @@ export async function runSetupEngine(
     paths,
     commands,
     warnings,
-    sshTunnelCommand,
     dashboardUrl,
     schemaVersion,
     llmOutcome,

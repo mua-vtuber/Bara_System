@@ -51,12 +51,12 @@ function writeConfiguredSettings(paths: SetupPaths): void {
 describe("writeSettingsAndMigrateDb", () => {
   test("retry preserves configured database path, port and bind host", () => {
     const root = mkdtempSync(join(tmpdir(), "bara-setup-retry-"));
-    const paths = resolveSetupPaths({ mode: "server-a1", repoRoot: root, env: {} });
+    const paths = resolveSetupPaths({ mode: "local", repoRoot: root, env: {} });
     mkdirSync(paths.dataDir, { recursive: true });
     const dbPath = join(paths.dataDir, "existing.sqlite");
     writeFileSync(paths.settingsPath, JSON.stringify({ db: { path: dbPath, port: 4411, host: "::1" } }));
     try {
-      const { result } = runWriter(root, "server-a1", {}, { useAi: false, localProvider: "none" });
+      const { result } = runWriter(root, "local", {}, { useAi: false, localProvider: "none" });
       expect(result.settings.db.path).toBe(dbPath);
       expect(result.settings.db.port).toBe(4411);
       expect(result.settings.db.host).toBe("::1");
@@ -66,9 +66,9 @@ describe("writeSettingsAndMigrateDb", () => {
   test("temp data dir에 settings 를 쓰고 실제 SQLite migration 까지 완료한다", () => {
     const root = mkdtempSync(join(tmpdir(), "bara-setup-writer-"));
     try {
-      const paths = resolveSetupPaths({ mode: "server-a1", repoRoot: root,
+      const paths = resolveSetupPaths({ mode: "local", repoRoot: root,
         env: { BARA_SECRETS_PATH: join(root, "private", "secrets.json") } });
-      const { result, restoredSecretsPath } = runWriter(root, "server-a1",
+      const { result, restoredSecretsPath } = runWriter(root, "local",
         { BARA_SECRETS_PATH: join(root, "private", "secrets.json") },
         { useAi: true, localProvider: "lmstudio", extractorModel: "local-text", visionModel: "local-vlm" });
       expect(restoredSecretsPath).toBe("before-setup-test");
@@ -89,9 +89,9 @@ describe("writeSettingsAndMigrateDb", () => {
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
-  /** All three setup modes, per WP-B2-06R: "server-a1을 포함한 모든 모드에서
-   * 기존 설정 파일이 있으면 llm을 기본으로 보존한다". */
-  const ALL_MODES = ["local", "desktop-windows", "server-a1"] as const;
+  /** All setup modes, per WP-B2-06R: "모든 모드에서 기존 설정 파일이 있으면 llm을 기본으로 보존한다".
+   * (The old `--server` mode was removed with the single pet-based deploy path.) */
+  const ALL_MODES = ["local", "desktop-windows"] as const;
 
   for (const mode of LAUNCHER_MODES) {
     test(`${mode} retry keeps the user's configured LLM slot when this run picked nothing explicitly`, () => {
@@ -130,29 +130,10 @@ describe("writeSettingsAndMigrateDb", () => {
     });
   }
 
-  test("server-a1 retry also keeps the operator's configured LLM slot when this run picked nothing explicitly", () => {
-    // WP-B2-06R extends WP-B2-06's preservation to server-a1 too — the earlier
-    // "server-a1 always applies its selection" exception is removed. Only an
-    // *explicit* choice may now change the llm slot, in any mode.
-    const root = mkdtempSync(join(tmpdir(), "bara-setup-a1-llm-"));
-    const paths = resolveSetupPaths({ mode: "server-a1", repoRoot: root, env: {} });
-    try {
-      writeConfiguredSettings(paths);
-      const { result } = runWriter(root, "server-a1", {},
-        { useAi: true, localProvider: "ollama", extractorModel: "operator-text", visionModel: "operator-image", cleanupEnabled: false });
-      expect(result.llmOutcome).toBe("kept");
-      expect(result.settings.llm.extractor).toMatchObject(CONFIGURED_LLM.extractor);
-      expect(result.settings.llm.cleanup).toMatchObject({ ...CONFIGURED_LLM.cleanup, anthropicApiKey: CLEANUP_KEY });
-      expect(result.settings.llm.vision).toMatchObject(CONFIGURED_LLM.vision);
-      expect(result.settings.db.path).toBe(paths.dbPath);
-    } finally { rmSync(root, { recursive: true, force: true }); }
-  });
-
-  // WP-B2-06R matrix: 3 modes x (no explicit choice / explicit choice same as
+  // WP-B2-06R matrix: every mode x (no explicit choice / explicit choice same as
   // current / explicit choice different from current). The "no explicit
-  // choice" cell is already covered by the two test blocks above (LAUNCHER_MODES
-  // + the server-a1 test just above); this block covers the two explicit cells
-  // for all three modes, including server-a1.
+  // choice" cell is already covered by the LAUNCHER_MODES block above; this
+  // block covers the two explicit cells for every mode.
   for (const mode of ALL_MODES) {
     test(`${mode} retry with an explicit choice that differs from the configured LLM slot changes only what that choice decides`, () => {
       const root = mkdtempSync(join(tmpdir(), "bara-setup-llm-explicit-diff-"));

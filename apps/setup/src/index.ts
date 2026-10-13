@@ -13,6 +13,13 @@ interface CliArgs {
   jsonEvents: boolean;
 }
 
+/** The old `--server` mode installed the abolished direct units (`bara-memory`, `bara-deploy.timer`, ...).
+ * Every server is now installed and updated the pet way, so the flag stops with the replacement named. */
+export const SERVER_MODE_REMOVED_MESSAGE =
+  "'--server' 설치 방식은 없앴습니다(옛 직접 설치 유닛 bara-memory·bara-deploy.timer 를 켜던 방식). " +
+  "원격 서버는 펫의 \"내 외부 서버\" 설치로 준비하고, 소유자 운영 서버 반영은 저장소 루트에서 'bun run deploy:a1' 을 실행하세요. " +
+  "이 컴퓨터에서 직접 준비하려면 --local(WSL/Linux) 또는 --desktop(Windows)을 쓰세요.";
+
 function parseArgs(argv: string[]): CliArgs {
   const args: CliArgs = {
     dryRun: false,
@@ -20,7 +27,7 @@ function parseArgs(argv: string[]): CliArgs {
     jsonEvents: false,
   };
   for (const arg of argv) {
-    if (arg === "--server") args.mode = "server-a1";
+    if (arg === "--server") throw new Error(SERVER_MODE_REMOVED_MESSAGE);
     else if (arg === "--local") args.mode = "local";
     else if (arg === "--desktop") args.mode = "desktop-windows";
     else if (arg === "--ollama") args.aiProvider = "ollama";
@@ -33,7 +40,6 @@ function parseArgs(argv: string[]): CliArgs {
       console.log(
         [
           "Bara setup",
-          "  bun run setup -- --server [--dry-run] [--json-events]",
           "  bun run setup -- --local [--ollama|--lmstudio|--no-ai] [--yes] (WSL/Linux, systemd 없음)",
           "  bun run setup -- --desktop [--ollama|--lmstudio|--no-ai] [--yes]",
           "  flags: --yes, --dry-run, --json-events",
@@ -136,9 +142,6 @@ async function main(): Promise<void> {
   });
 
   if (!args.jsonEvents) {
-    if (result.sshTunnelCommand) {
-      console.log(`SSH 터널: ${result.sshTunnelCommand}`);
-    }
     // WP-B2-06R — runSetupEngine already emitted this as a setup.llm progress
     // line; print it again here as the final, easy-to-spot summary line.
     if (result.llmOutcome === "kept") {
@@ -147,7 +150,7 @@ async function main(): Promise<void> {
       console.log("AI 설정: 이번 실행에서 고른 값으로 바꿨습니다.");
     }
     console.log(args.dryRun ? "실제 설정·모델 준비는 실행하지 않았습니다. 첫 실행은 저장소 루트에서:" : "설정과 모델 준비가 끝났습니다. 첫 실행은 저장소 루트에서:");
-    console.log(`cd apps/memory && bun run ../setup/src/launch.ts ${mode === "desktop-windows" ? "--desktop" : "--local"}${mode === "server-a1" ? " --link" : ""}`);
+    console.log(`cd apps/memory && bun run ../setup/src/launch.ts ${mode === "desktop-windows" ? "--desktop" : "--local"}`);
     console.log("--link 는 준비 상태 확인 후 인증 링크를 터미널에 표시합니다. 링크를 공유하지 마세요.");
     if (result.warnings.length > 0) {
       console.log("주의:");

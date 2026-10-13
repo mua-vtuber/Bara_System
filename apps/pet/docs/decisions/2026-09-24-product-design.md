@@ -165,7 +165,7 @@ PC에 AI 앱이 설치되어 있다는 사실만으로 앱이 호출할 수 있�
 
 - 현재 작업의 사용자 대화: 만만하게 느껴지는 펫, 입력·질문 구분, 자동 실행, 로컬·원격 서버, PC AI 활용, 설치 파일 하나로 비개발자 사용.
 - 바라 작업 공간의 로컬 참고 문서 `docs/architecture.md`: 코어와 클라이언트의 경계. 확인한 커밋에는 포함되어 있지 않으며, 본 문서 3절에 필요한 원칙을 기록했다.
-- [기존 데스크탑 런처](https://github.com/mua-vtuber/Bara_System/blob/4839919d/apps/launcher/src/main.ts)
-- [기존 설치 엔진](https://github.com/mua-vtuber/Bara_System/blob/4839919d/apps/setup/src/engine.ts)
+- 기존 데스크탑 런처: 저장소 경로 `apps/launcher/src/main.ts` (작성 당시 커밋 `4839919d` 기준)
+- 기존 설치 엔진: 저장소 경로 `apps/setup/src/engine.ts` (작성 당시 커밋 `4839919d` 기준)
 - 바라 작업 공간의 로컬 참고 문서 `infra/a1/README.md`: SSH 접속과 서버 설치 절차. 확인한 커밋에는 포함되어 있지 않으며, 재사용 가능하다는 사실이 완성된 원격 설치기를 뜻하지는 않는다.
-- [현재 글 입력·분류 처리](https://github.com/mua-vtuber/Bara_System/blob/4839919d/apps/memory/src/server-internal/routes/ingest-text-flow.ts)
+- 현재 글 입력·분류 처리: 저장소 경로 `apps/memory/src/server-internal/routes/ingest-text-flow.ts` (작성 당시 커밋 `4839919d` 기준)

@@ -2,14 +2,13 @@
 /**
  * monitor.ts — Phase 11b T2 (sub-phase 11.10).
  *
- * 옛 `bara-monitor.timer` (systemd 5분 주기) 흐름 안 자연 합류 — 자산 디렉토리
- * 사용량 임계 (default 0.80 = 80%) 도달 시점 정직 console.warn 으로 알린다.
+ * 자산 디렉토리 사용량 임계 (default 0.80 = 80%) 도달 시점 정직 console.warn 으로 알린다.
  *
  * 가동 양식:
  *   bun run apps/memory/scripts/monitor.ts
  *
- * 합류 흐름 — `infra/a1/scripts/monitor.sh` 안 옛 디스크/메모리/swap/load 점검 뒤에
- * 한 줄 추가 호출 (운영자 결정 — 본 script 자체는 한 가지 책임 가동만 담당).
+ * 옛 `bara-monitor.timer`·`monitor.sh` 는 2026-10-08 펫 방식 단일 배포로 바뀌며 삭제됐다.
+ * 지금은 운영자가 직접 가동한다 (본 script 자체는 한 가지 책임 가동만 담당).
  *
  * settings 로드 양식 = `server.ts` 부트 흐름 정합:
  *   1. process.env BARA_ASSET_DIR 우선 (env override)

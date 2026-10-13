@@ -16,20 +16,21 @@
  * - 이미 토큰이 있는 어댑터의 재등록 승인은 share(기존 토큰 전달, 기본)와
  *   rotate(새 토큰 발급 + 옛 토큰 무효) 중 관리자가 명시한 쪽만 따른다.
  * - 회수·교체·권한 변경은 onTokenChange 로 알려 열린 SSE 연결이 즉시 다시 검증한다.
+ *
+ * 무인증 등록 상한(adapter-enroll-limits.ts): pending 요청 수 상한, pending·rejected 요청
+ * 수명(읽기·쓰기 때마다 만료분 정리), 같은 adapterId 의 pending 이 있으면 새 무인증 요청 거절.
  */
 
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
-import { dirname } from "node:path";
+  ADAPTER_ENROLL_LIMITS,
+  type AdapterEnrollLimits,
+  assertEnrollAdmission,
+  pruneExpiredEnrollRequests,
+} from "./adapter-enroll-limits.ts";
 import { ID_PATTERN } from "./manifest-schema.ts";
+import { writeTokenFileAtomic } from "./sse-token-file.ts";
 import { isTokenScope, TOKEN_SCOPES, type TokenScope } from "./token-scope.ts";
 
 /**
@@ -50,9 +51,6 @@ export const DEFAULT_SSE_TOKEN_PATH = "data/sse-tokens.json";
 const TOKEN_BYTES = 32;
 const REQUEST_ID_BYTES = 16;
 const PICKUP_SECRET_BYTES = 32;
-
-/** at-rest 파일 권한(소유자만 읽기·쓰기). */
-const FILE_MODE = 0o600;
 
 /** 메타에 scope 칸이 없는 옛 토큰의 유효 권한. 기존 연결 보존을 위해 full 로 해석한다. */
 const LEGACY_TOKEN_SCOPE: TokenScope = "full";
@@ -138,6 +136,11 @@ interface StoredAdapterTokenRequest extends AdapterTokenRequest {
    * 실린다. 승인(수동 approve + D6 자동 승인) 시점에 tokenMeta 로 전파된다.
    */
   adminToken?: string;
+  /**
+   * 승인된 요청의 토큰을 요청자가 처음 회수한 시각. 이 시각부터 보관 기간이 지나면 요청을
+   * 지운다(adapter-enroll-limits.ts). 대시보드 목록에는 싣지 않는다.
+   */
+  pickedUpAt?: string;
 }
 
 export interface AdapterTokenRequestInput {
@@ -223,6 +226,7 @@ function publicRequest(req: StoredAdapterTokenRequest): AdapterTokenRequest {
   const {
     pickupSecretHash: _pickupSecretHash,
     adminToken: _adminToken,
+    pickedUpAt: _pickedUpAt,
     ...rest
   } = req;
   return rest;
@@ -256,10 +260,17 @@ export class SseTokenStore {
   /** 토큰 회수·교체·권한 변경 통지 대상(SA-6). 열린 SSE 연결마다 하나씩 등록된다. */
   private readonly changeListeners = new Set<TokenChangeListener>();
 
-  /** filePath = 토큰 파일. 필수 — 부팅은 index.ts 가 env SSE_TOKEN_PATH 로 정한 값, 테스트는 임시 파일. */
-  constructor(filePath: string) {
+  /**
+   * filePath = 토큰 파일. 필수 — 부팅은 index.ts 가 env SSE_TOKEN_PATH 로 정한 값, 테스트는 임시 파일.
+   * enrollLimits = 등록 요청 상한. 운영은 ADAPTER_ENROLL_LIMITS, 테스트는 작은 값을 넘겨 경계를 검증한다.
+   */
+  constructor(
+    filePath: string,
+    private readonly enrollLimits: AdapterEnrollLimits = ADAPTER_ENROLL_LIMITS,
+  ) {
     this.filePath = filePath;
     this.load();
+    this.pruneExpiredRequests();
   }
 
   /**
@@ -427,6 +438,7 @@ export class SseTokenStore {
    * 기존 권한(옛 토큰이면 full)을 그대로 유지한다.
    */
   createTokenRequest(input: AdapterTokenRequestInput): AdapterTokenRequestResult {
+    this.pruneExpiredRequests();
     const adapterId = normalizeAdapterId(input.adapterId);
     const requestedScope = input.requestedScope;
     if (requestedScope !== undefined && !isTokenScope(requestedScope)) {
@@ -434,24 +446,31 @@ export class SseTokenStore {
         `어댑터 토큰 요청 실패: requestedScope 는 ${TOKEN_SCOPES.join(", ")} 중 하나여야 한다`,
       );
     }
-    const requestId = `atr_${randomBytes(REQUEST_ID_BYTES).toString("base64url")}`;
-    const pickupSecret = randomBytes(PICKUP_SECRET_BYTES).toString("base64url");
-    const ts = nowIso();
-    const endpoint = trimBounded(input.endpoint, 200);
-    for (const existing of this.requests.values()) {
-      if (existing.adapterId !== adapterId || existing.status !== "pending") continue;
-      existing.status = "rejected";
-      existing.updatedAt = ts;
-      existing.rejectedAt = existing.rejectedAt ?? ts;
-      existing.lastSeenAt = ts;
-      this.requests.set(existing.requestId, existing);
-    }
-
     // 기존 토큰 소유 증명만 자동 승인한다. 입력 토큰 값 자체는 저장하지 않는다.
     const existingToken = trimBounded(input.existingToken, 4096);
     const ownsExistingToken =
       existingToken.length > 0 && this.verifyToken(existingToken) === adapterId;
     const autoApprove = this.byAdapter.has(adapterId) && ownsExistingToken;
+    const remoteAddr = trimBounded(input.remoteAddr, 80);
+    // 무인증 요청은 같은 adapterId 의 pending 을 건드리지 못하고(409), 주소별·전체 pending 상한도 지킨다.
+    if (!autoApprove) {
+      assertEnrollAdmission(this.requests.values(), adapterId, remoteAddr, this.enrollLimits);
+    }
+
+    const requestId = `atr_${randomBytes(REQUEST_ID_BYTES).toString("base64url")}`;
+    const pickupSecret = randomBytes(PICKUP_SECRET_BYTES).toString("base64url");
+    const ts = nowIso();
+    const endpoint = trimBounded(input.endpoint, 200);
+    if (autoApprove) {
+      // 소유를 증명한 재등록만 같은 adapterId 의 남은 pending 요청을 대기열에서 정리한다.
+      for (const existing of this.requests.values()) {
+        if (existing.adapterId !== adapterId || existing.status !== "pending") continue;
+        existing.status = "rejected";
+        existing.updatedAt = ts;
+        existing.rejectedAt = existing.rejectedAt ?? ts;
+        existing.lastSeenAt = ts;
+      }
+    }
 
     const adminToken = trimBounded(input.adminToken, 4096);
     const request: StoredAdapterTokenRequest = {
@@ -460,7 +479,7 @@ export class SseTokenStore {
       displayName: trimBounded(input.displayName, 80) || adapterId,
       description: trimBounded(input.description, 200),
       endpoint,
-      remoteAddr: trimBounded(input.remoteAddr, 80),
+      remoteAddr,
       status: autoApprove ? "approved" : "pending",
       createdAt: ts,
       updatedAt: ts,
@@ -484,6 +503,7 @@ export class SseTokenStore {
 
   /** 요청 목록. 기본은 전체, status 를 주면 해당 상태만 반환한다. */
   listTokenRequests(status?: AdapterTokenRequestStatus): AdapterTokenRequest[] {
+    this.pruneExpiredRequests();
     return Array.from(this.requests.values())
       .filter((r) => status === undefined || r.status === status)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
@@ -491,6 +511,7 @@ export class SseTokenStore {
   }
 
   getTokenRequest(requestId: string): AdapterTokenRequest | null {
+    this.pruneExpiredRequests();
     const req = this.requests.get(requestId);
     return req ? publicRequest(req) : null;
   }
@@ -517,6 +538,7 @@ export class SseTokenStore {
     if (existingToken !== undefined && !isExistingTokenChoice(existingToken)) {
       throw new Error(`existingToken 은 ${EXISTING_TOKEN_CHOICES.join(" / ")} 만 지정할 수 있다`);
     }
+    this.pruneExpiredRequests();
     const req = this.requests.get(requestId);
     if (!req) return null;
     if (req.status === "rejected") {
@@ -550,6 +572,7 @@ export class SseTokenStore {
   }
 
   rejectTokenRequest(requestId: string): AdapterTokenRequest | null {
+    this.pruneExpiredRequests();
     const req = this.requests.get(requestId);
     if (!req) return null;
     const ts = nowIso();
@@ -564,7 +587,7 @@ export class SseTokenStore {
 
   /**
    * 승인된 요청의 토큰을 pickupSecret 으로 회수한다.
-   * - request 없음 / secret 불일치 = null
+   * - request 없음(수명이 지나 지워진 요청 포함) / secret 불일치 = null
    * - pending/rejected = 상태만 반환
    * - approved = token 포함 반환
    */
@@ -572,6 +595,7 @@ export class SseTokenStore {
     requestId: string,
     pickupSecret: string,
   ): AdapterTokenPickupResult | null {
+    this.pruneExpiredRequests();
     const req = this.requests.get(requestId);
     if (!req) return null;
     if (!secretMatches(req.pickupSecretHash, pickupSecret)) return null;
@@ -592,6 +616,11 @@ export class SseTokenStore {
       req.endpoint || undefined,
       req.adminToken || undefined,
     );
+    if (req.pickedUpAt === undefined) {
+      // 첫 회수 시각부터 보관 기간을 센다(adapter-enroll-limits.ts pickedUpRetentionMs).
+      req.pickedUpAt = req.lastSeenAt;
+      this.persist();
+    }
     return { status: "approved", request, token };
   }
 
@@ -625,6 +654,14 @@ export class SseTokenStore {
       other.updatedAt = ts;
       other.rejectedAt = ts;
     }
+  }
+
+  /**
+   * 수명이 지난 pending·rejected 요청을 지운다(adapter-enroll-limits.ts). 요청을 읽고 쓰는
+   * 모든 공개 메서드가 먼저 부른다. 지운 것이 있을 때만 파일에 다시 쓴다.
+   */
+  private pruneExpiredRequests(): void {
+    if (pruneExpiredEnrollRequests(this.requests, Date.now(), this.enrollLimits)) this.persist();
   }
 
   /** 발급된 어댑터의 권한 요약. 호출자는 토큰이 있는 어댑터에만 부른다. */
@@ -728,40 +765,14 @@ export class SseTokenStore {
     }
   }
 
-  /** 현재 매핑을 디스크에 atomic 저장(tmp 쓰기 -> rename) + 권한 600. */
+  /** 현재 매핑을 디스크에 atomic 저장(tmp 쓰기 -> rename) + 권한 600 — sse-token-file.ts. */
   private persist(): void {
-    const dir = dirname(this.filePath);
-    if (dir && dir !== "." && !existsSync(dir)) {
-      mkdirSync(dir, { recursive: true, mode: 0o700 });
-    }
-
     const shape: TokenFileShape = {
       version: 2,
       tokens: Object.fromEntries(this.byAdapter),
       tokenMeta: Object.fromEntries(this.tokenMeta),
       requests: Object.fromEntries(this.requests),
     };
-
-    const tmpPath = `${this.filePath}.tmp-${process.pid}-${Date.now()}`;
-    try {
-      writeFileSync(tmpPath, `${JSON.stringify(shape, null, 2)}\n`, {
-        encoding: "utf-8",
-        mode: FILE_MODE,
-      });
-      chmodSync(tmpPath, FILE_MODE);
-      renameSync(tmpPath, this.filePath);
-      chmodSync(this.filePath, FILE_MODE);
-    } catch (err) {
-      if (existsSync(tmpPath)) {
-        try {
-          unlinkSync(tmpPath);
-        } catch {
-          // 원래 저장 실패를 가리지 않는다.
-        }
-      }
-      throw new Error(
-        `SSE 토큰 파일 저장 실패: ${this.filePath} — ${(err as Error).message}`,
-      );
-    }
+    writeTokenFileAtomic(this.filePath, `${JSON.stringify(shape, null, 2)}\n`);
   }
 }

@@ -124,7 +124,7 @@ for (const invalid of ["missing", "outside", "relative", "directory", "symlink",
       default: {
         const copy = new Database(snapshot);
         try {
-          if (invalid === "different-version") copy.run("UPDATE schema_version SET version = ?", [nextVersion]);
+          if (invalid === "different-version") copy.run("INSERT INTO schema_version (version) VALUES (?)", [nextVersion]);
           else if (invalid === "missing-schema") copy.run("DROP TABLE schema_version");
           else copy.run("DELETE FROM schema_version");
         } finally { copy.close(); }

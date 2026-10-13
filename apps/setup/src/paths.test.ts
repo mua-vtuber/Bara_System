@@ -16,7 +16,7 @@ describe("resolveSetupPaths", () => {
       { settings: { time: { zone: "Asia/Seoul" } }, env: { TZ: "UTC" }, zone: "UTC", scheduled: "2026-09-24T04:00:00.000Z" },
     ];
     try {
-      for (const mode of ["local", "desktop-windows", "server-a1"] as const) {
+      for (const mode of ["local", "desktop-windows"] as const) {
         for (const fixture of cases) {
           writeFileSync(settingsPath, JSON.stringify(fixture.settings));
           const paths = resolveSetupPaths({ mode, repoRoot: root, env: {
@@ -88,10 +88,10 @@ describe("resolveSetupPaths", () => {
     );
   });
 
-  test("server-a1 은 apps/memory/data/bara.sqlite 를 고정 DB로 쓴다", () => {
+  test("local 은 apps/memory/data/bara.sqlite 를 고정 DB로 쓴다", () => {
     const root = resolve("D:/repo/bara_system");
     const paths = resolveSetupPaths({
-      mode: "server-a1",
+      mode: "local",
       repoRoot: root,
       env: {},
     });
@@ -103,7 +103,7 @@ describe("resolveSetupPaths", () => {
 
   test("env override 는 settings/secrets/assets/HF/Kiwi 경로에 우선한다", () => {
     const paths = resolveSetupPaths({
-      mode: "server-a1",
+      mode: "local",
       repoRoot: "D:/repo/bara_system",
       env: {
         MEMORY_SETTINGS_PATH: "X:/settings.json",

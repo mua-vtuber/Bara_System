@@ -92,7 +92,8 @@ const settingsFilePath = settingsFiles.settingsPath;
 if (!existsSync(settingsFilePath)) {
   console.error(
     `[memory-api] setup required: settings 파일이 없습니다 (${settingsFilePath}). ` +
-      `먼저 'bun run setup -- --server' 또는 Bara Launcher setup 을 실행하세요.`,
+      `먼저 저장소 루트에서 'bun run setup -- --local'(WSL/Linux) 또는 'bun run setup -- --desktop'(Windows), 또는 Bara Launcher setup 을 실행하세요. ` +
+      `펫으로 설치한 서버는 펫이 설정 파일을 준비하므로 펫의 설치·업데이트로 다시 준비하세요.`,
   );
   process.exit(78);
 }

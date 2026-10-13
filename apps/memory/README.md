@@ -305,7 +305,7 @@ DB 파일을 열 때(`openMemoryDatabase`) 표 목록과 `schema_version`의 가
 
 옛 기억을 나중에 되살리려면 DB 파일과 첨부 파일 폴더를 한 쌍으로 보관해야 한다. 두 곳은 같은 짝 표시를 갖고, 서버는 짝이 맞는 폴더에서만 `content/`의 파일을 지운다(아래 "DB·첨부 폴더 짝" 절). DB만 치우고 폴더를 두면 새 DB의 시작이 멈출 뿐 옛 DB의 첨부 파일은 지워지지 않는다. 옛 기억이 필요 없다면 첨부 파일 폴더 전체를 지우거나 옮겨 새 폴더로 시작한다(`content/`만 비우고 짝 표시 파일 `bara-asset-pairing.json`을 남기면 S2로 멈춘다).
 
-펫 방식 서버(`bara-pet-memory.service`)에 이 버전을 올리면(펫 업데이트 또는 `bun run deploy:a1`) 옛 DB 를 연 새 버전은 `SchemaVersionTooOldError` 로 시작하지 못하고, 교체 절차는 위 "업데이트 실패 후 되돌리기" 절의 규칙대로 처리한다. 옛 DB 를 새로 시작하려면 서비스를 멈춘 상태에서 위 순서대로 DB 파일과 첨부 파일 폴더를 옮긴 뒤 다시 올린다. 예전의 `git pull` 자동 배포(`scripts/a1-auto-deploy.sh`, `bara-memory.service`)는 폐기했으므로 쓰지 않는다.
+펫 방식 서버(`bara-pet-memory.service`)에 이 버전을 올리면(펫 업데이트 또는 `bun run deploy:a1`) 옛 DB 를 연 새 버전은 `SchemaVersionTooOldError` 로 시작하지 못하고, 교체 절차는 위 "업데이트 실패 후 되돌리기" 절의 규칙대로 처리한다. 옛 DB 를 새로 시작하려면 서비스를 멈춘 상태에서 위 순서대로 DB 파일과 첨부 파일 폴더를 옮긴 뒤 다시 올린다. 예전의 `git pull` 자동 배포(`bara-memory.service`, `bara-deploy.timer`)는 폐기하고 그 스크립트와 유닛을 삭제했다.
 
 ### v48 이상 마이그레이션 더하는 법
 

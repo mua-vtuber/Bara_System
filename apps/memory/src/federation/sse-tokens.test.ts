@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { AdapterEnrollRefusedError } from "./adapter-enroll-limits.ts";
 import { SseTokenStore } from "./sse-tokens.ts";
 
 let workDir: string;
@@ -272,21 +273,15 @@ describe("SseTokenStore — 어댑터 승인 큐", () => {
     );
   });
 
-  test("(13b) 같은 adapterId 새 요청은 이전 pending 요청을 대기열에서 정리한다", () => {
+  test("(13b) 같은 adapterId 무인증 새 요청은 거절되고 이전 pending 요청은 그대로 남는다", () => {
     const store = new SseTokenStore(tokenPath);
     const first = store.createTokenRequest({ adapterId: "bot-discord" });
-    const second = store.createTokenRequest({ adapterId: "bot-discord" });
 
-    expect(first.request.requestId).not.toBe(second.request.requestId);
+    expect(() => store.createTokenRequest({ adapterId: "bot-discord" })).toThrow(AdapterEnrollRefusedError);
     expect(store.listTokenRequests("pending").map((r) => r.requestId)).toEqual([
-      second.request.requestId,
-    ]);
-    const oldPickup = store.pickupApprovedToken(
       first.request.requestId,
-      first.pickupSecret,
-    );
-    expect(oldPickup?.status).toBe("rejected");
-    expect(store.getTokenRequest(first.request.requestId)?.status).toBe("rejected");
+    ]);
+    expect(store.pickupApprovedToken(first.request.requestId, first.pickupSecret)?.status).toBe("pending");
   });
 
   test("(14) 발급 목록은 토큰 값을 숨기고 removeToken 뒤 검증이 실패한다", () => {
