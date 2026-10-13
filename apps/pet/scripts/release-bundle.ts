@@ -139,12 +139,17 @@ async function copyInto(coreRoot: string, stageDir: string, files: readonly stri
   }
 }
 
+/** How many of the lock lines a prune newly introduced the refusal names, so the cause is visible in a CI log. */
+const UNAPPROVED_LOCK_LINES_SHOWN = 5;
+
 /** Bun's frozen install rejects workspaces absent from the bundle; prune them without resolving new versions. */
 async function pruneLock(coreRoot: string, stageDir: string): Promise<void> {
   run([process.execPath, "install", "--lockfile-only"], stageDir);
   const original = new Set((await readFile(join(coreRoot, "bun.lock"), "utf8")).split(/\r?\n/));
-  if ((await readFile(join(stageDir, "bun.lock"), "utf8")).split(/\r?\n/).some((line) => line && !original.has(line)))
-    throw new Error("Pruned production lock introduced an unapproved dependency/version");
+  const introduced = (await readFile(join(stageDir, "bun.lock"), "utf8")).split(/\r?\n/).filter((line) => line && !original.has(line));
+  if (introduced.length > 0)
+    throw new Error(`Pruned production lock introduced an unapproved dependency/version (${introduced.length} line(s)): ` +
+      introduced.slice(0, UNAPPROVED_LOCK_LINES_SHOWN).map((line) => line.trim()).join(" | "));
 }
 
 /** The memory server's bundle source (what `package-runtime.ts` always built): dashboard, tracked runtime files, pruned lock. */
