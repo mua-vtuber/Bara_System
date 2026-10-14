@@ -17,7 +17,9 @@
       "restore-verify",
       "restore-data",
       "restore-switch",
-      "server-update"
+      "server-update",
+      "self-update-download",
+      "self-update-verify"
     ],
     "progressDetailMaxParts": 10,
     "answerOutcomes": [
@@ -78,7 +80,11 @@
       "HOST_BACKUP_FOLDER_UNAVAILABLE",
       "HOST_BACKUP_FOLDER_FAILED",
       "HOST_BACKUP_FOLDER_OPEN_FAILED",
-      "HOST_STARTUP_CHECK_FAILED"
+      "HOST_STARTUP_CHECK_FAILED",
+      "HOST_UPDATE_BUBBLE_STATE",
+      "HOST_UPDATE_PATH_REFUSED",
+      "HOST_UPDATE_LAUNCH_FAILED",
+      "HOST_UPDATE_ALREADY_STARTED"
     ],
     "serviceHeartbeatMs": 5000,
     "serviceSilenceLimitMs": 30000,
@@ -98,7 +104,10 @@
     "quickVisibilityEvent": "pet-quick-visibility",
     "petVisibilityEvent": "pet-visibility",
     "trayErrorEvent": "pet-tray-error",
-    "backupFolderName": "Bara 백업"
+    "backupFolderName": "Bara 백업",
+    "updatesDirName": "updates",
+    "installerSuffix": "_x64-setup.exe",
+    "updateBubbleEvent": "pet-update-bubble"
   },
   "text": {
     "productTitle": "바라 펫",

@@ -49,3 +49,13 @@ test("a newer passing notice replaces the older one", () => {
   expect(line.clear("command")).toBe(true);
   expect(line.text).toBeNull();
 });
+
+test("an update notice passes like a command failure and leaves a lasting notice in place", () => {
+  const line = new NoticeState();
+  line.show("listen", deaf);
+  const failure = messages.selfUpdate.checkFailed("연결 실패");
+  expect(line.show("update", failure)).toBe(true);
+  expect(line.text).toBe(failure);
+  line.expire();
+  expect(line.text).toBe(deaf);
+});

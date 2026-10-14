@@ -8,13 +8,13 @@ import { SQUIRREL_MOTION } from "./motion-config.ts";
 import type { MotionFeedback } from "./motion-types.ts";
 import { NoticeState, type NoticeKind } from "./pet-notice.ts";
 import { HostVisibility, PendingInputs, petDrawable, RendererPresence, type PresenceStep } from "./pet-presence.ts";
+import { PetPress } from "./pet-press.ts";
+import { mountPetUpdate } from "./pet-update.ts";
 import { squirrelErrorText } from "./squirrel-error-text.ts";
 import { SquirrelError } from "./squirrel-errors.ts";
 import type { SquirrelHandle } from "./squirrel-runtime.ts";
 
 const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
-/** How far (CSS px) the pointer moves with a button held before a press becomes a window drag instead of a click. */
-const DRAG_THRESHOLD_PX = 5;
 const ERROR_CAUSE_ID = "pet-error-cause";
 /** Set on `#app` while the error card stands in for the character (`style.css` hides the canvas then). */
 const FAILED_STATE = "failed";
@@ -121,19 +121,19 @@ export function renderPet(app: HTMLElement): void {
   const openQuick = (): void => runCommand(() => command("open_quick", { mode: "input" }), messages.pet.quickToggleFailed);
   app.append(petButton, overlay);
 
-  let origin: { x: number; y: number } | null = null, dragged = false;
-  petButton.addEventListener("pointerdown", event => { origin = { x: event.screenX, y: event.screenY }; dragged = false; });
+  const press = new PetPress();
+  petButton.addEventListener("pointerdown", event => press.down(event.screenX, event.screenY));
   petButton.addEventListener("pointermove", event => {
-    if (!origin || !event.buttons || dragged || Math.hypot(event.screenX - origin.x, event.screenY - origin.y) < DRAG_THRESHOLD_PX) return;
-    dragged = true;
-    if (native) runCommand(() => getCurrentWindow().startDragging(), messages.pet.dragFailed);
+    if (press.move(event.screenX, event.screenY, event.buttons) && native) runCommand(() => getCurrentWindow().startDragging(), messages.pet.dragFailed);
   });
-  petButton.addEventListener("pointerup", () => { origin = null; });
-  petButton.addEventListener("click", () => { if (!dragged) openQuick(); });
+  petButton.addEventListener("pointerup", () => press.up());
+  petButton.addEventListener("click", () => { if (press.click()) openQuick(); });
   petButton.addEventListener("contextmenu", event => {
     event.preventDefault();
     runCommand(() => command("open_panel", { mode: "settings" }), messages.pet.panelOpenFailed);
   });
+  // The update button sits beside the pet button (not inside it), above it in the window's bottom right corner.
+  mountPetUpdate(app, { notice: text => notice.show("update", text), press });
 
   function showFailure(error: SquirrelError): void {
     const text = squirrelErrorText(error);

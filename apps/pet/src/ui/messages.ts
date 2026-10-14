@@ -5,6 +5,7 @@ import { serviceAiMessages } from "./messages-service-ai.ts";
 import { causeOrEmpty, serviceCoreMessages, withCause, withCauseThen } from "./messages-service-core.ts";
 import { serviceInstallMessages } from "./messages-service-install.ts";
 import { serviceReleaseMessages } from "./messages-service-release.ts";
+import { selfUpdateMessages } from "./messages-self-update.ts";
 import type { SquirrelErrorCode } from "./squirrel/squirrel-errors.ts";
 
 export const labels: Record<CaptureKind, string> = {
@@ -255,6 +256,8 @@ export const messages = {
     "restore-data": "백업에서 기억을 되살리고 있어요. 검색 색인을 다시 계산해서 오래 걸릴 수 있어요.",
     "restore-switch": "되살린 기억으로 바꾸고 있어요.",
     "server-update": "서버 업데이트 중이에요. 끝날 때까지 저장과 질문이 잠시 기다려요.",
+    "self-update-download": "새 버전 설치 파일을 받고 있어요.",
+    "self-update-verify": "받은 설치 파일을 확인하고 있어요.",
   } satisfies Record<ProgressStage, string> as Readonly<Record<ProgressStage, string>>,
   /** A stage's byte progress (`ProgressEvent.detail`), built by `src/ui/progress-text.ts`. Sizes are whole
    * decimal megabytes; `total` is null when the download did not say how big it is. */
@@ -313,6 +316,10 @@ export const messages = {
     HOST_BACKUP_FOLDER_UNAVAILABLE: "Windows에서 문서 폴더 위치를 확인하지 못해 백업 폴더를 열 수 없어요. 바라를 다시 실행한 뒤 시도해 주세요.",
     HOST_BACKUP_FOLDER_FAILED: `문서 폴더에 "${BACKUP_FOLDER}" 폴더를 만들지 못했어요. 문서 폴더의 권한과 여유 공간을 확인해 주세요.`,
     HOST_BACKUP_FOLDER_OPEN_FAILED: `Windows 탐색기로 "${BACKUP_FOLDER}" 폴더를 열지 못했어요. 문서 폴더에서 직접 열어 주세요.`,
+    HOST_UPDATE_BUBBLE_STATE: "업데이트 말풍선이 이미 다른 단계로 바뀌어 이 동작을 하지 않았어요. 펫 오른쪽 아래 화살표 버튼으로 다시 시작해 주세요.",
+    HOST_UPDATE_PATH_REFUSED: "확인을 마친 업데이트 폴더 밖의 파일이라 설치 파일을 실행하지 않았어요.",
+    HOST_UPDATE_LAUNCH_FAILED: "설치 파일을 실행하지 못했어요. 백신 프로그램이 막고 있지 않은지 확인한 뒤 화살표 버튼으로 다시 시도해 주세요.",
+    HOST_UPDATE_ALREADY_STARTED: "설치 파일이 이미 실행됐거나 펫이 끝나는 중이라 설치 파일을 한 번 더 실행하지 않았어요.",
     // The host raises these itself as bubbles; their one text lives in native-host.json `text.hostNotice`.
     ...nativeHost.text.hostNotice,
     HOST_FEEDBACK_UNAVAILABLE: NO_FEEDBACK_TEXT,
@@ -672,4 +679,5 @@ export const messages = {
   ...serviceAiMessages,
   ...serviceInstallMessages,
   ...serviceReleaseMessages,
+  ...selfUpdateMessages,
 };

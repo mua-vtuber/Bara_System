@@ -306,3 +306,87 @@ FunctionEnd
     Call un.BaraDeleteModels
   ${EndIf}
 !macroend
+
+; ---------------------------------------------------------------------------------------------------------------
+; Clean reinstall for the pet's own update (docs/decisions/2026-10-14-pet-self-update-spec.md 6.3).
+;
+; The pet runs the downloaded installer as `<setup>.exe /P /R /BARA_CLEAN` (src-tauri/src/self_update.rs
+; INSTALLER_ARGS). Tauri's template (tauri-cli 2.11.4) never removes the old version in a /P run: PageReinstall builds
+; no page there, so its radio state reads 0 and the upgrade branch keeps the old files ("reinst_done"), and /UPDATE
+; skips the removal outright. So this hook runs the old uninstaller itself, before any file is copied:
+; NSIS_HOOK_PREINSTALL is expanded at the top of `Section Install`, where $PassiveMode and $UpdateMode are set.
+;
+; It runs only when all four hold: /BARA_CLEAN is given, the run is /P, it is not /UPDATE, and the previous install
+; left its uninstaller (UninstallString) and its folder (the product key's default value) in the registry.
+; The uninstaller runs as `"<UninstallString>" /P /UPDATE _?=<old folder>`:
+; - /UPDATE keeps the shortcuts and the login autostart value and removes only the program files (template
+;   `Section Uninstall`: those deletions check `$UpdateMode <> 1`; this file's NSIS_HOOK_PREUNINSTALL does too).
+; - /P skips the confirm page with its "delete app data" box and this file's model-deletion page.
+; - _?= runs it in place and makes ExecWait wait for it, the way the template's own reinstall path does.
+; A non-zero exit code or the old main executable still in place stops the install with a dialog: the files are never
+; copied over a half-removed version. The old memory server's Bun (BARA_SERVICE_RUNTIME) is waited for the same way
+; as in un.BaraDeleteModels step 4: the old pet's quit ends it with its Job object, and an executable that still runs
+; cannot be deleted, so the delete is retried up to BARA_RUNTIME_WAIT_TRIES times; if it stays, the install stops too. Some of the old version may already be gone, so the dialog says to run this
+; installer again by hand. Starting the old pet before that deletes this installer file (spec 6.2-1 startup cleanup),
+; so the dialog also says the pet's arrow button downloads it again.
+; ---------------------------------------------------------------------------------------------------------------
+
+!define BARA_CLEAN_SWITCH "/BARA_CLEAN"
+!define BARA_TEXT_CLEAN_START "이전 버전을 먼저 지웁니다: "
+!define BARA_TEXT_CLEAN_FAILED_HEAD "이전 버전을 지우지 못해 설치를 멈췄습니다."
+!define BARA_TEXT_CLEAN_NOT_STARTED "이전 버전의 제거 프로그램을 실행하지 못했습니다: "
+!define BARA_TEXT_CLEAN_EXIT_CODE "이전 버전의 제거 프로그램이 오류로 끝났습니다. 종료 코드: "
+!define BARA_TEXT_CLEAN_LEFTOVER "이전 버전의 실행 파일이 남아 있습니다: "
+!define BARA_TEXT_CLEAN_RUNTIME_BUSY "이전 버전의 메모리 서버(bun.exe)가 아직 실행 중이라 지우지 못했습니다: "
+!define BARA_TEXT_CLEAN_PARTIAL "이전 버전 일부가 이미 지워졌을 수 있습니다. 기억과 설정은 지우지 않았습니다."
+!define BARA_TEXT_CLEAN_RETRY "이전 버전의 펫을 먼저 켜면 이 설치 파일이 지워지며, 그때는 펫 오른쪽 아래 화살표 버튼으로 다시 받을 수 있습니다.$\r$\n설치 파일을 직접 다시 실행하세요: "
+
+Var BaraCleanOption
+Var BaraOldUninstaller
+Var BaraOldDir
+Var BaraCleanExit
+Var BaraCleanMessage
+
+!macro NSIS_HOOK_PREINSTALL
+  ClearErrors
+  ${GetOptions} $CMDLINE "${BARA_CLEAN_SWITCH}" $BaraCleanOption
+  ${IfNot} ${Errors}
+  ${AndIf} $PassiveMode = 1
+  ${AndIf} $UpdateMode <> 1
+    ReadRegStr $BaraOldUninstaller SHCTX "${UNINSTKEY}" "UninstallString"
+    ReadRegStr $BaraOldDir SHCTX "${MANUPRODUCTKEY}" ""
+    ${If} $BaraOldUninstaller != ""
+    ${AndIf} $BaraOldDir != ""
+      DetailPrint "${BARA_TEXT_CLEAN_START}$BaraOldDir"
+      ClearErrors
+      ExecWait '$BaraOldUninstaller /P /UPDATE _?=$BaraOldDir' $BaraCleanExit
+      ${If} ${Errors}
+        StrCpy $BaraCleanMessage "${BARA_TEXT_CLEAN_NOT_STARTED}$BaraOldUninstaller"
+      ${ElseIf} $BaraCleanExit <> 0
+        StrCpy $BaraCleanMessage "${BARA_TEXT_CLEAN_EXIT_CODE}$BaraCleanExit"
+      ${ElseIf} ${FileExists} "$BaraOldDir\${MAINBINARYNAME}.exe"
+        StrCpy $BaraCleanMessage "${BARA_TEXT_CLEAN_LEFTOVER}$BaraOldDir\${MAINBINARYNAME}.exe"
+      ${Else}
+        StrCpy $BaraCleanMessage ""
+        StrCpy $BaraTries 0
+        ${DoWhile} ${FileExists} "$BaraOldDir\${BARA_SERVICE_RUNTIME}"
+          Delete "$BaraOldDir\${BARA_SERVICE_RUNTIME}"
+          ${If} ${FileExists} "$BaraOldDir\${BARA_SERVICE_RUNTIME}"
+            IntOp $BaraTries $BaraTries + 1
+            ${If} $BaraTries >= ${BARA_RUNTIME_WAIT_TRIES}
+              StrCpy $BaraCleanMessage "${BARA_TEXT_CLEAN_RUNTIME_BUSY}$BaraOldDir\${BARA_SERVICE_RUNTIME}"
+              ${Break}
+            ${EndIf}
+            Sleep ${BARA_RUNTIME_WAIT_MS}
+          ${EndIf}
+        ${Loop}
+      ${EndIf}
+      ${If} $BaraCleanMessage != ""
+        DetailPrint "$BaraCleanMessage"
+        SetAutoClose false
+        MessageBox MB_OK|MB_ICONSTOP "${BARA_TEXT_CLEAN_FAILED_HEAD}$\r$\n$\r$\n$BaraCleanMessage$\r$\n${BARA_TEXT_CLEAN_PARTIAL}$\r$\n$\r$\n${BARA_TEXT_CLEAN_RETRY}$EXEPATH" /SD IDOK
+        Abort
+      ${EndIf}
+    ${EndIf}
+  ${EndIf}
+!macroend

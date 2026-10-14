@@ -61,6 +61,14 @@ struct Contract {
     /// The folder under the user's Documents that holds backups (`bridge::backup_root`); the
     /// screen names it in its result line, so the name lives here rather than in Rust.
     backup_folder_name: String,
+    /// The folder under the pet data folder the service downloads its own installer into
+    /// (`src/shared/self-update.ts`); `self_update::verified_installer` runs only a file in it.
+    updates_dir_name: String,
+    /// The ending of the one installer name a release carries (spec 5.2); the host runs no other file.
+    installer_suffix: String,
+    /// The event the host sends when the bubble's update phase changes (`update_bubble.rs`); the
+    /// bubble listens by the same name (`src/ui/bridge.ts` `onUpdateBubble`).
+    update_bubble_event: String,
 }
 
 #[derive(Deserialize)]
@@ -329,6 +337,23 @@ pub fn tray_error_event() -> &'static str {
     &catalog().contract.tray_error_event
 }
 
+/// The event name the bubble receives when its update phase changes (`contract.updateBubbleEvent`);
+/// the payload is `{ phase, version, sequence }` (`update_bubble.rs`).
+pub fn update_bubble_event() -> &'static str {
+    &catalog().contract.update_bubble_event
+}
+
+/// The folder under the pet data folder that holds the downloaded installer
+/// (`contract.updatesDirName`); `self_update::verified_installer` runs nothing outside it.
+pub fn updates_dir_name() -> &'static str {
+    &catalog().contract.updates_dir_name
+}
+
+/// The ending of the release installer's name (`contract.installerSuffix`).
+pub fn installer_suffix() -> &'static str {
+    &catalog().contract.installer_suffix
+}
+
 /// The backup folder's name under Documents (`contract.backupFolderName`).
 pub fn backup_folder_name() -> &'static str {
     &catalog().contract.backup_folder_name
@@ -462,6 +487,7 @@ mod tests {
             quick_visibility_event(),
             pet_visibility_event(),
             tray_error_event(),
+            update_bubble_event(),
         ];
         for event in events {
             assert!(!event.is_empty());
@@ -494,6 +520,21 @@ mod tests {
         );
         assert!(!matches!(name, "." | ".."));
         assert_eq!(Path::new(name).components().count(), 1);
+    }
+
+    #[test]
+    fn self_update_contract_values_are_plain() {
+        let contract = &catalog().contract;
+        assert_eq!(
+            Path::new(&contract.updates_dir_name).components().count(),
+            1
+        );
+        assert!(!contract.updates_dir_name.trim().is_empty());
+        assert!(
+            contract.installer_suffix.starts_with('_')
+                && contract.installer_suffix.ends_with(".exe")
+        );
+        assert!(!contract.update_bubble_event.is_empty());
     }
 
     #[test]

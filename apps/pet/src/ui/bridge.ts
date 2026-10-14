@@ -1,6 +1,6 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { Feedback, ProgressEvent, RpcMethod, RpcOperations } from "../shared/contracts.ts";
+import type { Feedback, ProgressEvent, RpcMethod, RpcOperations, UpdateBubbleEvent } from "../shared/contracts.ts";
 import nativeHost from "../shared/native-host.json";
 import { errorText } from "./error-text.ts";
 import { messages } from "./messages.ts";
@@ -41,6 +41,11 @@ export function onTrayError(callback: (error: unknown) => void): Promise<() => v
 }
 export function onFeedback(callback: (feedback: Feedback) => void): Promise<() => void> {
   return native ? listen<Feedback>("pet-feedback", event => callback(event.payload)) : Promise.resolve(() => {});
+}
+/** The host tells the bubble when its update phase changes (spec 6.1); the event name is the contract's
+ * (`native-host.json` `contract.updateBubbleEvent`), shared with the Rust side (`update_bubble.rs`). */
+export function onUpdateBubble(callback: (event: UpdateBubbleEvent) => void): Promise<() => void> {
+  return native ? listen<UpdateBubbleEvent>(nativeHost.contract.updateBubbleEvent, event => callback(event.payload)) : Promise.resolve(() => {});
 }
 export function errorMessage(error: unknown): string {
   return errorText(error);

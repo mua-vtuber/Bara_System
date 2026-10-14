@@ -22,6 +22,9 @@ import { SharedRun } from "./shared-run.ts";
 import { ceilingFor, runWithCeiling } from "./operation-limits.ts";
 import { checkStartup } from "../ui/startup-check.ts";
 import { startupFailureFeedback } from "../ui/startup-failure.ts";
+import { PRODUCT_RELEASE_SOURCE } from "../shared/self-update.ts";
+import { PET_VERSION } from "../shared/version.ts";
+import { SelfUpdateService } from "./self-update/service.ts";
 
 function text(value: unknown, label: string): string {
   if (typeof value !== "string") throw serviceError("INVALID_INPUT", messages.rpc.checkField(label));
@@ -56,6 +59,7 @@ export class PetService {
   private readonly backup: BackupService;
   private readonly restore: RestoreService;
   private readonly gate: UpdateGate;
+  private readonly selfUpdate: SelfUpdateService;
   private connectionTail: Promise<void> = Promise.resolve();
   private connectionJobs = 0;
   /** The startup check, run once per service start (`startup.check`); see `startupCheck`. */
@@ -90,6 +94,8 @@ export class PetService {
     // The settings backup steps aside while the gate copies the store or a start may be migrating it, and while a
     // restore moves the store's files.
     this.backup = new BackupService(this.config, paths, { updating: () => this.gate.busy, restoring: () => this.restore.active });
+    // The pet's own update reads the one public release address (spec 9); it starts with the pet window's first ask.
+    this.selfUpdate = new SelfUpdateService({ paths, currentVersion: PET_VERSION, source: PRODUCT_RELEASE_SOURCE });
   }
 
   private async withConnection<T>(ctx: RequestContext, work: () => Promise<T>): Promise<T> {
@@ -235,6 +241,11 @@ export class PetService {
         if (!status.capabilities) throw serviceError("CONNECTION_FAILED", status.message);
         return { url: await this.config.dashboardLink(assertSendable, memoryId, params.review === true, audience, status.capabilities) };
       }
+      // The pet's own update (docs/decisions/2026-10-14-pet-self-update-spec.md). Outside the connection queue: it never
+      // reaches the memory server. The pet window's first status ask of a start begins the checks (`ensureStarted`).
+      case "selfUpdate.status": this.selfUpdate.ensureStarted(); return this.selfUpdate.status();
+      case "selfUpdate.acknowledge": return this.selfUpdate.acknowledge(text(params.version, messages.selfUpdate.versionField));
+      case "selfUpdate.install": return this.selfUpdate.install(text(params.version, messages.selfUpdate.versionField), ctx);
       default: throw serviceError("INVALID_INPUT", messages.rpc.unsupportedRequest);
     }
   }
@@ -252,6 +263,7 @@ export class PetService {
    * startup check, a settings backup or a restore still running is stopped as well; a stopped restore does not start
    * the server again. The local server and tunnel close after those, so nothing they started is left behind. */
   async close(): Promise<void> {
+    this.selfUpdate.close();
     this.startup.close();
     this.cleanupOnSave.close();
     await Promise.all([this.restore.close(), this.backup.close()]);

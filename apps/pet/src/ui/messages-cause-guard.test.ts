@@ -8,7 +8,7 @@ import ts from "typescript";
 // what an empty cause becomes. This scan finds every message-module text that writes a parameter inside
 // parentheses, whatever the parameter is called (`cause`, `detail`, `reason`, ...), and makes each one either
 // a cause writer or a value named below as needing no empty-cause rule.
-const MESSAGE_MODULES = ["messages.ts", "messages-service-core.ts", "messages-service-ai.ts", "messages-service-install.ts", "messages-service-release.ts"];
+const MESSAGE_MODULES = ["messages.ts", "messages-service-core.ts", "messages-service-ai.ts", "messages-service-install.ts", "messages-service-release.ts", "messages-self-update.ts"];
 
 /** The only functions that write a cause sentence in parentheses: `<function>: <parameter>`. */
 const CAUSE_WRITERS = ["withCause: cause", "withCauseThen: cause"];

@@ -25,8 +25,12 @@ export type CeilingPolicy = number | null;
 /** `backup.restore` recomputes every search vector of the store, which takes longer than the ceiling for a large
  * one; each of its steps has its own limit (`restore.ts`) and the settings screen's "중단" ends it. `backup.join`
  * only waits for such a job (`background-job.ts`), as `backup.export` and `backup.restore` do for the one they start. */
+/** `selfUpdate.install` downloads a 200 MB installer, which a slow line takes longer than the ceiling for; the
+ * download stops itself after `SELF_UPDATE.downloadStallMs` without a byte (`self-update/download.ts`) and runs on its
+ * own signal, so only quitting ends it. */
 const UNBOUNDED_BY_USER_CANCEL: ReadonlySet<RpcMethod | "dashboard.link"> = new Set([
   "install.local", "install.remote", "cleanup.run", "backup.export", "backup.restore", "backup.join", "startup.check",
+  "selfUpdate.install",
 ]);
 export const OPERATION_CEILINGS: ReadonlyMap<RpcMethod | "dashboard.link", CeilingPolicy> = new Map(
   [...RPC_METHODS, "dashboard.link" as const].map((method) =>

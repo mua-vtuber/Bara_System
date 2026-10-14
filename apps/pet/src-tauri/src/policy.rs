@@ -29,6 +29,9 @@ pub const METHODS: &[&str] = &[
     "backup.status",
     "backup.join",
     "backup.cancel",
+    "selfUpdate.status",
+    "selfUpdate.acknowledge",
+    "selfUpdate.install",
     "operation.cancel",
 ];
 
@@ -39,7 +42,7 @@ pub fn validate_request<'a>(
     payload: &'a Value,
 ) -> Result<(&'a str, &'a str, &'a Value), HostError> {
     let invalid = || HostError::new(code::HOST_INVALID_REQUEST);
-    if !matches!(label, "main" | "pet" | "quick") {
+    if !matches!(label, "main" | "pet" | "quick" | "bubble") {
         return Err(HostError::new(code::HOST_WINDOW_NOT_ALLOWED));
     }
     let obj = payload.as_object().ok_or_else(invalid)?;
@@ -76,8 +79,14 @@ pub fn validate_request<'a>(
     if !METHODS.contains(&method) {
         return Err(invalid());
     }
-    if (label == "pet" && method != "status")
+    /// The pet window reads the app's state and its own update check, and records that the
+    /// update notice it asked for showed (spec 5.3).
+    const PET_METHODS: &[&str] = &["status", "selfUpdate.status", "selfUpdate.acknowledge"];
+    /// The bubble only downloads the update the user agreed to in it (spec 6.1).
+    const BUBBLE_METHODS: &[&str] = &["selfUpdate.install"];
+    if (label == "pet" && !PET_METHODS.contains(&method))
         || (label == "quick" && !QUICK_METHODS.contains(&method))
+        || (label == "bubble" && !BUBBLE_METHODS.contains(&method))
     {
         return Err(HostError::new(code::HOST_WINDOW_NOT_ALLOWED));
     }
@@ -500,5 +509,37 @@ mod tests {
         ] {
             assert_eq!(progress_detail(&detail), None, "{detail}");
         }
+    }
+
+    #[test]
+    fn only_the_pet_and_the_bubble_reach_their_own_update_methods() {
+        for method in ["selfUpdate.status", "selfUpdate.acknowledge"] {
+            let payload = json!({"id":"u","method":method,"params":{}});
+            assert!(validate_request("pet", &payload).is_ok(), "{method}");
+            assert!(validate_request("main", &payload).is_ok(), "{method}");
+            for label in ["quick", "bubble"] {
+                assert_eq!(
+                    rejection(label, payload.clone()),
+                    code::HOST_WINDOW_NOT_ALLOWED,
+                    "{label} {method}"
+                );
+            }
+        }
+        let install = json!({"id":"i","method":"selfUpdate.install","params":{"version":"0.1.9"}});
+        assert!(validate_request("bubble", &install).is_ok());
+        assert!(validate_request("main", &install).is_ok());
+        for label in ["pet", "quick"] {
+            assert_eq!(
+                rejection(label, install.clone()),
+                code::HOST_WINDOW_NOT_ALLOWED
+            );
+        }
+        assert_eq!(
+            rejection(
+                "bubble",
+                json!({"id":"c","method":"operation.cancel","params":{"requestId":"i"}})
+            ),
+            code::HOST_WINDOW_NOT_ALLOWED
+        );
     }
 }

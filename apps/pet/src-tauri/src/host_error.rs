@@ -58,6 +58,10 @@ pub mod code {
     pub const HOST_BACKUP_FOLDER_FAILED: &str = "HOST_BACKUP_FOLDER_FAILED";
     pub const HOST_BACKUP_FOLDER_OPEN_FAILED: &str = "HOST_BACKUP_FOLDER_OPEN_FAILED";
     pub const HOST_STARTUP_CHECK_FAILED: &str = "HOST_STARTUP_CHECK_FAILED";
+    pub const HOST_UPDATE_BUBBLE_STATE: &str = "HOST_UPDATE_BUBBLE_STATE";
+    pub const HOST_UPDATE_PATH_REFUSED: &str = "HOST_UPDATE_PATH_REFUSED";
+    pub const HOST_UPDATE_LAUNCH_FAILED: &str = "HOST_UPDATE_LAUNCH_FAILED";
+    pub const HOST_UPDATE_ALREADY_STARTED: &str = "HOST_UPDATE_ALREADY_STARTED";
 
     /// Prefix reserved for host codes; a service error may not use it.
     pub const HOST_PREFIX: &str = "HOST_";
@@ -116,6 +120,10 @@ pub mod code {
         HOST_BACKUP_FOLDER_FAILED,
         HOST_BACKUP_FOLDER_OPEN_FAILED,
         HOST_STARTUP_CHECK_FAILED,
+        HOST_UPDATE_BUBBLE_STATE,
+        HOST_UPDATE_PATH_REFUSED,
+        HOST_UPDATE_LAUNCH_FAILED,
+        HOST_UPDATE_ALREADY_STARTED,
     ];
 }
 

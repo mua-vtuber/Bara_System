@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "app-events",
-  "description": "Local Bara Pet windows only: event listen/unlisten used to receive pet-progress, pet-panel, pet-quick, pet-quick-visibility, pet-visibility, pet-feedback",
+  "description": "Local Bara Pet windows only: event listen/unlisten used to receive pet-progress, pet-panel, pet-quick, pet-quick-visibility, pet-visibility, pet-feedback, pet-update-bubble",
   "windows": ["pet", "main", "quick", "bubble"],
   "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
 }

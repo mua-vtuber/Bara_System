@@ -2,8 +2,10 @@
  * - `command`: a command of the pet window the host refused (decision D10). A later successful command ends it.
  * - `contract`: a feedback that broke its contract (section 9.1).
  * - `listen`: the window cannot hear the app's events. It lasts, because that stays broken.
- * `command` and `contract` notices pass: the screen ends them after `ui.commandNoticeMs`. */
-export type NoticeKind = "command" | "contract" | "listen";
+ * - `update`: the pet's own update: a failed check (first of a run), a failed notice or update button
+ *   (docs/decisions/2026-10-14-pet-self-update-spec.md 5.4).
+ * `command`, `contract` and `update` notices pass: the screen ends them after `ui.commandNoticeMs`. */
+export type NoticeKind = "command" | "contract" | "listen" | "update";
 
 /** Which notice the line shows. A passing notice covers the lasting one for its time and the lasting one shows again
  * when it ends, so a short failure never hides one that stays; a newer passing notice replaces an older one. The

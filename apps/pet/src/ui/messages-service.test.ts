@@ -7,6 +7,7 @@ import { validateText } from "../service/validation.ts";
 import { messages } from "./messages.ts";
 import { serviceAiMessages } from "./messages-service-ai.ts";
 import { serviceCoreMessages } from "./messages-service-core.ts";
+import { selfUpdateMessages } from "./messages-self-update.ts";
 import { serviceInstallMessages } from "./messages-service-install.ts";
 
 // Texts of the service that are built from parameters or by a condition (`messages-service-*.ts`).
@@ -99,7 +100,7 @@ test("the saved-but-not-reread text keeps its cause against the sentence, names 
 // `messages.ts` spreads the three service modules after the keys it writes itself, and a spread silently
 // replaces a key that came earlier. A key two modules share, or one a module shares with `messages.ts`, would
 // therefore make one section vanish without any error, so each overlap fails here.
-const SERVICE_MODULES = { core: serviceCoreMessages, ai: serviceAiMessages, install: serviceInstallMessages } as const;
+const SERVICE_MODULES = { core: serviceCoreMessages, ai: serviceAiMessages, install: serviceInstallMessages, selfUpdate: selfUpdateMessages } as const;
 
 /** The top-level keys `messages.ts` writes itself (not the ones its spreads bring in). */
 function keysWrittenInMessagesSource(): string[] {

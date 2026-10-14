@@ -9,7 +9,7 @@ test("every RPC method and dashboard.link has a registered ceiling policy", () =
 });
 
 test("operations with their own cancel button and step limits carry no total ceiling", () => {
-  for (const method of ["install.local", "install.remote", "cleanup.run", "backup.export", "backup.restore", "backup.join"] as const)
+  for (const method of ["install.local", "install.remote", "cleanup.run", "backup.export", "backup.restore", "backup.join", "selfUpdate.install"] as const)
     expect(ceilingFor(method)).toBeNull();
 });
 
@@ -20,7 +20,7 @@ test("joining the startup check carries no ceiling of its own: the check's conne
 
 test("every other operation is bounded by the shared safety ceiling", () => {
   for (const method of RPC_METHODS)
-    if (!["install.local", "install.remote", "cleanup.run", "backup.export", "backup.restore", "backup.join", "startup.check"].includes(method))
+    if (!["install.local", "install.remote", "cleanup.run", "backup.export", "backup.restore", "backup.join", "startup.check", "selfUpdate.install"].includes(method))
       expect(ceilingFor(method)).toBe(OPERATION_SAFETY_CEILING_MS);
   expect(ceilingFor("dashboard.link")).toBe(OPERATION_SAFETY_CEILING_MS);
 });

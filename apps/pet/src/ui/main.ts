@@ -20,6 +20,7 @@ import { startupFailureFeedback } from "./startup-failure.ts";
 import { observeStartupCheck } from "./startup-check.ts";
 import "./style.css";
 import "./notebook.css";
+import "./self-update.css";
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 const view = new URLSearchParams(location.search).get("view") ?? "main";

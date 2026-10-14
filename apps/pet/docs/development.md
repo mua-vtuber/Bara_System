@@ -110,6 +110,17 @@ bun test tests/classification-eval.test.ts
 
 새 설치는 서버 시작 전에 토큰을 준비합니다. 실행 중인 서버에는 등록·승인 절차를 이용합니다. 관리자 링크는 네이티브 명령이 직접 브라우저로 열며 화면의 일반 요청 결과로 반환하지 않습니다.
 
+## 펫 자체 업데이트
+
+설계: 저장소 루트 `docs/decisions/2026-10-14-pet-self-update-spec.md`(로컬 기록). 고정값은 `src/shared/self-update.ts` 한 곳(확인 간격 3시간, 공개 저장소 `mua-vtuber/Bara_System` 의 `releases/latest` 주소, 시간·크기 한도)과 `src/shared/native-host.json` `contract`(받는 폴더 이름 `updates`, 설치 파일 끝말 `_x64-setup.exe`, 말풍선 이벤트 `pet-update-bubble`)에만 있습니다. 주소를 바꾸는 설정·환경 변수는 없습니다.
+
+- 서비스 `src/service/self-update/`: 펫 창이 처음 `selfUpdate.status` 를 물을 때 확인을 시작해 바로 1번, 그 뒤 3시간마다 확인합니다(설치 파일을 받는 동안은 건너뜀). 시작할 때 `<데이터 폴더>\updates\` 안을 비웁니다. 릴리스 해석(`release.ts`)과 상태 전이(`state.ts`)는 순수 함수입니다. 받기(`download.ts`)는 `.partial` 로 흘려 받으며 sha256 을 계산하고, 크기·지문이 맞을 때만 정식 이름으로 바꿉니다. 실패는 모두 `<데이터 폴더>\self-update.log` 에 남습니다(64KB 를 넘으면 오래된 절반을 버림).
+- 알림 기록: 새 버전 말풍선을 띄운 버전을 `<데이터 폴더>\self-update.json`(`{"format":1,"notifiedVersion":"…"}`)에 둡니다(`self-update/notified-record.ts`). `pet-settings.json` 과 따로 두는 이유: 그 파일이 없다는 사실로 호스트가 첫 실행 안내를 띄우고, 설정 저장 코드는 아는 필드만 다시 쓰기 때문입니다. 쓰기는 임시 파일 + `renameWithRetry` 라 끊겨도 옛 기록이나 새 기록만 남습니다. 깨진 파일은 "알린 적 없음"으로 보지 않고 `SELF_UPDATE_RECORD_INVALID`/`_UNREADABLE` 로 로그와 펫 알림 줄에 남기며, 그 실행 동안 알림 말풍선을 띄우지 않습니다(↑ 버튼은 그대로). 그 파일을 지우면 다음 시작부터 새로 기록합니다.
+- 호스트: 말풍선의 업데이트 단계(`src-tauri/src/update_bubble.rs`)는 결과와 같은 순번을 씁니다. 받는 중(`busy`)에 온 결과는 "최근 결과"로 가고, 알림·확인·실패 중에 온 결과는 말풍선을 차지합니다. `launch_update_installer`(`self_update.rs`)는 `updates` 폴더 바로 안의 설치 파일만 `/P /R /BARA_CLEAN` 으로 분리 실행한 뒤 기존 종료 절차로 펫을 끝냅니다. 한 실행에서 설치 파일은 한 번만 띄우며, 두 번째 요청이나 펫이 끝나는 중의 요청은 `HOST_UPDATE_ALREADY_STARTED` 로 거절하고, 실행 자체가 실패했을 때만 다시 시도할 수 있습니다.
+- 설치기: `src-tauri/windows/installer-hooks.nsh` 의 `NSIS_HOOK_PREINSTALL` 이 `/BARA_CLEAN`·`/P`·`/UPDATE 아님`·기존 설치 기록이 모두 맞을 때만 옛 제거기를 `"<UninstallString>" /P /UPDATE _?=<옛 설치 폴더>` 로 먼저 실행합니다. 종료 코드가 0 이 아니거나 옛 실행 파일이 남으면 설치를 멈추고 대화상자를 띄웁니다.
+- 실제 펫을 띄우는 테스트(`main.test.ts`, `service-heartbeat.test.ts`, Rust bridge 테스트)는 `selfUpdate.status` 를 묻지 않으므로 GitHub 에 요청하지 않습니다. 자체 업데이트 테스트는 모두 `127.0.0.1` 의 실제 HTTP 서버로 합니다: `bun test src/service/self-update src/ui/update-bubble-model.test.ts src/ui/squirrel`.
+- 실제 설치 확인 절차와 결과는 `docs/verification.md` 의 "펫 자체 업데이트 실제 설치 확인" 절에 있습니다.
+
 ## 제품 버전 일치 검사
 
 `bun run check:release-version`은 `package.json`의 `version`, `src-tauri/tauri.conf.json`의 `version`, `src-tauri/Cargo.toml`의 `[package].version`을 읽어 같은 유효한 버전인지 확인합니다. UI의 `PET_VERSION`은 계속 `package.json`에서 가져옵니다. 버전을 올릴 때는 세 제품 버전을 함께 바꾸며 Cargo 의존성 버전은 검사 대상이 아닙니다.

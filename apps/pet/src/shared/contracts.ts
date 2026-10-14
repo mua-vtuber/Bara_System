@@ -364,6 +364,37 @@ export type StartupCheck =
  * did not take the report (`claim_startup_report`), for example because its page failed to load. */
 export type StartupCheckResult = Exclude<StartupCheck, { kind: "failed" }> | (Extract<StartupCheck, { kind: "failed" }> & { feedback: Feedback });
 
+/** The last check for a newer pet (docs/decisions/2026-10-14-pet-self-update-spec.md 5.3): never checked, checked with
+ * no newer version, checked with a newer version, or failed. */
+export type SelfUpdateCheckState = "unknown" | "current" | "available" | "failed";
+/** `selfUpdate.status`: what the pet window draws from (spec 5.3), and nothing else.
+ * - `available`: the newer version the update button offers; kept through a later failed check (spec 5.3).
+ * - `failure`: the last check's code and sentence while `check` is `failed`.
+ * - `failureNoticeId`: changes only when a new run of failed checks starts; the pet window shows `failure` on its notice
+ *   line once per id (spec 5.4).
+ * - `announce`: the version whose notice bubble is still owed (`available` and not yet acknowledged).
+ * - `logError`: why the failure log (`self-update.log`) could not be written, if it could not.
+ * - `recordError`: why the notice record (`self-update.json`) could not be read or written, if it could not. While it
+ *   cannot be read, `announce` is null: the notice bubble is not shown on a guess. */
+export interface SelfUpdateStatus {
+  check: SelfUpdateCheckState;
+  available: string | null;
+  failure: { code: string; message: string } | null;
+  failureNoticeId: number | null;
+  announce: string | null;
+  logError: string | null;
+  recordError: string | null;
+}
+/** A downloaded installer whose size and sha256 matched the release (spec 6.2): `installer` is its absolute path inside
+ * the pet data folder's `updates` folder, the only place the host runs it from (`src-tauri/src/self_update.rs`). */
+export interface SelfUpdateInstallResult { version: string; installer: string }
+/** The bubble's update phases (spec 6.1), kept by the host (`src-tauri/src/update_bubble.rs`). */
+export const UPDATE_BUBBLE_PHASES = ["notice", "confirm", "busy", "failed"] as const;
+export type UpdateBubblePhase = (typeof UPDATE_BUBBLE_PHASES)[number];
+/** Native host -> bubble event (`native-host.json` `contract.updateBubbleEvent`). `sequence` comes from the same counter
+ * as `Feedback.sequence`, so the bubble orders results and update events as the host made them. */
+export interface UpdateBubbleEvent { phase: UpdateBubblePhase; version: string; sequence: number }
+
 export interface RpcOperations {
   "status": { params: Record<string, never>; result: AppStatus };
   "settings.get": { params: Record<string, never>; result: PublicSettings };
@@ -392,6 +423,9 @@ export interface RpcOperations {
   "backup.status": { params: Record<string, never>; result: BackupJobs };
   "backup.join": { params: { kind: BackupJobKind }; result: BackupResult | RestoreResult };
   "backup.cancel": { params: { kind: BackupJobKind }; result: { cancelled: boolean } };
+  "selfUpdate.status": { params: Record<string, never>; result: SelfUpdateStatus };
+  "selfUpdate.acknowledge": { params: { version: string }; result: SelfUpdateStatus };
+  "selfUpdate.install": { params: { version: string }; result: SelfUpdateInstallResult };
   "operation.cancel": { params: { requestId: string }; result: { cancelled: boolean } };
 }
 export type RpcMethod = keyof RpcOperations;
@@ -403,7 +437,8 @@ export const RPC_METHODS: readonly RpcMethod[] = [
   "status", "settings.get", "settings.save", "connection.test", "startup.check", "enrollment.start", "enrollment.poll",
   "memory.save", "memory.status", "memory.search", "memory.get", "memory.update", "assistant.ask", "ai.probe", "ai.discover",
   "cleanup.run", "cleanup.list", "cleanup.onSaveStatus", "install.local", "install.remote", "ssh.inspect", "backup.export", "backup.list", "backup.restore",
-  "backup.status", "backup.join", "backup.cancel", "operation.cancel",
+  "backup.status", "backup.join", "backup.cancel",
+  "selfUpdate.status", "selfUpdate.acknowledge", "selfUpdate.install", "operation.cancel",
 ];
 export interface RpcRequest { id: string; method: RpcMethod; params: unknown }
 export interface RpcError { code: string; message: string }
@@ -413,7 +448,7 @@ export type RpcResponse = { id: string; result: unknown } | { id: string; error:
  * and, when there is one, a numeric OS error or exit `status`; a service failure carries the service's
  * code and its checked public `message`, kept apart instead of joined into one string. */
 export interface HostErrorPayload { code: string; message?: string; status?: number }
-export const PROGRESS_STAGES = ["prepare", "models", "server", "host-key", "preflight", "transfer", "dependencies", "service", "search", "answer", "classify", "cleanup", "update-backup", "restore-verify", "restore-data", "restore-switch", "server-update"] as const;
+export const PROGRESS_STAGES = ["prepare", "models", "server", "host-key", "preflight", "transfer", "dependencies", "service", "search", "answer", "classify", "cleanup", "update-backup", "restore-verify", "restore-data", "restore-switch", "server-update", "self-update-download", "self-update-verify"] as const;
 export type ProgressStage = (typeof PROGRESS_STAGES)[number];
 /** Byte counts of one download inside a stage (today only `models`): file `part` of `parts` (1-based,
  * `part <= parts <= contract.progressDetailMaxParts`), `loaded` of `total` bytes, `total` 0 when unknown.

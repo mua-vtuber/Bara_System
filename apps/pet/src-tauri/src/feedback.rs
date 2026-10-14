@@ -3,11 +3,16 @@ mod mask;
 
 use crate::host_error::{code, HostError};
 use crate::overlay;
+use crate::update_bubble::{self, UpdateBubble};
 pub(crate) use audience::valid_audience;
 pub(crate) use mask::mask_sensitive;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{sync::Mutex, thread, time::Duration};
+use std::{
+    sync::{Mutex, MutexGuard},
+    thread,
+    time::Duration,
+};
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 
 /// The longest `summary` the bubble accepts, in bytes. `classificationFailureReason` repeats the
@@ -81,7 +86,7 @@ fn shows_bubble(origin: Option<Origin>, pet_visible: bool) -> bool {
     pet_visible || origin != Some(Origin::Background)
 }
 
-fn pet_visible(app: &AppHandle) -> bool {
+pub(crate) fn pet_visible(app: &AppHandle) -> bool {
     app.get_webview_window("pet")
         .and_then(|pet| pet.is_visible().ok())
         .unwrap_or(true)
@@ -213,14 +218,25 @@ fn parse_feedback(value: Value) -> Result<Feedback, String> {
 }
 
 #[derive(Default)]
-struct Store {
+pub(crate) struct Store {
     current: Option<Feedback>,
     last_answer: Option<Feedback>,
-    /// A background result that arrived while the pet was hidden, shown by "최근 결과". Kept
-    /// apart from `current` so a bubble already on screen keeps the result its buttons refer to.
+    /// A background result that arrived while the pet was hidden, or a result that arrived while
+    /// an update downloads (`update_bubble.rs`), shown by "최근 결과". Kept apart from `current`
+    /// so a bubble already on screen keeps the result its buttons refer to.
     held: Option<Feedback>,
     generation: u64,
+    /// The bubble's update phase (`update_bubble.rs`); `None` when the bubble shows results.
+    pub(crate) update: Option<UpdateBubble>,
 }
+
+/// What "최근 결과" brings back (`show_last`).
+enum Recall {
+    /// The running download's progress bubble; a held result keeps waiting until it ends.
+    Download,
+    Result(Box<Feedback>),
+}
+
 impl Store {
     fn present(&mut self, mut feedback: Feedback) -> (Feedback, u64) {
         self.generation = self.generation.wrapping_add(1);
@@ -234,14 +250,39 @@ impl Store {
     fn invalidate(&mut self) {
         self.generation = self.generation.wrapping_add(1);
     }
+    /// The next value of the counter results are numbered with: an update event takes it, which
+    /// also stops any earlier hide timer.
+    pub(crate) fn next_sequence(&mut self) -> u64 {
+        self.invalidate();
+        self.generation
+    }
     fn should_hide(&self, generation: u64) -> bool {
         self.generation == generation
+    }
+    /// While an update downloads, "최근 결과" shows the download again and leaves a held result
+    /// where it is (it would only be held again); otherwise the held result first, then the
+    /// current one, then the last answer.
+    fn recall(&mut self) -> Option<Recall> {
+        if update_bubble::holds_feedback(self.update.as_ref()) {
+            return Some(Recall::Download);
+        }
+        self.held
+            .take()
+            .or_else(|| self.current.clone())
+            .or_else(|| self.last_answer.clone())
+            .map(|feedback| Recall::Result(Box::new(feedback)))
     }
 }
 
 #[derive(Default)]
 pub struct FeedbackState {
     inner: Mutex<Store>,
+}
+
+impl FeedbackState {
+    pub(crate) fn lock(&self) -> Result<MutexGuard<'_, Store>, HostError> {
+        self.inner.lock().map_err(lock_failed)
+    }
 }
 
 fn duration(kind: Kind) -> Option<Duration> {
@@ -269,11 +310,20 @@ fn present(app: &AppHandle, feedback: Feedback) -> Result<(), HostError> {
 
 fn show(app: &AppHandle, feedback: Feedback) -> Result<(), HostError> {
     let state = app.state::<FeedbackState>();
-    let mut store = state.inner.lock().map_err(lock_failed)?;
+    let mut store = state.lock()?;
+    if update_bubble::holds_feedback(store.update.as_ref()) {
+        // An update downloading or starting keeps the bubble (spec 6.1); the result waits in
+        // "최근 결과" like a background result while the pet is hidden.
+        store.held = Some(feedback);
+        drop(store);
+        crate::tray::set_attention(app, true);
+        return Ok(());
+    }
+    // A result takes the bubble from an update notice, question or failure (spec 6.1); the update
+    // starts again from the pet's update button.
+    store.update = None;
     let (feedback, generation) = store.present(feedback);
-    let bubble = app
-        .get_webview_window("bubble")
-        .ok_or(HostError::new(code::HOST_WINDOW_MISSING))?;
+    let bubble = bubble_window(app)?;
     app.emit("pet-feedback", feedback.clone())
         .map_err(|_| HostError::new(code::HOST_WINDOW_OPERATION_FAILED))?;
     overlay::position_near_pet(app, "bubble")?;
@@ -282,20 +332,40 @@ fn show(app: &AppHandle, feedback: Feedback) -> Result<(), HostError> {
         .map_err(|_| HostError::new(code::HOST_WINDOW_OPERATION_FAILED))?;
     drop(store);
     if let Some(delay) = duration(feedback.kind) {
-        let app = app.clone();
-        thread::spawn(move || {
-            thread::sleep(delay);
-            let state = app.state::<FeedbackState>();
-            if let Ok(store) = state.inner.lock() {
-                if store.should_hide(generation) {
-                    if let Some(bubble) = app.get_webview_window("bubble") {
-                        let _ = bubble.hide();
-                    }
-                }
-            };
-        });
+        hide_later(app, generation, delay);
     }
     Ok(())
+}
+
+pub(crate) fn bubble_window(app: &AppHandle) -> Result<WebviewWindow, HostError> {
+    app.get_webview_window("bubble")
+        .ok_or(HostError::new(code::HOST_WINDOW_MISSING))
+}
+
+/// Shows the bubble next to the pet, or next to the quick input while it is open.
+pub(crate) fn reveal(app: &AppHandle) -> Result<(), HostError> {
+    let bubble = bubble_window(app)?;
+    overlay::position_near_pet(app, "bubble")?;
+    bubble
+        .show()
+        .map_err(|_| HostError::new(code::HOST_WINDOW_OPERATION_FAILED))
+}
+
+/// Hides the bubble after `delay` unless something newer was shown, or it was dismissed, meanwhile
+/// (`generation` is the counter value it was shown with).
+pub(crate) fn hide_later(app: &AppHandle, generation: u64, delay: Duration) {
+    let app = app.clone();
+    thread::spawn(move || {
+        thread::sleep(delay);
+        let state = app.state::<FeedbackState>();
+        if let Ok(store) = state.inner.lock() {
+            if store.should_hide(generation) {
+                if let Some(bubble) = app.get_webview_window("bubble") {
+                    let _ = bubble.hide();
+                }
+            }
+        };
+    });
 }
 
 #[tauri::command]
@@ -342,6 +412,11 @@ pub fn dismiss_feedback(window: WebviewWindow, app: AppHandle) -> Result<(), Hos
     let state = app.state::<FeedbackState>();
     let mut store = state.inner.lock().map_err(lock_failed)?;
     store.invalidate();
+    // Closing the bubble during an update's download only hides it: the download goes on and the
+    // pet's update button shows it again (spec 6.1). Any other update bubble ends here.
+    if !update_bubble::holds_feedback(store.update.as_ref()) {
+        store.update = None;
+    }
     app.get_webview_window("bubble")
         .ok_or(HostError::new(code::HOST_WINDOW_MISSING))?
         .hide()
@@ -395,19 +470,22 @@ pub fn show_last_feedback(window: WebviewWindow, app: AppHandle) -> Result<(), H
 
 /// Shows the latest result again in the bubble, because the user asked for it: a background
 /// result held while the pet was hidden first, then the current one (a save, an error), then the
-/// last answer. Shared by the pet's command and the tray's "최근 결과".
+/// last answer. While an update downloads it shows the download's progress instead and keeps a
+/// held result (and the tray mark) for later (`Store::recall`). Shared by the pet's command and
+/// the tray's "최근 결과".
 pub fn show_last(app: &AppHandle) -> Result<(), HostError> {
     let state = app.state::<FeedbackState>();
-    let mut store = state.inner.lock().map_err(lock_failed)?;
-    let feedback = store
-        .held
-        .take()
-        .or_else(|| store.current.clone())
-        .or_else(|| store.last_answer.clone())
+    let recalled = state
+        .lock()?
+        .recall()
         .ok_or(HostError::new(code::HOST_FEEDBACK_UNAVAILABLE))?;
-    drop(store);
-    crate::tray::set_attention(app, false);
-    show(app, feedback)
+    match recalled {
+        Recall::Download => reveal(app),
+        Recall::Result(feedback) => {
+            crate::tray::set_attention(app, false);
+            show(app, *feedback)
+        }
+    }
 }
 
 /// Presents a host-raised notice bubble (a position save/read failure) without going through
@@ -454,246 +532,4 @@ pub fn notify_user_host_error(app: &AppHandle, id: &str, host_error_code: &str) 
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn a_hidden_pet_only_pops_up_results_the_user_asked_for() {
-        assert!(shows_bubble(None, false));
-        assert!(shows_bubble(Some(Origin::User), false));
-        assert!(!shows_bubble(Some(Origin::Background), false));
-        for origin in [None, Some(Origin::User), Some(Origin::Background)] {
-            assert!(shows_bubble(origin, true));
-        }
-    }
-
-    #[test]
-    fn origin_is_optional_and_limited_to_user_or_background() {
-        let base = json!({"id":"s","kind":"error","mode":"input","summary":"x","detail":"x"});
-        assert_eq!(parse_feedback(base.clone()).unwrap().origin, None);
-        for (value, expected) in [("user", Origin::User), ("background", Origin::Background)] {
-            let mut feedback = base.clone();
-            feedback["origin"] = json!(value);
-            assert_eq!(parse_feedback(feedback).unwrap().origin, Some(expected));
-        }
-        let mut unknown = base;
-        unknown["origin"] = json!("ai");
-        assert!(parse_feedback(unknown).is_err());
-    }
-    #[test]
-    fn feedback_keeps_plain_urls_and_rejects_structurally_invalid_shapes() {
-        let audience = r#"{"mode":"existing","origin":"https://example.com","ssh":null}"#;
-        let valid = json!({"id":"a_1","kind":"answer","mode":"question","summary":"링크 https://github.com/openai/codex",
-            "detail":"문서 https://example.com/docs 를 저장했어요","sources":[{"id":1,"content":"https://example.com/docs"}],"generated":true,
-            "audience":audience,"answerOutcome":"found"});
-        let parsed = parse_feedback(valid).unwrap();
-        assert!(parsed.summary.contains("https://github.com/openai/codex"));
-        assert!(parsed.detail.contains("https://example.com/docs"));
-
-        for value in [
-            json!({"id":"a","kind":"saved","mode":"input","summary":"x","detail":"x","memoryId":1}),
-            json!({"id":"a","kind":"answer","mode":"question","summary":"x","detail":"x","sources":[{"id":1,"content":"x"}],"answerOutcome":"found"}),
-            json!({"id":"a","kind":"saved","mode":"input","summary":"x","detail":"x","memoryId":1,"audience":"x"}),
-            json!({"id":"a","kind":"saved","mode":"input","summary":"x","detail":"x","memoryId":1,"audience":"a".repeat(4097)}),
-            json!({"id":"a","kind":"saved","mode":"input","summary":"x","detail":"x","memoryId":1,
-                "audience":r#"{"mode":"existing","origin":"https://example.com","ssh":null,"token":"secret"}"#}),
-            json!({"id":"a","kind":"answer","mode":"question","summary":"x","detail":"x","action":{"url":"https://example.com"},"answerOutcome":"found"}),
-            json!({"id":"a","kind":"answer","mode":"question","summary":"x","detail":"x","sources":[{"id":0,"content":"x"}],"answerOutcome":"found"}),
-            json!({"id":"a","kind":"answer","mode":"question","summary":"x","detail":"x","sequence":null,"answerOutcome":"found"}),
-            json!({"id":"a","kind":"answer","mode":"question","summary":" ","detail":"x","answerOutcome":"found"}),
-            json!({"id":"a","kind":"answer","mode":"input","summary":"x","detail":"x","answerOutcome":"found"}),
-            json!({"id":"a","kind":"answer","mode":"question","summary":"x","detail":"x","sources":vec![json!({"id":1,"content":"x"});11],"answerOutcome":"found"}),
-        ] {
-            assert!(parse_feedback(value).is_err());
-        }
-    }
-
-    /// PN-3: boundary cases the screen's own masking (`feedback-model.ts` `safeFeedbackText`)
-    /// already lets through must not turn a confirmed save into a rejected feedback here; the
-    /// content is masked instead of the whole feedback being rejected. Structural rejects
-    /// (audience, id, size, sequence) are unaffected, see the test above.
-    #[test]
-    fn boundary_credential_shapes_are_masked_not_rejected() {
-        let mask = "[인증정보 생략]";
-        for (detail, expect_masked) in [
-            ("trailing Bearer ", true),
-            ("api_key= with no value", true),
-            ("scheme missing ://user@host here", true),
-            ("ssh://git@github.com/openai/codex", true),
-            ("https://example.com/#bara-token=secret", true),
-            ("https://example.com/?access_token=secret", true),
-            ("Bearer token", true),
-            ("https://u:p@example.com", true),
-        ] {
-            let parsed = parse_feedback(
-                json!({"id":"a","kind":"answer","mode":"question","summary":"x","detail":detail,"answerOutcome":"found"}),
-            )
-            .unwrap_or_else(|error| panic!("expected Ok for {detail:?}, got {error}"));
-            assert!(
-                expect_masked == parsed.detail.contains(mask),
-                "detail {detail:?} -> {:?}",
-                parsed.detail
-            );
-        }
-    }
-
-    /// PFIX-3 Medium 2: every content field is masked, not only `detail`.
-    #[test]
-    fn summary_and_source_contents_are_masked_too() {
-        let audience = r#"{"mode":"existing","origin":"https://example.com","ssh":null}"#;
-        let parsed = parse_feedback(json!({"id":"a","kind":"answer","mode":"question",
-            "summary":"키는\napi_key = s3cret 이에요","detail":"x",
-            "sources":[{"id":1,"content":"Bearer\n\nabc123 끝"},{"id":2,"content":"https://h.example/?token=t 링크"}],
-            "audience":audience,"answerOutcome":"found"}))
-        .unwrap();
-        assert_eq!(parsed.summary, "키는\n[인증정보 생략] 이에요");
-        let sources = parsed.sources.unwrap();
-        assert_eq!(sources[0].content, "[인증정보 생략] 끝");
-        assert_eq!(sources[1].content, "[인증정보 생략] 링크");
-    }
-
-    /// A save the server confirmed whose AI classification failed carries
-    /// `classificationFailureReason` (`feedback-model.ts` `savedFeedback`). The host must accept it
-    /// and hand it to the bubble unchanged; `deny_unknown_fields` still turns away anything else.
-    #[test]
-    fn saved_feedback_with_classification_failure_reason_round_trips() {
-        let audience = r#"{"mode":"existing","origin":"https://example.com","ssh":null}"#;
-        let reason = "저장은 완료됐지만 분류에 실패했습니다: AI 서버에 연결할 수 없습니다.";
-        let saved = json!({"id":"a_1","kind":"saved","mode":"input","summary":reason,"detail":"x",
-            "memoryId":7,"requestId":"r_1","audience":audience,"classificationFailureReason":reason});
-        let parsed = parse_feedback(saved).expect("a saved feedback with a failure reason parses");
-        let emitted = serde_json::to_value(&parsed).unwrap();
-        assert_eq!(emitted["classificationFailureReason"], json!(reason));
-
-        let plain = parse_feedback(
-            json!({"id":"a_2","kind":"saved","mode":"input","summary":"저장했어요","detail":"x"}),
-        )
-        .unwrap();
-        assert!(serde_json::to_value(&plain)
-            .unwrap()
-            .get("classificationFailureReason")
-            .is_none());
-
-        let with_unknown = json!({"id":"a_3","kind":"saved","mode":"input","summary":reason,"detail":"x",
-            "classificationFailureReason":reason,"unexpected":true});
-        assert!(parse_feedback(with_unknown).is_err());
-    }
-
-    /// The failure reason is a content field like `summary`: masked, and bounded to the summary's
-    /// length, so it cannot carry what the other content fields may not.
-    #[test]
-    fn classification_failure_reason_is_masked_and_bounded_like_summary() {
-        let masked = parse_feedback(
-            json!({"id":"a","kind":"saved","mode":"input","summary":"x","detail":"x",
-            "classificationFailureReason":"분류 실패: api_key = s3cret 이에요"}),
-        )
-        .unwrap();
-        assert_eq!(
-            serde_json::to_value(&masked).unwrap()["classificationFailureReason"],
-            json!("분류 실패: [인증정보 생략] 이에요")
-        );
-
-        let longest = "a".repeat(SUMMARY_MAX_BYTES);
-        assert!(parse_feedback(
-            json!({"id":"a","kind":"saved","mode":"input","summary":"x","detail":"x",
-            "classificationFailureReason":longest})
-        )
-        .is_ok());
-        let too_long = "a".repeat(SUMMARY_MAX_BYTES + 1);
-        assert!(parse_feedback(
-            json!({"id":"a","kind":"saved","mode":"input","summary":"x","detail":"x",
-            "classificationFailureReason":too_long})
-        )
-        .is_err());
-    }
-
-    /// `answerOutcome` is decided where the answer is built; the host takes each listed value as it
-    /// comes and hands it on unchanged, also when a stored answer is shown again (`Store::present`).
-    #[test]
-    fn answer_feedback_with_each_listed_outcome_is_accepted_and_kept() {
-        for outcome in ["found", "notFound", "aiFailed"] {
-            let parsed = parse_feedback(
-                json!({"id":"a_1","kind":"answer","mode":"question","summary":"x","detail":"x",
-                "answerOutcome":outcome}),
-            )
-            .unwrap_or_else(|error| panic!("expected Ok for {outcome}, got {error}"));
-            assert_eq!(
-                serde_json::to_value(&parsed).unwrap()["answerOutcome"],
-                json!(outcome)
-            );
-            let mut store = Store::default();
-            store.present(parsed);
-            let again = serde_json::to_value(store.last_answer.as_ref().unwrap()).unwrap();
-            assert_eq!(again["answerOutcome"], json!(outcome));
-        }
-    }
-
-    /// An `answer` without a listed outcome is a contract violation and is rejected, never guessed:
-    /// missing, empty, wrongly spelled, padded, or not a string.
-    #[test]
-    fn answer_feedback_without_a_listed_outcome_is_rejected() {
-        let answer =
-            json!({"id":"a_1","kind":"answer","mode":"question","summary":"x","detail":"x"});
-        assert!(parse_feedback(answer.clone()).is_err());
-        for bad in [
-            json!(null),
-            json!(""),
-            json!("Found"),
-            json!("found "),
-            json!("not_found"),
-            json!("success"),
-            json!(1),
-            json!(true),
-        ] {
-            let mut value = answer.clone();
-            value["answerOutcome"] = bad.clone();
-            assert!(parse_feedback(value).is_err(), "{bad}");
-        }
-    }
-
-    /// Only an `answer` has an outcome; any other kind that carries one is rejected.
-    #[test]
-    fn a_feedback_that_is_not_an_answer_cannot_carry_an_outcome() {
-        for (kind, mode) in [
-            ("working", "input"),
-            ("working", "question"),
-            ("saved", "input"),
-            ("error", "input"),
-            ("error", "question"),
-        ] {
-            let plain = json!({"id":"a_1","kind":kind,"mode":mode,"summary":"x","detail":"x"});
-            assert!(parse_feedback(plain.clone()).is_ok(), "{kind}/{mode}");
-            for outcome in ["found", "notFound", "aiFailed"] {
-                let mut value = plain.clone();
-                value["answerOutcome"] = json!(outcome);
-                assert!(
-                    parse_feedback(value).is_err(),
-                    "{kind}/{mode} with {outcome}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn old_timer_cannot_hide_new_feedback() {
-        let mut store = Store::default();
-        let first = parse_feedback(
-            json!({"id":"one","kind":"saved","mode":"input","summary":"Saved","detail":"x"}),
-        )
-        .unwrap();
-        let second = parse_feedback(
-            json!({"id":"two","kind":"answer","mode":"question","summary":"Answer","detail":"y","answerOutcome":"notFound"}),
-        )
-        .unwrap();
-        let (first, old) = store.present(first);
-        let (second, newest) = store.present(second);
-        assert_eq!(first.sequence, Some(old));
-        assert_eq!(second.sequence, Some(newest));
-        assert!(!store.should_hide(old));
-        assert!(store.should_hide(newest));
-        store.invalidate();
-        assert!(!store.should_hide(newest));
-        assert_eq!(store.last_answer.as_ref().unwrap().id, "two");
-    }
-}
+mod tests;

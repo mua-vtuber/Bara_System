@@ -26,6 +26,9 @@ const COMPONENT = /^[a-z][a-z0-9-]{0,31}$/;
 
 export function isComponentName(name: string): boolean { return COMPONENT.test(name); }
 
+/** Whether `version` is a release version `compareVersions` accepts: MAJOR.MINOR.PATCH, each 1 to 6 digits. */
+export function isReleaseVersion(version: string): boolean { return VERSION.test(version); }
+
 function parts(version: string): [number, number, number] {
   const match = VERSION.exec(version);
   if (!match) throw serviceError("RELEASE_VERSION_INVALID", messages.releaseErrors.RELEASE_VERSION_INVALID(version));

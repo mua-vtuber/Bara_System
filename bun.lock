@@ -33,7 +33,7 @@
     },
     "apps/memory": {
       "name": "memory",
-      "version": "0.1.8",
+      "version": "0.1.9",
       "dependencies": {
         "@anthropic-ai/sdk": "^0.96.0",
         "@hono/mcp": "^0.3.1",

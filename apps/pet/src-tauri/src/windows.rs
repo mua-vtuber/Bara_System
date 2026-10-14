@@ -13,6 +13,8 @@ mod imp {
     const KEY_SET_VALUE: u32 = 0x0002;
     const REG_SZ: u32 = 1;
     const CREATE_NO_WINDOW: u32 = 0x08000000;
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
     const PROCESS_SET_QUOTA: u32 = 0x0100;
     const PROCESS_TERMINATE: u32 = 0x0001;
     const JOB_KILL_ON_CLOSE: u32 = 0x00002000;
@@ -369,6 +371,27 @@ mod imp {
         command.creation_flags(CREATE_NO_WINDOW);
     }
 
+    /// Starts `program` on its own: no console, its own process group, and not in the service's Job
+    /// object (only the service process is attached to one, `attach_job`), so it keeps running after
+    /// the pet quits. Only the OS error number of a failed start is kept; its text may name a path.
+    pub fn launch_detached(program: &std::path::Path, args: &[&str]) -> Result<(), HostError> {
+        use std::os::windows::process::CommandExt;
+        let mut command = std::process::Command::new(program);
+        command
+            .args(args)
+            .creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        if let Some(folder) = program.parent() {
+            command.current_dir(folder);
+        }
+        command
+            .spawn()
+            .map(drop)
+            .map_err(|error| HostError::io(code::HOST_UPDATE_LAUNCH_FAILED, &error))
+    }
+
     /// Test-only: waits up to `timeout` for process `pid` to end. `Ok(true)` once it has ended,
     /// also when no process with that id exists any more; `Ok(false)` if it is still running.
     #[cfg(test)]
@@ -501,6 +524,15 @@ pub fn choose_key_file() -> Result<Option<String>, crate::host_error::HostError>
 }
 #[cfg(not(windows))]
 pub fn hide_process(_: &mut std::process::Command) {}
+#[cfg(not(windows))]
+pub fn launch_detached(
+    _: &std::path::Path,
+    _: &[&str],
+) -> Result<(), crate::host_error::HostError> {
+    Err(crate::host_error::HostError::new(
+        crate::host_error::code::HOST_UPDATE_LAUNCH_FAILED,
+    ))
+}
 #[cfg(not(windows))]
 pub struct SingleInstance;
 #[cfg(not(windows))]

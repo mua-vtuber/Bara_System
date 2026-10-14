@@ -10,8 +10,10 @@ mod overlay;
 mod panel;
 mod policy;
 mod position;
+mod self_update;
 mod startup;
 mod tray;
+mod update_bubble;
 mod vault;
 mod windows;
 
@@ -577,7 +579,10 @@ fn main() {
             feedback::dismiss_feedback,
             feedback::open_feedback,
             feedback::get_last_answer,
-            feedback::show_last_feedback
+            feedback::show_last_feedback,
+            update_bubble::show_update_bubble,
+            update_bubble::set_update_bubble,
+            self_update::launch_update_installer
         ])
         .build(context);
     let app = match app {

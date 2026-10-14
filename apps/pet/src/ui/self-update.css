@@ -1,0 +1,78 @@
+/* The pet's own update (docs/decisions/2026-10-14-pet-self-update-spec.md 6.1, 7): the update bubble's card and
+   buttons, and the pet window's update button. Colors come from the shared tokens in style.css; sizes are here. */
+:root{
+  --update-actions-gap:8px;
+  --update-button-padding-y:5px;
+  --update-button-padding-x:16px;
+  --update-button-radius:10px;
+  --update-button-font-size:13px;
+  --pet-update-size:22px;
+  --pet-update-inset:4px;
+  --pet-update-font-size:14px;
+  --pet-update-focus-offset:1px;
+}
+.feedback-card[hidden]{
+  display:none
+}
+.update-card{
+  flex-direction:column;
+  align-items:stretch;
+  justify-content:center;
+  gap:var(--update-actions-gap)
+}
+.update-card[data-clickable=false]{
+  cursor:default
+}
+.update-actions{
+  display:flex;
+  justify-content:flex-end;
+  gap:var(--update-actions-gap)
+}
+.update-actions[hidden]{
+  display:none
+}
+.update-yes,.update-no{
+  padding:var(--update-button-padding-y) var(--update-button-padding-x);
+  border:0;
+  border-radius:var(--update-button-radius);
+  font-size:var(--update-button-font-size);
+  font-weight:700
+}
+.update-yes{
+  background:var(--accent);
+  color:var(--on-accent)
+}
+.update-yes:hover:not(:disabled){background:var(--accent-hover)}
+.update-no{
+  background:var(--accent-pale);
+  color:var(--muted-strong)
+}
+.update-yes:disabled,.update-no:disabled{cursor:default}
+[data-kind=update] .feedback-card{border-color:var(--line-accent)}
+
+/* The pet window's update button: bottom right of the 150 x 165 window, inside the floor band below the character
+   and the notice line, shown only while a newer version is offered (hidden attribute). */
+.pet-update{
+  position:absolute;
+  right:var(--pet-update-inset);
+  bottom:var(--pet-update-inset);
+  width:var(--pet-update-size);
+  height:var(--pet-update-size);
+  padding:0;
+  border:1px solid var(--line-accent);
+  border-radius:50%;
+  background:var(--accent);
+  color:var(--on-accent);
+  font-size:var(--pet-update-font-size);
+  font-weight:700;
+  line-height:1;
+  cursor:pointer
+}
+.pet-update:hover{background:var(--accent-hover)}
+.pet-update:focus-visible{
+  outline:2px solid var(--focus-ring);
+  outline-offset:var(--pet-update-focus-offset)
+}
+.pet-update[hidden]{
+  display:none
+}
