@@ -219,7 +219,7 @@ export const ALLOCATORS = Object.freeze({ memories: 'knowledge_nodes', memoryEdg
 export const INDEX_TABLES = Object.freeze(['vec_nodes','concept_vec','person_vec','entities_vec','chunk_summary_vec','relation_summary_vec','concept_siglip_vec','image_vec','knowledge_nodes_fts','knowledge_nodes_trgm','concept_nodes_fts','concept_nodes_uni','persons_fts','persons_uni','entities_fts','entities_uni']);
 /** 이 포터블 형식(v1)이 읽을 수 있는 원본 스키마 버전 — 기준 47 과 그 뒤 마이그레이션. 펫은 업데이트 직전에
  * 새 프로그램으로 옛 DB 를 내보내므로 바로 이전 배포의 버전도 받아야 한다(아래 assertSourceSchema 주석). */
-export const SUPPORTED_SOURCE_SCHEMA_VERSIONS: readonly number[] = Object.freeze([47, 48, 49]);
+export const SUPPORTED_SOURCE_SCHEMA_VERSIONS: readonly number[] = Object.freeze([47, 48, 49, 50]);
 
 /** 포터블 형식 v1 이 담지 않는 표. since 는 그 표가 생긴 스키마 버전이다. */
 export interface ExcludedTable { columns: readonly string[]; since: number; reason: string }
@@ -243,6 +243,10 @@ export const EXCLUDED_TABLE_SPECS: Readonly<Record<string, ExcludedTable>> = Obj
   document_ocr_daily_usage: {
     columns: Object.freeze(['day', 'page_calls']),
     since: 49, reason: 'Server OCR daily call counter is transient processing state, not part of portable format v1',
+  },
+  backfill_attempts: {
+    columns: Object.freeze(['kind', 'target_key', 'node_id', 'input_fingerprint', 'status', 'attempt_count', 'next_retry_at', 'last_error', 'last_attempt_at']),
+    since: 50, reason: '백필 재시도 기록은 일시 처리 상태라 포터블 형식 v1 에 넣지 않는다',
   },
 });
 

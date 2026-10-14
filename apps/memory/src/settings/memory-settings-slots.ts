@@ -62,6 +62,12 @@ export interface LlmExtractorSlot {
     intervalMin: number;
     batchSize: number;
     minImportance: number;
+    /** 같은 글로 센 실패(시간 초과 포함)가 이만큼이면 자동 재시도를 멈춘다(2026-10-14 backfill-retry-ledger spec 4.4). */
+    maxAttempts: number;
+    /** 첫 재시도 대기(분). 센 실패마다 늘어난다(배수는 ledger.ts 의 BACKFILL_RETRY_BACKOFF_FACTOR). */
+    retryDelayMin: number;
+    /** 늘어나는 대기의 상한(분). retryDelayMin 이상이어야 한다(설정 검사가 거부). */
+    retryMaxDelayMin: number;
   };
 }
 
@@ -158,6 +164,12 @@ export interface LlmVisionSlot {
    */
   backfill: {
     batchSize: number;
+    /** 같은 이미지로 센 실패(시간 초과 포함)가 이만큼이면 자동 재시도를 멈춘다(2026-10-14 backfill-retry-ledger spec 4.4). */
+    maxAttempts: number;
+    /** 첫 재시도 대기(분). 센 실패마다 늘어난다(배수는 ledger.ts 의 BACKFILL_RETRY_BACKOFF_FACTOR). */
+    retryDelayMin: number;
+    /** 늘어나는 대기의 상한(분). retryDelayMin 이상이어야 한다(설정 검사가 거부). */
+    retryMaxDelayMin: number;
   };
 }
 

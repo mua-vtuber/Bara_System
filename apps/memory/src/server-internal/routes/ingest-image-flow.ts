@@ -205,7 +205,11 @@ export async function handleImageIngest(
         type: "image",
         images: [imageResult],
         attachedToNodeId,
-        captionFlow: captionResult,
+        // 실패 원인(failure)은 캡션 백필 전용 칸이라 응답에 싣지 않는다 — 응답 모양을 바꾸지 않는다(2026-10-14 spec 4.6).
+        captionFlow:
+          captionResult === null
+            ? null
+            : { called: captionResult.called, caption: captionResult.caption, captionNodeId: captionResult.captionNodeId },
       },
       201,
     );

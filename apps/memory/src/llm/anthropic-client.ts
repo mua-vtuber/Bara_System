@@ -19,7 +19,7 @@
  * 매 분당 1회 이상 추출 시 캐시 히트로 비용·지연 절감.
  */
 
-import Anthropic from "@anthropic-ai/sdk";
+import Anthropic, { type ClientOptions } from "@anthropic-ai/sdk";
 import {
   APIConnectionTimeoutError,
   APIError,
@@ -33,6 +33,7 @@ import type {
 } from "./types.ts";
 import { LlmRequestError, parseRetryAfterMs } from "./errors.ts";
 import { anthropicSamplingParams } from "./anthropic-model-capabilities.ts";
+import { ANTHROPIC_SDK_FETCH_OPTIONS } from "./bun-fetch.ts";
 
 /** Anthropic stop_reason 원문 → LlmChatResult.stopReason 3값 정규화. */
 function normalizeAnthropicStopReason(
@@ -100,6 +101,20 @@ export interface AnthropicClientOptions {
   timeoutMs?: number;
 }
 
+/**
+ * SDK 생성자 옵션. fetchOptions 로 Bun 기본 300초 제한을 끈다(bun-fetch.ts) — 그래야 timeoutMs(추출 900000 등)가
+ * 실제 제한이 된다. SDK 0.96 은 전역 fetch(Bun)를 쓰고 이 칸을 매 요청에 펼친다.
+ */
+export function buildAnthropicClientOptions(opts: AnthropicClientOptions): ClientOptions {
+  return {
+    apiKey: opts.apiKey,
+    ...(opts.baseURL ? { baseURL: opts.baseURL } : {}),
+    ...(opts.maxRetries !== undefined ? { maxRetries: opts.maxRetries } : {}),
+    ...(opts.timeoutMs !== undefined ? { timeout: opts.timeoutMs } : {}),
+    fetchOptions: ANTHROPIC_SDK_FETCH_OPTIONS,
+  };
+}
+
 export class AnthropicClient implements ObservableLlmClient {
   private readonly client: Anthropic;
   private readonly model: string;
@@ -113,12 +128,7 @@ export class AnthropicClient implements ObservableLlmClient {
           "settings.llm.anthropicApiKey 를 채우거나 ollama 경로로 전환하라.",
       );
     }
-    this.client = new Anthropic({
-      apiKey: opts.apiKey,
-      ...(opts.baseURL ? { baseURL: opts.baseURL } : {}),
-      ...(opts.maxRetries !== undefined ? { maxRetries: opts.maxRetries } : {}),
-      ...(opts.timeoutMs !== undefined ? { timeout: opts.timeoutMs } : {}),
-    });
+    this.client = new Anthropic(buildAnthropicClientOptions(opts));
     this.model = opts.model;
     this.enablePromptCache = opts.enablePromptCache ?? true;
     this.defaultMaxOutputTokens =

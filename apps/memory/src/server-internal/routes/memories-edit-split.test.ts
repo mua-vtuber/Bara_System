@@ -14,6 +14,7 @@
  *  - 분리한 N 은 수정 요청 안에서 LLM 을 부르지 않고 추출 대기로 남아, 백필이 뒤에 추출한다(B1-08, D9).
  */
 
+import { TEST_EXTRACTION_BACKFILL_RETRY } from "../../test-utils/backfill-retry.ts";
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import type { Hono } from "hono";
@@ -185,7 +186,7 @@ async function sharedOrigin(h: Harness, messageId: string): Promise<number> {
 }
 
 async function runBackfill(h: Harness): Promise<BackfillCycleSummary> {
-  const handle = startBackfillScheduler(h.extractor, h.store, { intervalMs: 60_000, batchSize: 10 });
+  const handle = startBackfillScheduler(h.extractor, h.store, { intervalMs: 60_000, batchSize: 10, retry: TEST_EXTRACTION_BACKFILL_RETRY });
   try {
     return await handle.tickNow();
   } finally {

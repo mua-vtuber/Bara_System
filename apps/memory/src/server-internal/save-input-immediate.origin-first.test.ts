@@ -15,6 +15,7 @@
  *    자식 INSERT 를 막아 재현).
  */
 
+import { TEST_EXTRACTION_BACKFILL_RETRY } from "../test-utils/backfill-retry.ts";
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import type { Hono } from "hono";
@@ -252,7 +253,7 @@ describe("C2 — 원문과 같은 문장을 돌려주는 즉시 추출", () => {
 describe("원문은 LLM 응답 뒤에 저장된다", () => {
   test("잠금 없이 부르는 POST /memories 의 LLM 이 느린 동안 백필 주기는 원문을 후보로 잡지 않는다", async () => {
     const h = makeHarness();
-    const scheduler = startBackfillScheduler(h.extractor, h.store, { intervalMs: 60_000, batchSize: 5 });
+    const scheduler = startBackfillScheduler(h.extractor, h.store, { intervalMs: 60_000, batchSize: 5, retry: TEST_EXTRACTION_BACKFILL_RETRY });
     try {
       const release = h.llm.hold();
       const arrived = h.llm.nextRequest();

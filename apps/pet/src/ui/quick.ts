@@ -5,6 +5,8 @@ import { button, element } from "./dom.ts";
 import { answerFeedback, canShowProgress, errorFeedback, failedClassificationReason, mergeIncomingDraft, quickLengthError, reserveOperation, savedFeedback, storageAccessFailed, storageAccessSucceeded, storageOutboxRead, switchQuickMode, workingFeedback, type OperationState, type QuickMode, type QuickModeState, type StorageAccess, type StorageNotices } from "./feedback-model.ts";
 import { labels, messages } from "./messages.ts";
 import { loadQuickMode, quickSendState } from "./quick-model.ts";
+import { recordAnswer, recordSave } from "./recent-history.ts";
+import { answerEntry, saveEntry } from "./recent-history-model.ts";
 import { completeDraft, nextDraft, shouldSend } from "./state.ts";
 
 export function renderQuick(host: HTMLElement): () => void {
@@ -57,6 +59,14 @@ export function renderQuick(host: HTMLElement): () => void {
    * never dropped silently. */
   function publishOrRecord(feedback: Feedback, text: string): Promise<void> {
     return queueFeedback(feedback).catch(error => { liveStatus.textContent = messages.quick.bubbleUnpublished(text, errorMessage(error)); });
+  }
+  /** Adds a finished save or answer to the recent lists. The work itself already ended, so a list that cannot be
+   * written does not change its result: the cause is returned, to be shown after the result's own bubble. */
+  function remember(write: () => void): string | null {
+    try { write(); return null; } catch (error) { return messages.recent.recordFailed(errorMessage(error)); }
+  }
+  async function reportRememberFailure(mode: QuickMode, text: string | null) {
+    if (text) { liveStatus.textContent = text; await publishOrRecord(errorFeedback(crypto.randomUUID(), mode, text), text); }
   }
   function focusField() { requestAnimationFrame(() => { if (live && document.visibilityState === "visible") area.focus(); }); }
   function updateButton() {
@@ -125,6 +135,8 @@ export function renderQuick(host: HTMLElement): () => void {
         if (state.requestId === submittedId) {
           const latest = readDraft(); state = { ...state, content: latest.content, requestId: latest.requestId }; area.value = latest.content;
         }
+        const entry = saveEntry(content, result, audience, new Date().toISOString());
+        const rememberFailure = entry ? remember(() => recordSave(entry)) : null;
         if (result.state === "saved") {
           const classification = result.classification;
           const captureLabel = classification?.outcome === "applied" && classification.capture ? labels[classification.capture.kind] : undefined;
@@ -135,12 +147,16 @@ export function renderQuick(host: HTMLElement): () => void {
         } else {
           await queueFeedback(errorFeedback(operationId, mode, result.message ?? messages.feedback.unknownDetail, submittedId, audience));
         }
+        await reportRememberFailure(mode, rememberFailure);
       } else {
         const answer = await request("assistant.ask", { question: content, audience }, operationId);
         if (operation?.id === operationId) { operation.settled = true; operation = null; }
         const current = readDraft(); const next = completeDraft(current, submittedId);
         if (next !== current) { writeDraft(next); state = { ...state, ...next }; area.value = next.content; document.dispatchEvent(new Event(DRAFT_EVENT)); }
-        await queueFeedback(answerFeedback(operationId, answer.text, answer.sources, answer.generated, answer.outcome, answer.audience === audience ? audience : undefined));
+        const feedback = answerFeedback(operationId, answer.text, answer.sources, answer.generated, answer.outcome, answer.audience === audience ? audience : undefined);
+        const rememberFailure = remember(() => recordAnswer(answerEntry(content, feedback, answer.generated, answer.outcome, new Date().toISOString())));
+        await queueFeedback(feedback);
+        await reportRememberFailure(mode, rememberFailure);
       }
     } catch (error) {
       if (operation?.id === operationId) { operation.settled = true; operation = null; }

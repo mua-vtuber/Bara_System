@@ -19,6 +19,7 @@
  * by-id 편집 규칙(설계 5.7, Q2): REST·MCP 편집은 같은 id 로 고치고 출처 행을 더하지 않는다 — 편집자는 출처가 아니다.
  */
 
+import { TEST_EXTRACTION_BACKFILL_RETRY } from "../../test-utils/backfill-retry.ts";
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -263,7 +264,7 @@ function lineageParents(db: Database, id: number): number[] {
 }
 
 async function runBackfill(h: Harness): Promise<BackfillCycleSummary> {
-  const handle = startBackfillScheduler(h.extractor, h.store, { intervalMs: 60_000, batchSize: 10 });
+  const handle = startBackfillScheduler(h.extractor, h.store, { intervalMs: 60_000, batchSize: 10, retry: TEST_EXTRACTION_BACKFILL_RETRY });
   try {
     return await handle.tickNow();
   } finally {

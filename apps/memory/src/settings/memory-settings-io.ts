@@ -24,7 +24,7 @@ import { validateStageAllocation } from "../memory/cleanup-deep-pass/cycle-budge
 import { migrateLegacyKeys } from "./migrate-legacy-keys";
 import type { SecretCopy } from "./migrate-document-ocr-api";
 import { SecretStore } from "./secrets";
-import { validateMemorySettings } from "./memory-settings-validate";
+import { backfillRetryDelayErrors, validateMemorySettings } from "./memory-settings-validate";
 import {
   cloneDefaults,
   deepMergeWithDefaults,
@@ -242,6 +242,11 @@ export function getMemorySettings(path: string, secretsPath: string): MemorySett
     throw new Error(
       `memory-settings 검증 실패: ${path} — ${allocValidation.error}`,
     );
+  }
+  // 2026-10-14 backfill-retry-ledger spec 4.4 — 손으로 고친 파일도 최대 대기 < 첫 대기면 읽기에서 멈춘다(조용히 맞춰 쓰지 않음).
+  const retryDelayErrors = backfillRetryDelayErrors(merged as unknown as Record<string, unknown>);
+  if (retryDelayErrors.length > 0) {
+    throw new Error(`memory-settings 검증 실패: ${path} — ${retryDelayErrors.join("; ")}`);
   }
   // secret 파일의 진짜 키를 settings 객체에 얹는다 — 호출처 회귀 0.
   overlaySecrets(merged, secretStore);

@@ -1,0 +1,17 @@
+/* The recent questions and saves lists (`recent-history.ts`). Colors come from the surface's tokens. */
+.recent-list{border-top:1px solid var(--line);margin-top:16px;padding-top:14px}
+.recent-heading{font-size:15px;margin:0 0 10px}
+.recent-error{color:var(--danger)}
+.recent-entry{border-bottom:1px solid var(--line);padding:8px 0}
+.recent-summary{display:flex;align-items:baseline;gap:10px;cursor:pointer;font-size:13px;font-weight:700}
+.recent-question{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.recent-entry[open] .recent-question{white-space:pre-wrap;overflow-wrap:anywhere}
+.recent-time{flex:none;font-size:11px;font-weight:400;color:var(--muted)}
+.recent-entry .answer{padding:10px 0}
+.recent-save{border-bottom:1px solid var(--line);padding:10px 0;display:grid;gap:4px}
+.recent-save-top{display:flex;align-items:baseline;gap:10px}
+.recent-outcome{flex:1;min-width:0;font-size:13px;font-weight:700;color:var(--accent);overflow-wrap:anywhere}
+.recent-save[data-outcome=rejected] .recent-outcome,
+.recent-save[data-outcome=classificationFailed] .recent-outcome{color:var(--danger)}
+.recent-content{margin:0;font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.recent-save .text-button{justify-self:start}

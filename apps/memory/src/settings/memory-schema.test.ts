@@ -603,10 +603,10 @@ describe("MEMORY_SCHEMA — Phase 5.6 W5 + 11b T11: llm 세 슬롯 (extractor + 
     const backfill = slot.properties.backfill!;
     const backfillKeys = Object.keys(backfill.properties ?? {}).sort();
     // 캡션 시점·주기 분은 extractor 권위 — vision 에는 한 사이클 batchSize 만.
-    expect(backfillKeys).toEqual(["batchSize"]);
+    expect(backfillKeys).toEqual(["batchSize", "maxAttempts", "retryDelayMin", "retryMaxDelayMin"]);
     expect(backfill.properties!.intervalMin).toBeUndefined();
     expect(backfill.properties!.batchSize!.default).toBe(10);
-    expect([...(backfill.required ?? [])]).toEqual(["batchSize"]);
+    expect([...(backfill.required ?? [])]).toEqual(["batchSize", "maxAttempts", "retryDelayMin", "retryMaxDelayMin"]);
   });
 
   test("llm.extractor 슬롯은 mode·backfill.intervalMin 보존 (권위 — Task 4)", () => {
@@ -634,7 +634,7 @@ describe("MEMORY_SCHEMA — Phase 5.6 W5 + 11b T11: llm 세 슬롯 (extractor + 
 });
 
 describe("MEMORY_SCHEMA — Phase 5.7.1 W1: llm.extractor.backfill sub-object", () => {
-  test("backfill sub-object = 3 칸 (intervalMin + batchSize + minImportance)", () => {
+  test("backfill sub-object = 6 칸 (intervalMin + batchSize + minImportance + 재시도 세 칸 maxAttempts·retryDelayMin·retryMaxDelayMin)", () => {
     const slot = MEMORY_SCHEMA.properties.llm.properties.extractor as {
       properties: Record<string, unknown>;
     };
@@ -645,11 +645,14 @@ describe("MEMORY_SCHEMA — Phase 5.7.1 W1: llm.extractor.backfill sub-object", 
     };
     expect(backfill.type).toBe("object");
     const keys = Object.keys(backfill.properties).sort();
-    expect(keys).toEqual(["batchSize", "intervalMin", "minImportance"]);
+    expect(keys).toEqual(["batchSize", "intervalMin", "maxAttempts", "minImportance", "retryDelayMin", "retryMaxDelayMin"]);
     expect([...backfill.required]).toEqual([
       "intervalMin",
       "batchSize",
       "minImportance",
+      "maxAttempts",
+      "retryDelayMin",
+      "retryMaxDelayMin",
     ]);
   });
 

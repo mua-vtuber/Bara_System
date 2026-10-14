@@ -207,6 +207,7 @@ describe("스키마 표 분류 가드", () => {
   const WIPED_EXPLICIT = [
     "asset_file_imports",
     "asset_files",
+    "backfill_attempts",
     "chunk_summaries",
     "classify_vocab_overrides",
     "classify_vocab_user_entries",

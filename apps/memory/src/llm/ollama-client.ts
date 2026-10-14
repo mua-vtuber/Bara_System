@@ -33,6 +33,7 @@ import {
   LlmRequestError,
   parseRetryAfterMs,
 } from "./errors.ts";
+import { BUN_FETCH_NO_DEFAULT_TIMEOUT } from "./bun-fetch.ts";
 import {
   DEFAULT_OLLAMA_NUM_CTX,
   DEFAULT_OLLAMA_TIMEOUT_MS,
@@ -95,6 +96,20 @@ interface OllamaChatResponse {
   eval_count?: number;
   /** 에러 시 채워짐. ollama가 200으로 돌려보내도 message가 비고 error만 채울 수 있음. */
   error?: string;
+}
+
+/** /api/chat 요청 옵션 — Bun 기본 300초 제한을 끄고 내부 제한 타이머(signal)만 쓴다(bun-fetch.ts). */
+export function buildOllamaChatInit(
+  body: unknown,
+  signal: AbortSignal,
+): RequestInit & typeof BUN_FETCH_NO_DEFAULT_TIMEOUT {
+  return {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal,
+    ...BUN_FETCH_NO_DEFAULT_TIMEOUT,
+  };
 }
 
 /** Ollama done_reason 원문 → LlmChatResult.stopReason 3값 정규화. */
@@ -192,12 +207,7 @@ export class OllamaClient implements ObservableLlmClient {
       // 래핑에 걸리지 않고 generic Error 로 남는다(요청 오류와 결정적 오류의 경계).
       let res: Response;
       try {
-        res = await fetch(`${this.baseUrl}/api/chat`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-          signal: timeoutController.signal,
-        });
+        res = await fetch(`${this.baseUrl}/api/chat`, buildOllamaChatInit(body, timeoutController.signal));
       } catch (error) {
         // abort: 내부 timeout 이면 일시 요청 오류로 래핑, 외부 signal(사용자 취소)이면
         // 그대로 던져 취소 의미를 보존한다(실패 아님).

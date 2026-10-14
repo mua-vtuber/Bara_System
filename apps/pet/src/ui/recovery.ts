@@ -3,6 +3,8 @@ import { activeSaves, DRAFT_EVENT, finishSubmission, readSubmissions, returnToDr
 import { button, confirmAction, element, type Notice } from "./dom.ts";
 import { messages } from "./messages.ts";
 import { openMemory } from "./memory-view.ts";
+import { recordSave, renderRecentSaves } from "./recent-history.ts";
+import { confirmedEntry, saveEntry } from "./recent-history-model.ts";
 import { pendingEntryStatusText, saveCheckOutcome } from "./recovery-model.ts";
 import { submissionIsActive } from "./state.ts";
 
@@ -12,7 +14,13 @@ export function renderRecovery(host: HTMLElement, notice: Notice): () => void {
   const title = element("h1", "result-title", messages.feedback.recovery);
   const intro = element("p", "muted", messages.composer.pendingCheck);
   const list = element("div", "outbox");
-  host.append(title, intro, list);
+  const recent = element("section", "recent-list");
+  host.append(title, intro, list, recent);
+  const stopRecent = renderRecentSaves(recent, notice);
+  /** Adds a handled save to the recent list; a failure is told on the status line, the save itself already ended. */
+  const remember = (write: () => void) => {
+    try { write(); } catch (error) { notice(messages.recent.recordFailed(errorMessage(error)), "error"); }
+  };
 
   async function refresh() {
     const revision = ++generation;
@@ -49,6 +57,8 @@ export function renderRecovery(host: HTMLElement, notice: Notice): () => void {
             const outcome = saveCheckOutcome(result);
             finishSubmission(item.requestId, outcome.settled);
             notice(outcome.text, outcome.tone);
+            const entry = saveEntry(item.content, result, item.audience!, new Date().toISOString());
+            if (entry) remember(() => recordSave(entry));
             if (result.memory && live) void openMemory(result.memory, notice);
             void refresh();
           } catch (error) { notice(errorMessage(error), "error"); }
@@ -56,7 +66,10 @@ export function renderRecovery(host: HTMLElement, notice: Notice): () => void {
         else record.append(element("p", "hint", messages.feedback.connectionChanged));
         record.append(button(messages.composer.confirmSaved, async () => {
           if (await confirmAction(messages.composer.confirmSavedTitle, messages.composer.confirmSavedBody, messages.composer.confirmSavedAction)) {
-            try { finishSubmission(item.requestId, true); notice(messages.composer.cleanConfirmed); void refresh(); }
+            try {
+              finishSubmission(item.requestId, true); notice(messages.composer.cleanConfirmed);
+              remember(() => recordSave(confirmedEntry(item.content, new Date().toISOString()))); void refresh();
+            }
             catch (error) { notice(errorMessage(error), "error"); }
           }
         }));
@@ -75,5 +88,5 @@ export function renderRecovery(host: HTMLElement, notice: Notice): () => void {
   window.addEventListener("storage", refreshOnStorage);
   document.addEventListener(DRAFT_EVENT, refreshOnLocal);
   void refresh();
-  return () => { live = false; generation++; window.removeEventListener("storage", refreshOnStorage); document.removeEventListener(DRAFT_EVENT, refreshOnLocal); };
+  return () => { live = false; generation++; stopRecent(); window.removeEventListener("storage", refreshOnStorage); document.removeEventListener(DRAFT_EVENT, refreshOnLocal); };
 }

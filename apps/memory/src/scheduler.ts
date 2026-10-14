@@ -30,6 +30,15 @@ import {
   prepareBackfillCandidate,
 } from "./memory/backfill-extraction.ts";
 import type { ChunkingSettings } from "./memory/origin-chunks.ts";
+import { extractionTargetKey } from "./db/store-internal/backfill-attempts-sql.ts";
+import { BackfillAttemptsLedger, type BackfillRetryPolicy } from "./memory/backfill-attempts/ledger.ts";
+import {
+  BackfillCycleGuard,
+  formatRetrySummary,
+  type BackfillRetrySummary,
+} from "./memory/backfill-attempts/cycle-guard.ts";
+import { extractionFingerprint } from "./memory/backfill-attempts/fingerprint.ts";
+import { inspectExtractionAttempt } from "./memory/backfill-attempts/targets.ts";
 
 /**
  * 백필 사이클 기본 간격 (분).
@@ -74,6 +83,11 @@ export interface BackfillSchedulerOptions {
    * chunkDocument 기본 한도를 쓴다.
    */
   chunking?: ChunkingSettings;
+  /**
+   * 실패 기록·재시도 규칙(2026-10-14 backfill-retry-ledger spec 4.4) — settings.llm.extractor.backfill 의
+   * maxAttempts·retryDelayMin·retryMaxDelayMin. 필수다: 빠진 채 기록 없이 돌면 실패 대상이 매 주기 CPU 를 잡는다.
+   */
+  retry: { policy: BackfillRetryPolicy };
   /** 사이클마다 호출되는 콜백 (관측·테스트용). */
   onCycleComplete?: (summary: BackfillCycleSummary) => void;
   /** 로그 출력 prefix. 기본 "[memory-api scheduler]". */
@@ -104,6 +118,11 @@ export interface BackfillCycleSummary {
   rechunked: number;
   /** WP-B1-08R (Minor 3) — candidates whose prepared LLM result could not be used and was discarded. */
   discarded: number;
+  /**
+   * 실패 기록 요약(2026-10-14 spec 4.5) — 대기·멈춤 수와 주기 중단 사유. 실패 기록을 쓰지 않는 주기(정리 깊은 패스의
+   * 형식 어댑터, 아직 연결 전인 캡션)는 null.
+   */
+  retry: BackfillRetrySummary | null;
 }
 
 /**
@@ -146,6 +165,7 @@ function emptySummary(): BackfillCycleSummary {
     failures: 0,
     rechunked: 0,
     discarded: 0,
+    retry: null,
   };
 }
 
@@ -178,8 +198,8 @@ function startGenericBackfillScheduler(args: {
  * 재확인 뒤다(WP-B1-07 — memory/backfill-extraction.ts). 후보 조회 기준
  * (auto_capture/minImportance), skipHashtagWiring, merged_into 엣지는 옛 흐름 그대로다.
  * 청크가 필요한 긴 원문 후보는 추출하지 않고 잠금 안에서 재청크한다(WP-B1-31). 재청크 실패는
- * 다른 후보 실패와 같이 노드 id·원인을 로그에 남기고 failures 로 세며, 원문은 다음 주기에
- * 다시 후보가 된다(따로 두는 재시도 간격은 없다 — 추출 실패와 같은 주기 재시도).
+ * 다른 후보 실패와 같이 노드 id·원인을 로그에 남기고 failures 로 세며, 재청크 실패도 실패 기록
+ * 규칙(spec 4.3)을 따른다 — 감싼 원인으로 분류한다.
  */
 export function startBackfillScheduler(
   extractor: MemoryExtractor,
@@ -189,9 +209,11 @@ export function startBackfillScheduler(
   const batchSize = options.batchSize ?? 10;
   const minImportance = options.minImportance ?? 0;
   const logPrefix = options.logPrefix ?? "[memory-api scheduler]";
+  // 주기 시작 시각·막힘 판정 기준 시각은 주입 시계 하나에서 나온다(미주입 시 Date.now).
+  const clock = options.now ?? Date.now;
 
   async function runCycle(): Promise<BackfillCycleSummary> {
-    const startedAtMs = Date.now();
+    const startedAtMs = clock(); // 주기 시작 시각(요약용). guard 는 clock 을 직접 받아 막힘 기준은 생성 때, 다음 시도는 실패 순간에 읽는다.
     const startedAt = new Date(startedAtMs).toISOString();
     let processed = 0;
     let storedNodes = 0;
@@ -200,21 +222,35 @@ export function startBackfillScheduler(
     let discarded = 0;
     let rechunked = 0;
 
+    // 2026-10-14 spec 4.5 — 주기 시작: 후보가 아닌 줄 정리 + 지문이 바뀐 줄 해제. 그다음 막힌 대상을 후보 SQL 안에서 뺀다.
+    const guard = new BackfillCycleGuard({
+      ledger: new BackfillAttemptsLedger(store.getRawDb()),
+      kind: "extraction",
+      policy: options.retry.policy,
+      logPrefix,
+      clock,
+    });
+    await guard.reconcile((row) => inspectExtractionAttempt(store, extractor.llmName, row));
+
     const candidates = await store.getBackfillCandidates({
       limit: batchSize,
       minImportance,
+      excludeBlockedAt: guard.now,
     });
 
     for (const listedCandidate of candidates) {
+      const targetKey = extractionTargetKey(listedCandidate.id);
       try {
         // WP-B1-07 — LLM 호출은 쓰기 잠금 밖(준비), 저장은 잠금 안에서 후보를 다시 확인한
         // 뒤에만 한다. 후보가 준비 뒤 바뀌면 LLM 결과를 버리고 이유를 남긴다 — 추출 완료
-        // 표시를 하지 않으므로 다음 주기에 다시 판정한다.
+        // 표시를 하지 않으므로 다음 주기에 다시 판정한다(버림은 실패가 아니라 기록하지 않는다).
         const prepared = await prepareBackfillCandidate(
           extractor, store, listedCandidate.id, options.chunking,
         );
         if (prepared === null) continue;
-        const outcome = await commitBackfillCandidate(extractor, store, prepared);
+        const outcome = await commitBackfillCandidate(
+          extractor, store, prepared, () => guard.recordSuccess(targetKey, `node ${listedCandidate.id}`),
+        );
         if (outcome.kind === "discarded") {
           discarded += 1;
           console.warn(
@@ -232,17 +268,31 @@ export function startBackfillScheduler(
         storedNodes += outcome.storedNodeIds.length;
         bumpedNodes += outcome.bumpedNodeIds.length;
         processed += 1;
+        // 성공 저장은 끝났지만 지난 실패 줄을 지우지 못했다면(guard 가 크게 알리고 중단 사유를 정했다) 주기를 끝낸다.
+        if (guard.isStopped) break;
       } catch (e) {
         failures += 1;
         console.error(
           `${logPrefix} backfill failed for node ${listedCandidate.id}: ${e instanceof Error ? e.message : String(e)}`,
         );
+        const verdict = guard.recordFailure(
+          {
+            targetKey,
+            nodeId: listedCandidate.id,
+            fingerprint: extractionFingerprint(extractor.llmName, listedCandidate.content),
+            label: `node ${listedCandidate.id}`,
+          },
+          e,
+        );
+        // 연결 실패·설정 문제·취소 — 남은 후보도 같은 결과일 테니 건드리지 않고 주기를 끝낸다(spec 4.3).
+        if (verdict === "stop") break;
       }
     }
 
+    const retry = guard.summary();
     const summary: BackfillCycleSummary = {
       startedAt,
-      durationMs: Date.now() - startedAtMs,
+      durationMs: clock() - startedAtMs,
       candidatesFound: candidates.length,
       processed,
       storedNodes,
@@ -250,11 +300,12 @@ export function startBackfillScheduler(
       failures,
       rechunked,
       discarded,
+      retry,
     };
 
     if (candidates.length > 0) {
       console.log(
-        `${logPrefix} cycle: ${processed}/${candidates.length} processed, +${storedNodes} nodes, ${bumpedNodes} bumped, ${rechunked} rechunked, ${discarded} discarded, ${failures} fail in ${summary.durationMs}ms`,
+        `${logPrefix} cycle: ${processed}/${candidates.length} processed, +${storedNodes} nodes, ${bumpedNodes} bumped, ${rechunked} rechunked, ${discarded} discarded, ${failures} fail in ${summary.durationMs}ms, ${formatRetrySummary(retry)}`,
       );
     }
     options.onCycleComplete?.(summary);
@@ -368,6 +419,8 @@ export interface VisionBackfillSchedulerOptions {
    * 개정된 한국어 검색용 default 를 쓴다 (Phase 11e G2-4).
    */
   captionPrompt?: string;
+  /** 실패 기록·재시도 규칙(2026-10-14 spec 4.4) — settings.llm.vision.backfill 의 세 칸. 필수. */
+  retry: { policy: BackfillRetryPolicy };
   /** 사이클마다 호출되는 콜백 (관측·테스트용). */
   onCycleComplete?: (summary: BackfillCycleSummary) => void;
   /** 로그 출력 prefix. 기본 "[memory-api vision-scheduler]". */
@@ -422,6 +475,8 @@ export function startVisionBackfillScheduler(
       batchSize,
       captionPrompt: options.captionPrompt,
       logPrefix,
+      retry: options.retry,
+      now: options.now,
     });
     options.onCycleComplete?.(summary);
     return summary;

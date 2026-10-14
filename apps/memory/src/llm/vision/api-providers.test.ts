@@ -145,7 +145,8 @@ describe("caption-flow — 잘린 캡션은 저장하고 경고", () => {
     const warn = spyOn(console, "warn");
     try {
       const out = await requestVlmCaption({ ...baseArgs, provider: gpt() });
-      expect(out).toEqual({ called: true, caption: null });
+      expect(out).toMatchObject({ called: true, caption: null });
+      expect((out as { failure?: unknown }).failure).toBeInstanceOf(Error);
       expect(warn.mock.calls.map((c) => String(c[0])).some((l) => l.includes("llm.vision.tokenCap"))).toBe(true);
     } finally {
       warn.mockRestore();

@@ -21,6 +21,7 @@ import { observeStartupCheck } from "./startup-check.ts";
 import "./style.css";
 import "./notebook.css";
 import "./self-update.css";
+import "./recent-history.css";
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 const view = new URLSearchParams(location.search).get("view") ?? "main";

@@ -23,6 +23,7 @@
  * 정리)를 더한다. 같은 본문 두 메시지(H1)·보관표 정리는 memories-delete-by-source.sources.test.ts.
  */
 
+import { TEST_EXTRACTION_BACKFILL_RETRY } from "../../test-utils/backfill-retry.ts";
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import type { Hono } from "hono";
@@ -187,7 +188,7 @@ describe("긴 Discord 글 삭제", () => {
     expect(regexAtoms.length).toBeGreaterThan(0);
     for (const id of regexAtoms) expect(regexParents(h.db, id)).toEqual([origin]);
 
-    const handle = startBackfillScheduler(h.extractor, h.store, { intervalMs: 60_000, batchSize: 10 });
+    const handle = startBackfillScheduler(h.extractor, h.store, { intervalMs: 60_000, batchSize: 10, retry: TEST_EXTRACTION_BACKFILL_RETRY });
     try {
       expect((await handle.tickNow()).failures).toBe(0);
     } finally {
@@ -338,7 +339,7 @@ describe("파생 노드에 흡수된 독립 저장", () => {
   test("LLM 추출 자식에 흡수된 대시보드 저장도 원문 삭제 뒤 남고 검색된다", async () => {
     const h = makeHarness();
     const discord = await saveDiscord(h, "배포 창구를 정했다. 금요일 오후로 확정했다.", "msg-llm", false);
-    const handle = startBackfillScheduler(h.extractor, h.store, { intervalMs: 60_000, batchSize: 10 });
+    const handle = startBackfillScheduler(h.extractor, h.store, { intervalMs: 60_000, batchSize: 10, retry: TEST_EXTRACTION_BACKFILL_RETRY });
     try {
       expect((await handle.tickNow()).failures).toBe(0);
     } finally {

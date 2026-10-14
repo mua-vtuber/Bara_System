@@ -446,6 +446,7 @@ if (intervalMin > 0) {
       offsetMin: 0,
       batchSize: extractorSlot.backfill.batchSize,
       minImportance: extractorSlot.backfill.minImportance, chunking: settings.chunking,
+      retry: { policy: extractorSlot.backfill }, // 2026-10-14 spec 4.4 — maxAttempts·retryDelayMin·retryMaxDelayMin
       // Phase 7 2차 Task 6 — extractor 사이클 끝마다 갈래 2 한 사이클을 잇는다.
       onCycleComplete: onExtractorCycleComplete,
     });
@@ -529,6 +530,7 @@ if (visionIntervalMin > 0) {
           offsetMin: visionOffsetMin,
           batchSize: visionSlot.backfill.batchSize,
           captionPrompt: visionSlot.captionPrompt,
+          retry: { policy: visionSlot.backfill }, // 2026-10-14 spec 4.4 — maxAttempts·retryDelayMin·retryMaxDelayMin
         },
       );
     }

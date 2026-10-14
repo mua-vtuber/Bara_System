@@ -1,12 +1,13 @@
 # 생성 파일 — 손으로 고치지 않는다. 다시 쓰기: cd apps/memory && bun run scripts/write-schema-snapshot.ts
 baseline-version: 47
 baseline-sql-sha256: 2fb1493ca810b6bcd83a6313523a4fd50de0a546efe23092a6dce7507a374bbb
-current-version: 49
+current-version: 50
 
 [objects]
 table	asset_file_imports	CREATE TABLE asset_file_imports(import_id TEXT PRIMARY KEY,asset_sha256 TEXT NOT NULL,source TEXT NOT NULL,source_ref TEXT,original_name TEXT,imported_at TEXT NOT NULL,author TEXT NOT NULL,user_id TEXT NOT NULL,FOREIGN KEY(asset_sha256)REFERENCES asset_files(sha256))
 table	asset_files	CREATE TABLE asset_files(sha256 TEXT PRIMARY KEY,asset_type TEXT NOT NULL,asset_path TEXT NOT NULL,byte_size INTEGER NOT NULL,mime_type TEXT,original_name TEXT,first_imported_at TEXT NOT NULL)
 table	asset_folder_pairing	CREATE TABLE asset_folder_pairing(id INTEGER PRIMARY KEY CHECK(id = 1),pairing_id TEXT NOT NULL,created_at TEXT NOT NULL)
+table	backfill_attempts	CREATE TABLE backfill_attempts(kind TEXT NOT NULL CHECK(kind IN('extraction','caption')),target_key TEXT NOT NULL,node_id INTEGER NOT NULL REFERENCES knowledge_nodes(id)ON DELETE CASCADE,input_fingerprint TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN('retryable_failure','terminal_failure')),attempt_count INTEGER NOT NULL,next_retry_at TEXT,last_error TEXT NOT NULL,last_attempt_at TEXT NOT NULL,PRIMARY KEY(kind,target_key))
 table	chunk_summaries	CREATE TABLE chunk_summaries(summary_id TEXT PRIMARY KEY,parent_chunk_id INTEGER NOT NULL,parent_document_id TEXT NOT NULL,summary_text TEXT NOT NULL,generated_by TEXT NOT NULL,generated_at TEXT NOT NULL DEFAULT(datetime('now','localtime')),has_embedding INTEGER NOT NULL DEFAULT 0,FOREIGN KEY(parent_chunk_id)REFERENCES knowledge_nodes(id)ON DELETE CASCADE,FOREIGN KEY(parent_document_id)REFERENCES documents(document_id)ON DELETE CASCADE)
 table	chunk_summary_vec_vector_chunks00	CREATE TABLE chunk_summary_vec_vector_chunks00(rowid PRIMARY KEY,vectors BLOB NOT NULL)
 table	classify_vocab_overrides	CREATE TABLE classify_vocab_overrides(override_id TEXT PRIMARY KEY,type_name TEXT NOT NULL,slot TEXT NOT NULL CHECK(slot IN('synonyms','subcategories','attributes')),value TEXT NOT NULL,kind TEXT NOT NULL DEFAULT 'tombstone',created_at TEXT NOT NULL DEFAULT(datetime('now','localtime')),UNIQUE(type_name,slot,value))
@@ -83,6 +84,7 @@ index	idx_asset_file_imports_source	CREATE INDEX idx_asset_file_imports_source O
 index	idx_asset_file_imports_source_ref	CREATE INDEX idx_asset_file_imports_source_ref ON asset_file_imports(source_ref)
 index	idx_asset_file_imports_user	CREATE INDEX idx_asset_file_imports_user ON asset_file_imports(user_id)
 index	idx_asset_files_type	CREATE INDEX idx_asset_files_type ON asset_files(asset_type)
+index	idx_backfill_attempts_block	CREATE INDEX idx_backfill_attempts_block ON backfill_attempts(kind,status,next_retry_at)
 index	idx_ce_source	CREATE INDEX idx_ce_source ON concept_edges(source_concept_id)
 index	idx_ce_target	CREATE INDEX idx_ce_target ON concept_edges(target_concept_id)
 index	idx_chunk_summaries_chunk	CREATE INDEX idx_chunk_summaries_chunk ON chunk_summaries(parent_chunk_id)

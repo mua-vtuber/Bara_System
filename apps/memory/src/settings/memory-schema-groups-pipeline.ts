@@ -15,6 +15,7 @@ import {
   entityRegisterAllocationSchema,
   entityRegisterSchemaBlock,
 } from "./memory-schema-groups-entity-register.ts";
+import { BACKFILL_RETRY_REQUIRED, extractorBackfillRetryProperties, visionBackfillRetryProperties } from "./memory-schema-groups-backfill-retry.ts";
 import { llmApiProviderFields } from "./memory-schema-groups-llm-providers.ts";
 import { LLM_PROVIDERS } from "../llm/provider-registry.ts";
 
@@ -215,8 +216,9 @@ export const llmGroup = {
               minimum: 0,
               maximum: 1,
             },
+            ...extractorBackfillRetryProperties,
           },
-          required: ["intervalMin", "batchSize", "minImportance"] as const,
+          required: ["intervalMin", "batchSize", "minImportance", ...BACKFILL_RETRY_REQUIRED] as const,
         },
       },
       required: ["enabled", "provider"] as const,
@@ -458,8 +460,9 @@ export const llmGroup = {
               default: 10,
               minimum: 1,
             },
+            ...visionBackfillRetryProperties,
           },
-          required: ["batchSize"] as const,
+          required: ["batchSize", ...BACKFILL_RETRY_REQUIRED] as const,
         },
       },
       required: ["enabled", "provider"] as const,

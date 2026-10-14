@@ -37,6 +37,19 @@ export interface LlmClientSlot extends LlmProviderFieldValues {
   timeoutMs?: number;
 }
 
+/** 클라이언트 구성 옵션 — 슬롯 설정에 없는, 호출하는 쪽이 정하는 값. */
+export interface LlmClientBuildOptions {
+  /** Anthropic SDK 자동 재시도 횟수. 없으면 SDK 기본값(2). */
+  anthropicMaxRetries?: number;
+}
+
+/**
+ * 추출 클라이언트의 Anthropic SDK 자동 재시도 횟수 (2026-10-14 backfill-retry-ledger 사용자 결정).
+ * Bun 300초 제한을 끈 뒤(llm/bun-fetch.ts) SDK 기본 재시도 2번이 남으면 추출 한 번이 최악 timeoutMs × 3 까지 간다.
+ * 추출 백필은 실패 기록 표(backfill_attempts)로 자체 재시도하므로 SDK 재시도는 끈다. 정리 경로는 이 값을 쓰지 않는다.
+ */
+export const EXTRACTOR_ANTHROPIC_MAX_RETRIES = 0 as const;
+
 /** 클라이언트 구성 결과 — 실패하면 client=null + 사유 문장(키 값 없음). */
 export interface LlmClientBuildResult {
   client: LlmClient | null;
@@ -65,14 +78,25 @@ function requireTimeout(provider: LlmProvider, slot: LlmClientSlot, slotPath: st
   return slot.timeoutMs;
 }
 
-function constructClient(provider: LlmProvider, slot: LlmClientSlot, slotPath: string): LlmClient {
+function constructClient(
+  provider: LlmProvider,
+  slot: LlmClientSlot,
+  slotPath: string,
+  options: LlmClientBuildOptions,
+): LlmClient {
   switch (provider) {
     case "ollama":
       // extractor-a1-2.4b-transition T5 (IN-6) — settings 의 추출 타임아웃을 그대로 전달.
       return new OllamaClient({ baseUrl: slot.ollamaUrl, model: slot.ollamaModel, timeoutMs: slot.timeoutMs });
     case "anthropic":
       // 데이터 정리 AI 효율 가동 spec 4.A-8 — slot.timeoutMs 를 SDK 요청 timeout 옵션으로 전달.
-      return new AnthropicClient({ apiKey: slot.anthropicApiKey, model: slot.anthropicModel, timeoutMs: slot.timeoutMs });
+      // 2026-10-14 backfill-retry-ledger — 재시도 횟수는 호출하는 쪽이 정한다(추출 0, 정리는 SDK 기본).
+      return new AnthropicClient({
+        apiKey: slot.anthropicApiKey,
+        model: slot.anthropicModel,
+        timeoutMs: slot.timeoutMs,
+        ...(options.anthropicMaxRetries !== undefined ? { maxRetries: options.anthropicMaxRetries } : {}),
+      });
     case "openai_compatible":
       return new OpenAiCompatibleClient({
         baseUrl: slot.openaiBaseUrl,
@@ -109,13 +133,14 @@ export function buildLlmClientWithReason(
   provider: LlmProvider | "none",
   slot: LlmClientSlot,
   slotPath: string,
+  options: LlmClientBuildOptions = {},
 ): LlmClientBuildResult {
   if (provider === "none") return { client: null, reason: null };
   const missing = missingFieldReason(provider, slot, slotPath);
   let reason = missing;
   if (reason === null) {
     try {
-      return { client: constructClient(provider, slot, slotPath), reason: null };
+      return { client: constructClient(provider, slot, slotPath, options), reason: null };
     } catch (e) {
       reason = e instanceof Error ? e.message : String(e);
     }
@@ -132,8 +157,9 @@ export function buildLlmClient(
   provider: LlmProvider | "none",
   slot: LlmClientSlot,
   slotPath: string,
+  options: LlmClientBuildOptions = {},
 ): LlmClient | null {
-  return buildLlmClientWithReason(provider, slot, slotPath).client;
+  return buildLlmClientWithReason(provider, slot, slotPath, options).client;
 }
 
 /**

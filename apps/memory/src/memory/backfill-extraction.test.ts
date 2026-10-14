@@ -11,6 +11,7 @@
  *  4. 추출 한 건에서 자식 N개가 생겨도 가시성 스냅샷 계산은 1회다(countMemoryVisibilityComputations).
  */
 
+import { TEST_EXTRACTION_BACKFILL_RETRY } from "../test-utils/backfill-retry.ts";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import { openMemoryDatabase } from "../db/migrations.ts";
@@ -22,6 +23,7 @@ import {
   startDelayedOllamaChatServer,
   type DelayedOllamaChatServer,
 } from "../test-utils/delayed-ollama-chat-server.ts";
+import { BackfillAttemptsLedger } from "./backfill-attempts/ledger.ts";
 import { MemoryExtractor, originExtractionLineage } from "./extractor.ts";
 import { withMemoryMutationLock } from "./shared-memory-mutation-lock.ts";
 import { countMemoryVisibilityComputations } from "./shared-memory-read.ts";
@@ -96,7 +98,7 @@ describe("백필 — LLM 호출 동안 쓰기 잠금이 비어 있다", () => {
     server = startDelayedOllamaChatServer({ delayMs: LLM_DELAY_MS, content: extractionResponse(CHILD_CONTENTS.slice(0, 1)) });
     const candidate = await addCandidate();
     const other = await store.addNode({ content: "잠금 작업 대상 기억", sourceType: "user_explicit", author: AUTHOR });
-    const handle = startBackfillScheduler(extractorFor(server.url), store, { intervalMs: 60_000, batchSize: 5 });
+    const handle = startBackfillScheduler(extractorFor(server.url), store, { intervalMs: 60_000, batchSize: 5, retry: TEST_EXTRACTION_BACKFILL_RETRY });
 
     const llmCalled = server.nextRequest();
     let cycleDone = false;
@@ -124,7 +126,7 @@ describe("백필 — 잠금 안 재확인이 어긋나면 LLM 결과를 버린�
   test("준비 뒤 원문 본문이 편집되면 저장하지 않고 이유를 남기며, 원문은 다음 주기 후보다", async () => {
     server = startDelayedOllamaChatServer({ delayMs: LLM_DELAY_MS, content: extractionResponse(CHILD_CONTENTS) });
     const candidate = await addCandidate();
-    const handle = startBackfillScheduler(extractorFor(server.url), store, { intervalMs: 60_000, batchSize: 5 });
+    const handle = startBackfillScheduler(extractorFor(server.url), store, { intervalMs: 60_000, batchSize: 5, retry: TEST_EXTRACTION_BACKFILL_RETRY });
     const warn = spyOn(console, "warn");
     try {
       const llmCalled = server.nextRequest();
@@ -148,13 +150,15 @@ describe("백필 — 잠금 안 재확인이 어긋나면 LLM 결과를 버린�
       warn.mockRestore();
     }
     expect(store.nodeRepo.isBackfillCandidateEligible(candidate)).toBe(true);
+    // 2026-10-14 spec 4.3 — 준비 중 후보가 바뀌어 버린 결과는 실패가 아니다. 기록하지 않는다.
+    expect(new BackfillAttemptsLedger(db).rows("extraction")).toEqual([]);
     expect((await store.getBackfillCandidates({ limit: 5 })).map((node) => node.id)).toEqual([candidate]);
   }, 30_000);
 
   test("준비 뒤 다른 흐름이 추출 완료로 표시하면 후보 조건을 벗어나 결과를 버린다", async () => {
     server = startDelayedOllamaChatServer({ delayMs: LLM_DELAY_MS, content: extractionResponse(CHILD_CONTENTS) });
     const candidate = await addCandidate();
-    const handle = startBackfillScheduler(extractorFor(server.url), store, { intervalMs: 60_000, batchSize: 5 });
+    const handle = startBackfillScheduler(extractorFor(server.url), store, { intervalMs: 60_000, batchSize: 5, retry: TEST_EXTRACTION_BACKFILL_RETRY });
     const warn = spyOn(console, "warn");
     try {
       const llmCalled = server.nextRequest();
@@ -213,7 +217,7 @@ describe("추출 한 건당 가시성 스냅샷 1회 (SL-8)", () => {
     server = startDelayedOllamaChatServer({ delayMs: 0, content: extractionResponse(CHILD_CONTENTS) });
     const candidate = await addCandidate();
     await addOutsideLineageMemory();
-    const handle = startBackfillScheduler(extractorFor(server.url), store, { intervalMs: 60_000, batchSize: 5 });
+    const handle = startBackfillScheduler(extractorFor(server.url), store, { intervalMs: 60_000, batchSize: 5, retry: TEST_EXTRACTION_BACKFILL_RETRY });
 
     const before = countMemoryVisibilityComputations(store);
     const summary = await handle.tickNow();

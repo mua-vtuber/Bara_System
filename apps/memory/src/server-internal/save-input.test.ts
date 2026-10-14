@@ -88,7 +88,7 @@ function extractorSlot(
     // extractor-a1-2.4b-transition T1 (IN-1) — 신규 두 칸 형식 충족용 default 값.
     forceJsonFormat: false,
     timeoutMs: 900000,
-    backfill: { intervalMin: 30, batchSize: 10, minImportance: 0 },
+    backfill: { intervalMin: 30, batchSize: 10, minImportance: 0, maxAttempts: 5, retryDelayMin: 30, retryMaxDelayMin: 1440 },
   };
 }
 

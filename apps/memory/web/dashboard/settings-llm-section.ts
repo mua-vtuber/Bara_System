@@ -7,7 +7,9 @@
  * settings.ts 에는 readLlmGroup·renderLlmSection 만 노출한다(readLlmGroup 은 재노출).
  */
 
+import { renderBackfillAttemptsPanel } from "./settings-backfill-attempts-panel";
 import { createSlotCommonControls } from "./settings-llm-controls";
+import { renderRetryFields } from "./settings-llm-retry-fields";
 import { buildProviderPayload, isProviderChanged } from "./settings-llm-provider-forms";
 import {
   readLlmGroup,
@@ -198,6 +200,12 @@ export function renderExtractorBlocks(
     { showDesc: false, showHints: false },
   );
 
+  // 실패 기록 패널(2026-10-14 spec 6장) — 모델 블록 끝에 둔다. 처리 시점(즉시/주기)·켜기와 무관하게 멈춘 기억이 보이도록
+  // 접히는 칸(detailBlock) 밖이다. 처음 그릴 때 한 번 불러온다.
+  const attemptsPanel = renderBackfillAttemptsPanel("extraction");
+  ctrl.section.appendChild(attemptsPanel.element);
+  void attemptsPanel.refresh();
+
   // ── (4) 텍스트 전용 설정 블록 (batchSize + minImportance) ───────────────────
   //
   // 옛 extractor.backfill 3 칸 중 intervalMin 은 (3) 공통 동작방식으로 이동.
@@ -247,6 +255,10 @@ export function renderExtractorBlocks(
   minImpRow.appendChild(backfillMinImpInput);
   backfillBox.appendChild(minImpRow);
 
+  // 자동 재시도 칸 세 개(2026-10-14 spec 4.4) — 정해진 주기 처리 칸 옆. 처리 시점이 즉시면 함께 숨는다.
+  const retryFields = renderRetryFields("llm-extractor-backfill", current.backfill);
+  backfillBox.appendChild(retryFields.element);
+
   detailBlock.appendChild(backfillBox);
 
   // (4) batchSize·minImportance 가시성을 공통 동작방식 라디오에 묶는다.
@@ -276,6 +288,7 @@ export function renderExtractorBlocks(
         intervalMin,
         batchSize: Number.isFinite(batchSize) ? batchSize : 0,
         minImportance: Number.isFinite(minImportance) ? minImportance : 0,
+        ...retryFields.read(),
       };
     }
     return payload;
@@ -291,6 +304,7 @@ export function renderExtractorBlocks(
 
     // backfill batchSize·minImportance 변경 감지 (backfill 갈래일 때만 의미).
     if (commonMode.isBackfillSelected()) {
+      if (retryFields.isChanged(original.backfill)) return true;
       const batchSize = Number.parseInt(backfillBatchInput.value, 10);
       if (
         Number.isFinite(batchSize) &&
@@ -424,6 +438,12 @@ export function renderVisionBlocks(
     { showDesc: false, showHints: false },
   );
 
+  // 실패 기록 패널(2026-10-14 spec 6장) — 모델 블록 끝에 둔다. 처리 시점(즉시/주기)·켜기와 무관하게 멈춘 기억이 보이도록
+  // 접히는 칸(detailBlock) 밖이다. 처음 그릴 때 한 번 불러온다.
+  const attemptsPanel = renderBackfillAttemptsPanel("caption");
+  ctrl.section.appendChild(attemptsPanel.element);
+  void attemptsPanel.refresh();
+
   // ── 기본 꺼짐 + 캡션 시점 안내 ──────────────────────────────────────────────
   // "켰는데 안 된다" 오해 차단. 기본 꺼짐 + 켰을 때 캡션 생성 시점을 한곳에 정직하게
   // 안내한다. 캡션 시점(즉시/주기)·주기 분은 의미추출 AI 공통 동작방식을 따른다.
@@ -483,6 +503,10 @@ export function renderVisionBlocks(
   batchRow.appendChild(backfillBatchInput);
   backfillBox.appendChild(batchRow);
 
+  // 자동 재시도 칸 세 개(2026-10-14 spec 4.4) — 캡션 batchSize 옆. 처리 시점이 즉시면 함께 숨는다.
+  const retryFields = renderRetryFields("llm-vision-backfill", current.backfill);
+  backfillBox.appendChild(retryFields.element);
+
   detailBlock.appendChild(backfillBox);
 
   // (5) batchSize 가시성을 공통 동작방식 라디오에 묶는다.
@@ -508,6 +532,7 @@ export function renderVisionBlocks(
       const batchSize = Number.parseInt(backfillBatchInput.value, 10);
       payload.backfill = {
         batchSize: Number.isFinite(batchSize) ? batchSize : 0,
+        ...retryFields.read(),
       };
     }
     return payload;
@@ -525,6 +550,7 @@ export function renderVisionBlocks(
 
     // backfill batchSize 변경 감지 — backfill 갈래일 때만 의미 (Task 4·6).
     if (commonMode.isBackfillSelected()) {
+      if (retryFields.isChanged(original.backfill)) return true;
       const batchSize = Number.parseInt(backfillBatchInput.value, 10);
       if (
         Number.isFinite(batchSize) &&

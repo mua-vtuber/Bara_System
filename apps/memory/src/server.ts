@@ -28,7 +28,7 @@ import { ConflictChecker } from "./memory/conflict-checker.ts";
 import type { LlmClient } from "./llm/types.ts";
 import type { AutoCleanupTriggerHandle } from "./memory/auto-cleanup-trigger.ts";
 import type { MemoryApiDeps, CreateMemoryApiOptions } from "./server-internal/types.ts";
-import { buildLlmClient, autoDetectProvider } from "./server-internal/llm-wiring.ts";
+import { buildLlmClient, autoDetectProvider, EXTRACTOR_ANTHROPIC_MAX_RETRIES } from "./server-internal/llm-wiring.ts";
 import { registerStatsRoutes } from "./server-internal/routes/stats.ts";
 import { registerMemoriesRoutes } from "./server-internal/routes/memories.ts";
 import { registerSearchRoutes } from "./server-internal/routes/search.ts";
@@ -48,6 +48,7 @@ import { registerProjectsRoutes } from "./server-internal/routes/projects.ts";
 import { registerPersonsRoutes } from "./server-internal/routes/persons.ts";
 import { registerDateOccurrencesRoutes } from "./server-internal/routes/date-occurrences.ts";
 import { registerDocumentRoutes } from "./server-internal/routes/documents.ts";
+import { registerBackfillAttemptsRoutes } from "./server-internal/routes/backfill-attempts.ts";
 import { createDocumentOcrRuntime } from "./server-internal/document-ocr/runtime.ts";
 import type { DocumentOcrRuntime } from "./server-internal/document-ocr/runtime-types.ts";
 import { registerIngestRoutes } from "./server-internal/routes/ingest.ts";
@@ -224,6 +225,8 @@ export function buildMemoryApi(deps: MemoryApiDeps): Hono {
   // GET /api/documents/ocr-candidates + POST /api/documents/:id/ocr-result —
   // A1 코어는 OCR 실행 대신 상태 표시와 외부 OCR 결과 적용만 책임진다.
   registerDocumentRoutes(app, deps);
+  // GET /api/backfill-attempts/status + POST /api/backfill-attempts/retry — 백필 실패 기록(full 토큰만, 2026-10-14 spec 5장).
+  registerBackfillAttemptsRoutes(app, deps);
   // POST /ingest — 자산(텍스트·Markdown·PDF·docx) 입력 → 원본 보존 + canonical .md
   // + documents 등록 + 청크 분해 + 노드 저장 + attribution + 정직한 경고 (14a T12).
   registerIngestRoutes(app, deps);
@@ -575,7 +578,9 @@ export async function createMemoryApi(
 
   const provider =
     opts.llmProvider ?? autoDetectProvider(settings.llm.extractor);
-  const llm = buildLlmClient(provider, settings.llm.extractor, "llm.extractor");
+  const llm = buildLlmClient(provider, settings.llm.extractor, "llm.extractor", {
+    anthropicMaxRetries: EXTRACTOR_ANTHROPIC_MAX_RETRIES,
+  });
   // Phase 5.7.1 W1 — search 묶음 키 이름 변경:
   //   conflictLow → conflictCheckMin / conflictHigh → conflictSameMax /
   //   dedupSim → mergeSimThreshold. importanceDecay → valueDecay 묶음 이전.

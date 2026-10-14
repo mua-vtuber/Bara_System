@@ -13,6 +13,7 @@
  *  - 분류만 바꾸는 PATCH 는 임베딩을 다시 계산하지 않고 'node-edited' 신호도 보내지 않는다.
  */
 
+import { TEST_EXTRACTION_BACKFILL_RETRY } from "../../test-utils/backfill-retry.ts";
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import type { Hono } from "hono";
@@ -179,7 +180,7 @@ function totalChanges(db: Database): number {
 }
 
 async function runBackfill(h: Harness): Promise<BackfillCycleSummary> {
-  const handle = startBackfillScheduler(h.extractor, h.store, { intervalMs: 60_000, batchSize: 10 });
+  const handle = startBackfillScheduler(h.extractor, h.store, { intervalMs: 60_000, batchSize: 10, retry: TEST_EXTRACTION_BACKFILL_RETRY });
   try {
     return await handle.tickNow();
   } finally {

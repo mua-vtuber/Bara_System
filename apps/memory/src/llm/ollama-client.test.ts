@@ -285,6 +285,8 @@ describe("OllamaClient — LlmRequestError throw 경로 (A-2)", () => {
     const err = caught as LlmRequestError;
     expect(err.timedOut).toBe(true);
     expect(err.status).toBeNull();
+    // 2026-10-14 spec 7장 A — 설정 제한이 실제 제한이 되어 문장에 그 값이 그대로 실린다.
+    expect(err.message).toBe("Ollama /api/chat timeout (80ms 초과)");
   });
 
   test("외부 signal 취소 → LlmRequestError 아님(취소 의미 보존, AbortError 그대로)", async () => {

@@ -17,7 +17,7 @@
  * 회신 회수: response.content 안 텍스트 블록들을 합쳐 회신. usage 합류.
  */
 
-import Anthropic from "@anthropic-ai/sdk";
+import Anthropic, { type ClientOptions } from "@anthropic-ai/sdk";
 import type {
   VisionCaptionOptions,
   VisionCaptionResult,
@@ -25,6 +25,7 @@ import type {
 } from "./index.ts";
 import { anthropicSamplingParams } from "../anthropic-model-capabilities.ts";
 import { emptyTruncatedOutputError, requireLimitSettingPath } from "./caption-result.ts";
+import { ANTHROPIC_SDK_FETCH_OPTIONS } from "../bun-fetch.ts";
 
 export interface AnthropicVisionProviderOptions {
   /** API 키. caller (createVisionProvider) 가 settings.llm.vision.apiKey 검사 후 전달. */
@@ -53,6 +54,17 @@ export interface AnthropicVisionProviderOptions {
 }
 
 /** Anthropic 이 받는 image media_type 가족 — Phase 11a 5 mime 양식 정합. */
+/** SDK 생성자 옵션. fetchOptions 로 Bun 기본 300초 제한을 끈다(llm/bun-fetch.ts — 캡션·문서 OCR 공통). */
+export function buildAnthropicVisionClientOptions(opts: AnthropicVisionProviderOptions): ClientOptions {
+  return {
+    apiKey: opts.apiKey,
+    ...(opts.baseURL ? { baseURL: opts.baseURL } : {}),
+    ...(opts.timeoutMs !== undefined ? { timeout: opts.timeoutMs } : {}),
+    ...(opts.maxRetries !== undefined ? { maxRetries: opts.maxRetries } : {}),
+    fetchOptions: ANTHROPIC_SDK_FETCH_OPTIONS,
+  };
+}
+
 const SUPPORTED_MEDIA_TYPES = new Set([
   "image/png",
   "image/jpeg",
@@ -73,12 +85,7 @@ export class AnthropicVisionProvider implements VisionProvider {
           "settings.llm.vision.apiKey 를 채워라.",
       );
     }
-    this.client = new Anthropic({
-      apiKey: opts.apiKey,
-      ...(opts.baseURL ? { baseURL: opts.baseURL } : {}),
-      ...(opts.timeoutMs !== undefined ? { timeout: opts.timeoutMs } : {}),
-      ...(opts.maxRetries !== undefined ? { maxRetries: opts.maxRetries } : {}),
-    });
+    this.client = new Anthropic(buildAnthropicVisionClientOptions(opts));
     this.limitSettingPath = requireLimitSettingPath("AnthropicVisionProvider", opts.limitSettingPath);
     this.model = opts.model;
     this.defaultMaxTokens = opts.defaultMaxTokens ?? 256;

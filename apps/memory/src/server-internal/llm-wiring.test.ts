@@ -162,7 +162,7 @@ function extractorSlot(
     minImportance: 0.3,
     forceJsonFormat: false,
     timeoutMs,
-    backfill: { intervalMin: 30, batchSize: 10, minImportance: 0 },
+    backfill: { intervalMin: 30, batchSize: 10, minImportance: 0, maxAttempts: 5, retryDelayMin: 30, retryMaxDelayMin: 1440 },
   };
 }
 

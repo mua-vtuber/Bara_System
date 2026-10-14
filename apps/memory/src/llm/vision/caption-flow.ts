@@ -20,6 +20,7 @@
  *    정직 회수. 자산 저장 흐름 차단 X — 호출자 (ingest 라우트) 는 본 흐름 회신
  *    자연 반영 (caption=null 응답 안 표현 가능). silent skip X — called=true 인
  *    데 caption=null 양식이 호출 자체는 시도했다는 정직한 신호.
+ *  - 2026-10-14 — 실패 원인은 failure 칸에 실어 돌려준다(던지지 않는 동작은 그대로). 캡션 백필이 분류에 쓴다.
  *
  * 권위: docs/decisions/2026-05-28-phase11b-plan(...).md § Task 10.
  */
@@ -140,6 +141,11 @@ export interface ApplyVlmCaptionFlowResult {
   called: boolean;
   caption?: string | null;
   captionNodeId?: number;
+  /**
+   * called=true + caption=null 일 때 그 원인 — 잡은 예외 그대로, 빈 캡션이면 EmptyCaptionError (2026-10-14 spec 4.6).
+   * 캡션 백필이 실패 분류에 쓴다. 새 이미지 저장 경로(ingest-image-flow)는 읽지 않고 응답에도 싣지 않는다.
+   */
+  failure?: unknown;
 }
 
 /**
@@ -194,10 +200,21 @@ export async function applyVlmCaptionFlow(
 export type RequestVlmCaptionArgs = Omit<ApplyVlmCaptionFlowArgs, "store" | "db">;
 
 /**
- * `requestVlmCaption` 회수 양식 — 저장 전 단계라 captionNodeId 가 없다.
- * called=true + caption 문자열이면 저장할 캡션이 있다.
+ * `requestVlmCaption` 회수 양식 — 저장 전 단계라 captionNodeId 가 없다. caption=null 이면 failure 가 반드시 있다
+ * (형이 강제한다 — 원인 없는 실패를 만들 수 없다).
  */
-export type VlmCaptionRequest = Omit<ApplyVlmCaptionFlowResult, "captionNodeId">;
+export type VlmCaptionRequest =
+  | { called: false }
+  | { called: true; caption: string }
+  | { called: true; caption: null; failure: unknown };
+
+/** 공급자가 빈 캡션을 돌려줌 — 같은 입력이면 다시 해도 같을 가능성이 커 백필은 세는 실패로 본다. */
+export class EmptyCaptionError extends Error {
+  constructor(parentNodeId: number) {
+    super(`VLM 이 빈 캡션을 돌려줌 (parentNodeId=${parentNodeId})`);
+    this.name = "EmptyCaptionError";
+  }
+}
 
 /**
  * 캡션 요청 — 호출 판정(decideVlmInvocation)과 공급자 호출까지만 한다. DB 에 쓰지 않는다.
@@ -247,7 +264,7 @@ export async function requestVlmCaption(
       console.warn(
         `[caption-flow] provider 회수 caption 글 빈 문자열 — 노드 추가 건너뜀 (parentNodeId=${args.parentNodeId})`,
       );
-      return { called: true, caption: null };
+      return { called: true, caption: null, failure: new EmptyCaptionError(args.parentNodeId) };
     }
     return { called: true, caption };
   } catch (e) {
@@ -255,7 +272,7 @@ export async function requestVlmCaption(
     console.warn(
       `[caption-flow] VisionProvider.captionImage 가동 실패 — 자산 흐름 차단 X (parentNodeId=${args.parentNodeId}, asset_sha256=${args.assetSha256}, err=${msg})`,
     );
-    return { called: true, caption: null };
+    return { called: true, caption: null, failure: e };
   }
 }
 

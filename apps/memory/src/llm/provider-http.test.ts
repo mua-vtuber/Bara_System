@@ -74,3 +74,23 @@ describe("오류 응답 본문을 못 읽으면", () => {
     expect((err as LlmRequestError).message).toBe(`OpenAI /x 500: ${UNREADABLE_BODY_MARK}`);
   });
 });
+
+describe("설정 제한 시간 초과 (2026-10-14 backfill-retry-ledger spec 7장 A)", () => {
+  test("80ms 에서 끊기면 LlmRequestError{timedOut:true, status:null} 와 'timeout (80ms 초과)' 문장", async () => {
+    standIn.reply = () => ({ hang: true });
+    let caught: unknown;
+    try {
+      await requestProviderJson({
+        provider: "openai", label: "OpenAI /chat/completions", url: `${standIn.origin}/v1/chat/completions`,
+        method: "POST", headers: {}, body: {}, timeoutMs: 80,
+      });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(LlmRequestError);
+    const err = caught as LlmRequestError;
+    expect(err.timedOut).toBe(true);
+    expect(err.status).toBeNull();
+    expect(err.message).toBe("OpenAI /chat/completions timeout (80ms 초과)");
+  });
+});

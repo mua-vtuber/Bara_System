@@ -36,7 +36,36 @@ export function validateMemorySettings(value: unknown): ValidationResult {
     }
     validateGroup(groupKey, group as Record<string, unknown>, errors);
   }
+  errors.push(...backfillRetryDelayErrors(root));
   return { ok: errors.length === 0, errors };
+}
+
+/** 재시도 두 칸 관계를 보는 슬롯 — 추출(extractor)과 캡션(vision) 백필 둘 다 본다. */
+const BACKFILL_RETRY_SLOTS = ["extractor", "vision"] as const;
+
+/**
+ * 백필 재시도 설정의 두 칸 관계 — 최대 대기(retryMaxDelayMin)가 첫 대기(retryDelayMin)보다 작으면 거부한다
+ * (2026-10-14 spec 4.4 — 조용히 맞춰 쓰지 않는다). 칸이 없거나 숫자가 아니면 여기서는 보지 않는다 — 그 경우는
+ * 스키마 칸 검사(validateGroup)가 이미 "필수 필드 누락"·"integer 필요"로 알린다.
+ */
+export function backfillRetryDelayErrors(root: Record<string, unknown>): string[] {
+  const errors: string[] = [];
+  const llm = root.llm;
+  if (typeof llm !== "object" || llm === null) return errors;
+  for (const slotKey of BACKFILL_RETRY_SLOTS) {
+    const slot = (llm as Record<string, unknown>)[slotKey];
+    if (typeof slot !== "object" || slot === null) continue;
+    const backfill = (slot as Record<string, unknown>).backfill;
+    if (typeof backfill !== "object" || backfill === null) continue;
+    const { retryDelayMin, retryMaxDelayMin } = backfill as Record<string, unknown>;
+    if (typeof retryDelayMin !== "number" || typeof retryMaxDelayMin !== "number") continue;
+    if (retryMaxDelayMin < retryDelayMin) {
+      errors.push(
+        `llm.${slotKey}.backfill.retryMaxDelayMin: llm.${slotKey}.backfill.retryDelayMin(${retryDelayMin}) 이상 필요 (받은 값 ${retryMaxDelayMin})`,
+      );
+    }
+  }
+  return errors;
 }
 
 function validateGroup(

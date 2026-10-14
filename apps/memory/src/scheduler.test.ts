@@ -8,6 +8,7 @@
  * 실제 LLM 끼는 통합 시나리오는 별도 *.int.test.ts에서 다룬다 (TBD).
  */
 
+import { TEST_CAPTION_BACKFILL_RETRY, TEST_EXTRACTION_BACKFILL_RETRY } from "./test-utils/backfill-retry.ts";
 import {
   afterAll,
   afterEach,
@@ -79,7 +80,7 @@ describe("startBackfillScheduler 입력 검증", () => {
     const extractor = new MemoryExtractor(llm, store, embedder);
 
     expect(() =>
-      startBackfillScheduler(extractor, store, { intervalMs: 59_999 }),
+      startBackfillScheduler(extractor, store, { intervalMs: 59_999, retry: TEST_EXTRACTION_BACKFILL_RETRY }),
     ).toThrow();
 
     db.close();
@@ -105,6 +106,7 @@ describe("스케줄러 사이클 — 후보 0개", () => {
   test("DB가 비어있으면 tickNow → candidatesFound 0, LLM 호출 없음", async () => {
     const handle = startBackfillScheduler(extractor, store, {
       intervalMs: 60_000,
+      retry: TEST_EXTRACTION_BACKFILL_RETRY,
       batchSize: 5,
     });
     const summary = await handle.tickNow();
@@ -125,6 +127,7 @@ describe("스케줄러 사이클 — 후보 0개", () => {
     });
     const handle = startBackfillScheduler(extractor, store, {
       intervalMs: 60_000,
+      retry: TEST_EXTRACTION_BACKFILL_RETRY,
       batchSize: 5,
     });
     const summary = await handle.tickNow();
@@ -140,6 +143,7 @@ describe("스케줄러 사이클 — 후보 0개", () => {
     });
     const handle = startBackfillScheduler(extractor, store, {
       intervalMs: 60_000,
+      retry: TEST_EXTRACTION_BACKFILL_RETRY,
       batchSize: 5,
       minImportance: 0.5,
     });
@@ -151,6 +155,7 @@ describe("스케줄러 사이클 — 후보 0개", () => {
   test("stop() 후 tickNow는 즉시 빈 사이클 반환", async () => {
     const handle = startBackfillScheduler(extractor, store, {
       intervalMs: 60_000,
+      retry: TEST_EXTRACTION_BACKFILL_RETRY,
     });
     await handle.stop();
     const summary = await handle.tickNow();
@@ -161,6 +166,7 @@ describe("스케줄러 사이클 — 후보 0개", () => {
   test("lastSummary는 첫 사이클 전엔 null, 한 번 돌리면 채워짐", async () => {
     const handle = startBackfillScheduler(extractor, store, {
       intervalMs: 60_000,
+      retry: TEST_EXTRACTION_BACKFILL_RETRY,
     });
     expect(handle.lastSummary()).toBeNull();
     await handle.tickNow();
@@ -173,6 +179,7 @@ describe("스케줄러 사이클 — 후보 0개", () => {
     const captured: Array<number> = [];
     const handle = startBackfillScheduler(extractor, store, {
       intervalMs: 60_000,
+      retry: TEST_EXTRACTION_BACKFILL_RETRY,
       onCycleComplete: (s) => captured.push(s.candidatesFound),
     });
     await handle.tickNow();
@@ -228,6 +235,7 @@ describe("startGenericBackfillScheduler — 시계 정렬 재예약 (extractor w
     let nowMs = new Date("2026-06-02T10:07:00+09:00").getTime();
     const handle = startBackfillScheduler(extractor, store, {
       intervalMs: 30 * 60_000,
+      retry: TEST_EXTRACTION_BACKFILL_RETRY,
       now: () => nowMs,
       setTimeoutFn: (fn, ms) => {
         captured.push({ fn, ms });
@@ -260,6 +268,7 @@ describe("startGenericBackfillScheduler — 시계 정렬 재예약 (extractor w
     const nowMs = new Date("2026-06-02T10:07:00+09:00").getTime();
     const handle = startBackfillScheduler(extractor, store, {
       intervalMs: 30 * 60_000,
+      retry: TEST_EXTRACTION_BACKFILL_RETRY,
       offsetMin: 15,
       now: () => nowMs,
       setTimeoutFn: (fn, ms) => {
@@ -283,6 +292,7 @@ describe("startGenericBackfillScheduler — 시계 정렬 재예약 (extractor w
     const nowMs = new Date("2026-06-02T10:07:00+09:00").getTime();
     const handle = startBackfillScheduler(extractor, store, {
       intervalMs: 30 * 60_000,
+      retry: TEST_EXTRACTION_BACKFILL_RETRY,
       now: () => nowMs,
       setTimeoutFn: (fn, ms) => {
         captured.push({ fn, ms });
@@ -373,6 +383,7 @@ describe("백필 사이클 — 추출 후 완료 마킹 (Task 5 / 실제 extract
 
     const handle = startBackfillScheduler(extractor, store, {
       intervalMs: 60_000,
+      retry: TEST_EXTRACTION_BACKFILL_RETRY,
       batchSize: 10,
     });
     const summary = await handle.tickNow();
@@ -460,6 +471,7 @@ describe("백필 사이클 — Q1 태그 전처리 (prepareExtraction.text = cle
 
     const handle = startBackfillScheduler(extractor, store, {
       intervalMs: 60_000,
+      retry: TEST_EXTRACTION_BACKFILL_RETRY,
       batchSize: 10,
     });
     await handle.tickNow();
@@ -483,6 +495,7 @@ describe("백필 사이클 — Q1 태그 전처리 (prepareExtraction.text = cle
 
     const handle = startBackfillScheduler(extractor, store, {
       intervalMs: 60_000,
+      retry: TEST_EXTRACTION_BACKFILL_RETRY,
       batchSize: 10,
     });
     await handle.tickNow();
@@ -506,6 +519,7 @@ describe("백필 사이클 — Q1 태그 전처리 (prepareExtraction.text = cle
 
     const handle = startBackfillScheduler(extractor, store, {
       intervalMs: 60_000,
+      retry: TEST_EXTRACTION_BACKFILL_RETRY,
       batchSize: 10,
     });
     await handle.tickNow();
@@ -528,6 +542,7 @@ describe("백필 사이클 — Q1 태그 전처리 (prepareExtraction.text = cle
 
     const handle = startBackfillScheduler(extractor, store, {
       intervalMs: 60_000,
+      retry: TEST_EXTRACTION_BACKFILL_RETRY,
       batchSize: 10,
     });
     await handle.tickNow();
@@ -618,7 +633,7 @@ describe("startVisionBackfillScheduler 입력 검증", () => {
         assetStore,
         VISION_SETTINGS,
         countingProvider(),
-        { intervalMs: 59_999 },
+        { intervalMs: 59_999, retry: TEST_CAPTION_BACKFILL_RETRY },
       ),
     ).toThrow();
     db.close();
@@ -662,7 +677,7 @@ describe("vision 백필 사이클 — runVisionBackfillCycle 통로 (tickNow)", 
       assetStore,
       VISION_SETTINGS,
       provider,
-      { intervalMs: 60_000, batchSize: 5 },
+      { intervalMs: 60_000, batchSize: 5, retry: TEST_CAPTION_BACKFILL_RETRY },
     );
     const summary = await handle.tickNow();
     expect(summary.candidatesFound).toBe(0);
@@ -689,7 +704,7 @@ describe("vision 백필 사이클 — runVisionBackfillCycle 통로 (tickNow)", 
       assetStore,
       VISION_SETTINGS,
       provider,
-      { intervalMs: 60_000, batchSize: 5 },
+      { intervalMs: 60_000, batchSize: 5, retry: TEST_CAPTION_BACKFILL_RETRY },
     );
     const summary = await handle.tickNow();
     expect(summary.candidatesFound).toBe(1);
@@ -721,7 +736,7 @@ describe("vision 백필 사이클 — runVisionBackfillCycle 통로 (tickNow)", 
       assetStore,
       VISION_SETTINGS,
       provider,
-      { intervalMs: 60_000, batchSize: 5 },
+      { intervalMs: 60_000, batchSize: 5, retry: TEST_CAPTION_BACKFILL_RETRY },
     );
     const summary = await handle.tickNow();
     expect(summary.candidatesFound).toBe(1);
@@ -750,7 +765,7 @@ describe("vision 백필 사이클 — runVisionBackfillCycle 통로 (tickNow)", 
       assetStore,
       VISION_SETTINGS,
       provider,
-      { intervalMs: 60_000, batchSize: 2 },
+      { intervalMs: 60_000, batchSize: 2, retry: TEST_CAPTION_BACKFILL_RETRY },
     );
     // 사이클 1 — 오래된 2건.
     const s1 = await handle.tickNow();
@@ -781,6 +796,7 @@ describe("vision 백필 사이클 — runVisionBackfillCycle 통로 (tickNow)", 
       countingProvider(),
       {
         intervalMs: 60_000,
+        retry: TEST_CAPTION_BACKFILL_RETRY,
         onCycleComplete: (s) => captured.push(s.candidatesFound),
       },
     );
@@ -816,7 +832,7 @@ describe("vision 백필 사이클 — runVisionBackfillCycle 통로 (tickNow)", 
       assetStore,
       { ...VISION_SETTINGS, forceCall: false },
       provider,
-      { intervalMs: 60_000, batchSize: 5 },
+      { intervalMs: 60_000, batchSize: 5, retry: TEST_CAPTION_BACKFILL_RETRY },
     );
     const summary = await handle.tickNow();
     expect(summary.candidatesFound).toBe(1);
@@ -882,7 +898,7 @@ describe("백필 재처리 — 태그 wiring 중복 누적 0 (T4)", () => {
       minImportance: 0.3,
       forceJsonFormat: false,
       timeoutMs: 900000,
-      backfill: { intervalMin: 30, batchSize: 10, minImportance: 0 },
+      backfill: { intervalMin: 30, batchSize: 10, minImportance: 0, maxAttempts: 5, retryDelayMin: 30, retryMaxDelayMin: 1440 },
     };
   }
 
@@ -906,6 +922,7 @@ describe("백필 재처리 — 태그 wiring 중복 누적 0 (T4)", () => {
     // 엣지는 늘지 않아야 한다(추출 사이클과 무관).
     const handle = startBackfillScheduler(extractor, store, {
       intervalMs: 60_000,
+      retry: TEST_EXTRACTION_BACKFILL_RETRY,
       batchSize: 10,
     });
     await handle.tickNow();

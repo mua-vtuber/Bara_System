@@ -2,34 +2,31 @@ import type { Feedback } from "../shared/contracts.ts";
 import { command } from "./bridge.ts";
 import { button, element, type Notice } from "./dom.ts";
 import { openedMemoryInitialStatus } from "./feedback-model.ts";
-import { memoryCard, openMemory } from "./memory-view.ts";
+import { openMemory } from "./memory-view.ts";
 import { messages } from "./messages.ts";
+import { renderRecentAnswers } from "./recent-history.ts";
 import { renderRecovery } from "./recovery.ts";
 
+/** With no result, or an answer, the screen is the recent questions and answers (the answer is the newest of them).
+ * Any other result (a save, work in progress, a failure) is shown first, with the recent answers under it. */
 export function renderResult(host: HTMLElement, feedback: Feedback | null, notice: Notice, openSettings: () => void): () => void {
   host.replaceChildren();
   let live = true;
-  if (!feedback) {
-    host.append(element("h1", "result-title", messages.feedback.resultHeading), element("p", "hint", messages.feedback.noFeedback));
+  if (!feedback || feedback.kind === "answer") {
+    host.append(element("h1", "result-title", messages.feedback.resultHeading));
+    const recent = element("section", "recent-answers");
+    host.append(recent);
+    const stopRecent = renderRecentAnswers(recent, notice);
     const actions = element("div", "stack-actions");
     actions.append(button(messages.feedback.openQuickInput, () => command("open_quick", { mode: "input" })),
       button(messages.feedback.openQuickQuestion, () => command("open_quick", { mode: "question" })));
     host.append(actions);
-    return () => { live = false; };
+    return () => { live = false; stopRecent(); };
   }
-  const title = feedback.kind === "answer" ? messages.feedback.resultHeading : feedback.kind === "saved" ? messages.feedback.savedHeading
+  const title = feedback.kind === "saved" ? messages.feedback.savedHeading
     : feedback.kind === "working" ? messages.feedback.workingHeading : messages.feedback.errorHeading;
   host.append(element("h1", "result-title", title), element("p", "result-summary", feedback.summary));
-  if (feedback.kind === "answer" && feedback.generated === false) host.append(element("p", "hint", messages.feedback.searchOnly));
   if (feedback.detail.trim() && feedback.detail.trim() !== feedback.summary.trim()) host.append(element("p", "answer", feedback.detail));
-  if (feedback.kind === "answer" && feedback.sources?.length && feedback.audience) {
-    host.append(element("h2", "sources-heading", messages.feedback.sourceHeading));
-    const sources = element("div", "results");
-    for (const source of feedback.sources) sources.append(memoryCard({ ...source, audience: feedback.audience }, memory => { void openMemory(memory, notice); }));
-    host.append(sources);
-  } else if (feedback.kind === "answer" && feedback.sources?.length) {
-    host.append(element("p", "hint", messages.feedback.connectionChanged));
-  }
   let stopRecovery = () => {};
   if (feedback.kind === "error") {
     const actions = element("div", "stack-actions");
@@ -46,5 +43,7 @@ export function renderResult(host: HTMLElement, feedback: Feedback | null, notic
   } else if (feedback.kind === "saved" && feedback.memoryId) {
     host.append(element("p", "hint", messages.feedback.connectionChanged));
   }
-  return () => { live = false; stopRecovery(); };
+  const recent = element("section", "recent-list"); host.append(recent);
+  const stopRecent = renderRecentAnswers(recent, notice);
+  return () => { live = false; stopRecovery(); stopRecent(); };
 }

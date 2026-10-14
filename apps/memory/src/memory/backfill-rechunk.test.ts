@@ -11,7 +11,9 @@
  *
  *  1. 편집 뒤 재청크가 실패해 청크 없이 추출 대기로 남은 긴 원문: 백필은 LLM 을 부르지 않고 재청크하며,
  *     원문을 추출 완료로 표시하지 않는다. 다음 주기에 새 청크를 청크 단위로 추출한다.
- *  2. 백필의 재청크도 실패하면 이유(노드·원인)를 로그에 남기고 원문은 추출 대기 그대로다. 다음 주기에 다시 시도한다.
+ *  2. 백필의 재청크도 실패하면 이유(노드·원인)를 로그에 남기고 원문은 추출 대기 그대로다. 실패 기록(2026-10-14 spec 4.3)에
+ *     세는 실패로 남아 재시도 시각까지 후보에서 빠지고, 그 뒤 다시 시도한다. 쓰기 잠금 때문에 기록 표 쓰기까지 실패하면
+ *     주기를 "ledger_write_failed" 로 멈추고 기록은 남지 않는다.
  *  3. WP-B1-06 이전 편집으로 청크가 모두 계보 무효화된 긴 원문(대기 표시 없음)은 백필 한 주기 뒤 새 청크를 갖는다.
  *  4. 청크가 모두 계보 무효화된 짧은 원문은 한 번 직접 추출되고, 그 뒤에는 다시 후보가 되지 않는다.
  */
@@ -24,6 +26,8 @@ import { cleanupTempDir, makeWalTempDir } from "../db/wal-test-helpers.ts";
 import { Bgem3Embedder } from "../embedding/bge-m3.ts";
 import { OllamaClient } from "../llm/ollama-client.ts";
 import { startBackfillScheduler, type BackfillCycleSummary } from "../scheduler.ts";
+import { TEST_EXTRACTION_BACKFILL_RETRY } from "../test-utils/backfill-retry.ts";
+import { BackfillAttemptsLedger } from "./backfill-attempts/ledger.ts";
 import { rewireEditedNodeContent } from "../server-internal/routes/memories-shared.ts";
 import { saveTextInput, type SaveTextChunkingSettings } from "../server-internal/save-input.ts";
 import { MEMORY_DEFAULTS } from "../settings/memory-schema.ts";
@@ -53,6 +57,10 @@ const EDITED_LONG_PARAGRAPHS = [
   "점검 목록은 배포 당일 아침에 본다. 결과는 채널에 남긴다.",
 ];
 const EXTRACTED_FACT = "배포 창구는 화요일 오전이다";
+const CLOCK_START_MS = Date.UTC(2026, 9, 14, 0, 0, 0);
+const MINUTE_MS = 60_000;
+/** 첫 재시도 대기(기본 30분)를 넘기는 간격. */
+const PAST_FIRST_DELAY_MS = (TEST_EXTRACTION_BACKFILL_RETRY.policy.retryDelayMin + 1) * MINUTE_MS;
 
 let embedder: Bgem3Embedder;
 beforeAll(async () => {
@@ -84,6 +92,7 @@ afterEach(() => {
 });
 
 function makeHarness(): Harness {
+  clockMs = CLOCK_START_MS;
   const { dir, file } = makeWalTempDir("bara-backfill-rechunk-");
   const db = openMemoryDatabase(file, { embeddingDim: 1024 });
   const store = new SqliteMemoryStore(db, embedder);
@@ -124,8 +133,13 @@ async function editLongClaim(h: Harness, origin: number): Promise<string> {
   return content;
 }
 
+/** 시험의 시계 — 고정 시작 시각에서 시험이 직접 움직인다(실제 시각에 기대지 않는다). */
+let clockMs = CLOCK_START_MS;
+
 async function runBackfill(h: Harness): Promise<BackfillCycleSummary> {
-  const handle = startBackfillScheduler(h.extractor, h.store, { intervalMs: 60_000, batchSize: 10, chunking: CHUNKING });
+  const handle = startBackfillScheduler(h.extractor, h.store, {
+    intervalMs: 60_000, batchSize: 10, chunking: CHUNKING, retry: TEST_EXTRACTION_BACKFILL_RETRY, now: () => clockMs,
+  });
   try {
     return await handle.tickNow();
   } finally {
@@ -211,7 +225,7 @@ describe("재청크 실패로 청크 없이 추출 대기인 긴 원문", () => 
     expect(await candidateIds(h)).toEqual([]);
   }, 60_000);
 
-  test("백필의 재청크도 실패하면 노드와 원인을 로그에 남기고, 원문은 추출 대기로 남아 다음 주기에 다시 시도된다", async () => {
+  test("백필의 재청크가 쓰기 잠금 때문에 실패하면 기록 표 쓰기도 실패해 주기를 ledger_write_failed 로 멈추고, 기록은 남지 않는다", async () => {
     const h = makeHarness();
     const { origin } = await saveLong(h);
     await editLongClaim(h, origin);
@@ -223,24 +237,69 @@ describe("재청크 실패로 청크 없이 추출 대기인 긴 원문", () => 
     let logged: string[];
     try {
       failedCycle = await runBackfill(h);
-      logged = logLines(errors).filter((line) => line.includes(`node ${origin}`));
+      logged = logLines(errors);
     } finally {
       lock.release();
       errors.mockRestore();
     }
-    expect(failedCycle).toMatchObject({ candidatesFound: 1, processed: 0, storedNodes: 0, failures: 1 });
-    expect(logged).toHaveLength(1);
-    expect(logged[0]).toContain("재청크");
-    expect(logged[0]).toContain("locked");
+    expect(failedCycle).toMatchObject({
+      candidatesFound: 1, processed: 0, storedNodes: 0, failures: 1,
+      retry: { retryWait: 0, stopped: 0, cycleStopped: "ledger_write_failed" },
+    });
+    const failedLines = logged.filter((line) => line.includes(`backfill failed for node ${origin}`));
+    expect(failedLines).toHaveLength(1);
+    expect(failedLines[0]).toContain("재청크");
+    expect(failedLines[0]).toContain("locked");
+    expect(logged.some((line) => line.includes("cycle stopped (ledger_write_failed)"))).toBe(true);
+    expect(new BackfillAttemptsLedger(h.db).rows("extraction")).toEqual([]);
     expect(h.server.requestCount()).toBe(0);
     expect(extractChildCount(h)).toBe(0);
     expect(activeChunkIds(h, origin)).toEqual([]);
     expect((await h.store.getNode(origin))!.metadata.extracted).toBe(0);
     expect(await candidateIds(h)).toEqual([origin]);
 
+    // 잠금이 풀리면 기록이 없는 원문은 곧바로 다시 후보가 되어 재청크된다.
     await runBackfill(h);
     expect(h.server.requestCount()).toBe(0);
     await expectRechunked(h, origin);
+  }, 60_000);
+
+  test("재청크가 잠금 밖 원인으로 실패하면 세는 실패로 기록해 재시도 시각까지 후보에서 빼고, 시각이 지나면 다시 시도해 줄을 지운다", async () => {
+    const h = makeHarness();
+    const { origin } = await saveLong(h);
+    await editLongClaim(h, origin);
+    expect(activeChunkIds(h, origin)).toEqual([]);
+
+    // 청크 노드 저장만 막는 실제 DB 트리거 — 재청크 트랜잭션이 이 원인으로 실패한다(쓰기 잠금과 무관).
+    h.db.run(`CREATE TRIGGER block_chunk_insert BEFORE INSERT ON knowledge_nodes
+      WHEN NEW.source_type = 'document_chunk'
+      BEGIN SELECT RAISE(ABORT, 'chunk insert blocked by test'); END`);
+    const ledger = new BackfillAttemptsLedger(h.db);
+    const errors = spyOn(console, "error");
+    let failedCycle: BackfillCycleSummary;
+    try {
+      failedCycle = await runBackfill(h);
+    } finally {
+      errors.mockRestore();
+    }
+    expect(failedCycle).toMatchObject({
+      candidatesFound: 1, failures: 1, retry: { retryWait: 1, stopped: 0, cycleStopped: null },
+    });
+    expect(ledger.get("extraction", String(origin))).toMatchObject({ status: "retryable_failure", attemptCount: 1 });
+    expect(ledger.get("extraction", String(origin))!.lastError).toContain("재청크");
+    expect(ledger.get("extraction", String(origin))!.lastError).toContain("blocked");
+    expect(h.server.requestCount()).toBe(0);
+
+    // 재시도 시각 전에는 후보에서 빠진다.
+    expect((await runBackfill(h)).candidatesFound).toBe(0);
+
+    // 시각이 지나면 다시 후보가 되고, 원인을 치웠으니 재청크되어 줄이 지워진다.
+    clockMs += PAST_FIRST_DELAY_MS;
+    h.db.run("DROP TRIGGER block_chunk_insert");
+    expect(await runBackfill(h)).toMatchObject({ candidatesFound: 1, failures: 0, rechunked: 1 });
+    expect(h.server.requestCount()).toBe(0);
+    await expectRechunked(h, origin);
+    expect(ledger.get("extraction", String(origin))).toBeNull();
   }, 60_000);
 });
 

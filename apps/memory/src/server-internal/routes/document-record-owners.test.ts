@@ -23,6 +23,7 @@
  * 불변식 도우미가 빈 목록이다(설계 2 사례는 도우미가 정확히 그 어긋남을 알리는지 본다). mock 0.
  */
 
+import { TEST_EXTRACTION_BACKFILL_RETRY } from "../../test-utils/backfill-retry.ts";
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import { Hono } from "hono";
@@ -198,7 +199,7 @@ async function expireTrash(h: Harness): Promise<Awaited<ReturnType<typeof runTra
 
 /** 실제 백필 주기 한 번(루프백 LLM). */
 async function backfillOnce(h: Harness): Promise<void> {
-  const handle = startBackfillScheduler(h.extractor!, h.store, { intervalMs: 60_000, batchSize: 10 });
+  const handle = startBackfillScheduler(h.extractor!, h.store, { intervalMs: 60_000, batchSize: 10, retry: TEST_EXTRACTION_BACKFILL_RETRY });
   try {
     await handle.tickNow();
   } finally {

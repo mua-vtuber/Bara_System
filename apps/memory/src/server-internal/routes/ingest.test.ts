@@ -45,6 +45,7 @@ import { originalExt } from "./ingest.ts";
 import { createAuthGate } from "../auth-gate.ts";
 import { SseTokenStore } from "../../federation/sse-tokens.ts";
 import { MEMORY_DEFAULTS } from "../../settings/memory-defaults.ts";
+import { startProviderStandIn } from "../../test-utils/provider-stand-in.ts";
 
 // ── 테스트 전역 ─────────────────────────────────────────────────────────────
 
@@ -1837,7 +1838,7 @@ describe("POST /ingest", () => {
   async function ingestImageWith(
     settings: ReturnType<typeof getMemorySettings>,
     embedImageResult: () => Promise<Float32Array | null> = async () => null,
-  ): Promise<{ captionFlow: { called: boolean } | null }> {
+  ): Promise<{ captionFlow: { called: boolean; caption?: string | null; captionNodeId?: number } | null }> {
     const stubImageEmbedder: ImageEmbedder = {
       dim: 768,
       modelId: "stub:for-test",
@@ -1876,7 +1877,7 @@ describe("POST /ingest", () => {
       }),
     });
     expect(res.status).toBe(201);
-    return (await res.json()) as { captionFlow: { called: boolean } | null };
+    return (await res.json()) as { captionFlow: { called: boolean; caption?: string | null; captionNodeId?: number } | null };
   }
 
   test("(k2) extractor.mode='backfill' → 업로드 캡션 블록 진입 0 (captionFlow=null — 스케줄러가 T7 에서 채움)", async () => {
@@ -1908,6 +1909,21 @@ describe("POST /ingest", () => {
     // 블록 진입 신호 = captionFlow 가 null 아님. called=false = decideVlmInvocation OFF.
     expect(json.captionFlow).not.toBeNull();
     expect(json.captionFlow!.called).toBe(false);
+  });
+
+  test("(k3) 업로드 즉시 캡션이 실패해도 저장은 성공하고, 응답 captionFlow 에 실패 원인 칸이 없다 (2026-10-14 spec 4.6)", async () => {
+    const vlm = startProviderStandIn();
+    vlm.reply = () => ({ status: 500, body: { error: "vlm down" } });
+    try {
+      const base = getMemorySettings("/nonexistent-default-ingest-test", "/nonexistent-default-ingest-test.secrets.json");
+      const settings = makeVisionSettings(base, "immediate", true);
+      settings.llm.vision = { ...settings.llm.vision, provider: "ollama", ollamaUrl: vlm.origin, forceCall: true };
+      const json = await ingestImageWith(settings);
+      expect(json.captionFlow).toEqual({ called: true, caption: null });
+      expect(vlm.requests.length).toBeGreaterThan(0);
+    } finally {
+      vlm.stop();
+    }
   });
 
   // ── (L) 대시보드 경로 — type="auto" + image mimeType + base64 (Phase 11d 회귀) ──

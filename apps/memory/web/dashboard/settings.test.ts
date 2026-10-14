@@ -118,6 +118,9 @@ function makeExtractorValue(
       intervalMin: 30,
       batchSize: 10,
       minImportance: 0,
+      maxAttempts: 5,
+      retryDelayMin: 30,
+      retryMaxDelayMin: 1440,
     },
     ...overrides,
   };
@@ -157,6 +160,9 @@ function makeVisionValue(
     // Task 4·6 — vision.backfill 은 batchSize 한 칸. mode·intervalMin 은 extractor 권위.
     backfill: {
       batchSize: 10,
+      maxAttempts: 5,
+      retryDelayMin: 30,
+      retryMaxDelayMin: 1440,
     },
     ...overrides,
   };
@@ -1192,6 +1198,7 @@ describe("renderVisionBlocks — 모델 블록 + 이미지 전용 설정 (Task 6
     expect(backfill.batchSize).toBe(10);
     expect(backfill.intervalMin).toBeUndefined();
     expect(backfill.minImportance).toBeUndefined();
+    expect(backfill.maxAttempts).toBe(5);
   });
 
   test("getPayload — 공통 mode=immediate 시 vision backfill 포함 0", () => {

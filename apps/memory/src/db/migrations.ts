@@ -29,6 +29,7 @@ import {
 } from "../backup/pre-migration-snapshot.ts";
 import { v48EntityRegister } from "./migrations-internal/v48-entity-register.ts";
 import { v49DocumentOcrLedger } from "./migrations-internal/v49-document-ocr-ledger.ts";
+import { v50BackfillAttempts } from "./migrations-internal/v50-backfill-attempts.ts";
 
 export interface Migration {
   version: number;
@@ -47,7 +48,7 @@ export interface Migration {
 }
 
 /** 기준 스키마(v47) 위에 쌓는 마이그레이션. version 은 BASELINE_VERSION + 1 부터, 오름차순으로 더한다. */
-export const MIGRATIONS: Migration[] = [v48EntityRegister, v49DocumentOcrLedger];
+export const MIGRATIONS: Migration[] = [v48EntityRegister, v49DocumentOcrLedger, v50BackfillAttempts];
 
 /** 이 마이그레이션 목록을 아는 코드의 최고 스키마 버전 — 기준 스키마 번호와 목록 최고값 중 큰 쪽. */
 function knownMaxVersion(migrations: readonly Migration[]): number {

@@ -13,6 +13,7 @@ import {
   type LlmApiKeyField,
   type LlmProvider,
 } from "../../src/llm/provider-registry";
+import { readRetryPolicyValue, type RetryPolicyValue } from "./settings-llm-retry-fields";
 
 // 공급자 값 정의는 서버와 같은 공급자 표 한 곳(src/llm/provider-registry.ts) — 다시 내보내기만 한다.
 export type { LlmProvider };
@@ -42,7 +43,7 @@ export interface LlmSlotCommonValue {
 }
 
 /** 의미 추출 슬롯 backfill sub-object — Phase 5.7.1 W1 정착 (3 칸). */
-export interface LlmExtractorBackfillValue {
+export interface LlmExtractorBackfillValue extends RetryPolicyValue {
   intervalMin: number;
   batchSize: number;
   minImportance: number;
@@ -66,7 +67,7 @@ export interface LlmCleanupValue extends LlmSlotCommonValue {
  * 분은 의미추출 AI 공통 설정(llm.extractor 권위)을 따른다. 그래서 vision 에는
  * batchSize 한 칸만 남는다. minImportance 도 제외 — 이미지는 importance 부적합.
  */
-export interface LlmVisionBackfillValue {
+export interface LlmVisionBackfillValue extends RetryPolicyValue {
   batchSize: number;
 }
 
@@ -305,6 +306,7 @@ export function readLlmGroup(value: Record<string, unknown>): LlmGroupValue {
         intervalMin: backfillIntervalMin,
         batchSize: backfillBatchSize,
         minImportance: backfillMinImportance,
+        ...readRetryPolicyValue(backfillObj, "llm.extractor.backfill"),
       },
     },
     cleanup: {
@@ -318,6 +320,7 @@ export function readLlmGroup(value: Record<string, unknown>): LlmGroupValue {
       captionPrompt,
       backfill: {
         batchSize: visionBackfillBatchSize,
+        ...readRetryPolicyValue(visionBackfillObj, "llm.vision.backfill"),
       },
     },
   };

@@ -11,6 +11,7 @@
  * OllamaClient 로 테스트 안 Bun.serve 루프백 LLM 을 부른다). mock 0. 모든 메시지 삭제 뒤 계보 불변식 도우미를 부른다.
  */
 
+import { TEST_EXTRACTION_BACKFILL_RETRY } from "../../test-utils/backfill-retry.ts";
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import type { Hono } from "hono";
@@ -177,7 +178,7 @@ async function deleteMessage(h: Harness, messageId: string): Promise<DeleteBySou
 }
 
 async function runBackfill(h: Harness): Promise<void> {
-  const handle = startBackfillScheduler(h.extractor, h.store, { intervalMs: 60_000, batchSize: 10 });
+  const handle = startBackfillScheduler(h.extractor, h.store, { intervalMs: 60_000, batchSize: 10, retry: TEST_EXTRACTION_BACKFILL_RETRY });
   try {
     expect(await handle.tickNow()).toMatchObject({ processed: 1, failures: 0 });
   } finally {

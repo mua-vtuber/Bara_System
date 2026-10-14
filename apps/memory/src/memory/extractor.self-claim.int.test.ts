@@ -12,6 +12,7 @@
  *  - 한 문장 원문의 백필: 자기 엣지 없이 원문이 다른 AI 의 반대 주장과 충돌 후보가 된다(설계 5.9, 9절 위험 3).
  */
 
+import { TEST_EXTRACTION_BACKFILL_RETRY } from "../test-utils/backfill-retry.ts";
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 
@@ -227,7 +228,7 @@ describe("백필(설계 5.9) — 백필과 즉시 추출이 같은 규칙", () =
     // Codex 가 남긴 한 문장 원문 — 아직 추출하지 않은 백필 후보.
     const origin = await addOrigin(h, BACKFILL_ORIGIN, "codex");
     const mentionsBefore = nodeState(h.db, origin).mention_count;
-    const scheduler = startBackfillScheduler(h.extractor, h.store, { intervalMs: 60_000, batchSize: 5 });
+    const scheduler = startBackfillScheduler(h.extractor, h.store, { intervalMs: 60_000, batchSize: 5, retry: TEST_EXTRACTION_BACKFILL_RETRY });
     try {
       const summary = await scheduler.tickNow();
       expect(summary).toMatchObject({ candidatesFound: 1, processed: 1, storedNodes: 1, failures: 0 });
@@ -258,7 +259,7 @@ describe("백필(설계 5.9) — 백필과 즉시 추출이 같은 규칙", () =
   test("백필 자식은 자기 원문과 충돌 후보로 이어지지 않는다", async () => {
     const h = makeHarness();
     const origin = await addOrigin(h, MULTI_ORIGIN);
-    const scheduler = startBackfillScheduler(h.extractor, h.store, { intervalMs: 60_000, batchSize: 5 });
+    const scheduler = startBackfillScheduler(h.extractor, h.store, { intervalMs: 60_000, batchSize: 5, retry: TEST_EXTRACTION_BACKFILL_RETRY });
     try {
       expect(await scheduler.tickNow()).toMatchObject({ processed: 1, storedNodes: 1, failures: 0 });
     } finally {

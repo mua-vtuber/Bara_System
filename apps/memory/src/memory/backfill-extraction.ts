@@ -24,10 +24,11 @@
  * 청크 단위 추출 원칙이 깨지고, 추출 완료 표시 뒤에는 청크가 다시 만들어지지 않는다. 그래서 잠금
  * 안에서 같은 재확인을 거친 뒤 재청크(writeOriginChunksAtomic)만 한다. 새 청크는 다음 주기 후보다.
  * 재청크가 실패하면 아무것도 쓰지 않고 사유를 붙여 throw 한다 — 원문은 추출 완료로 표시되지 않아
- * 다음 주기에 다시 시도된다(편집 뒤 재청크 실패, WP-B1-06 이전에 청크만 거둔 원문 모두 여기서 복구).
+ * 재시도 간격 뒤 다시 시도된다(상한에 닿으면 멈춤. 편집 뒤 재청크 실패, WP-B1-06 이전에 청크만 거둔 원문 모두 여기서 복구).
  */
 
 import type { SqliteMemoryStore } from "../db/store.ts";
+import { BackfillRechunkError } from "./backfill-attempts/classify.ts";
 import {
   originExtractionLineage,
   type ExtractInput,
@@ -138,12 +139,14 @@ export async function prepareBackfillCandidate(
 
 /**
  * 준비 결과를 쓰기 잠금 안에서 저장한다. 후보가 준비 때와 달라졌으면 아무것도 쓰지 않고
- * discarded 와 이유를 돌려준다.
+ * discarded 와 이유를 돌려준다. onCommitted 는 저장·재청크가 끝난 직후 같은 잠금 안에서 부른다 — 백필 스케줄러가
+ * 실패 기록 줄을 지우는 자리다(2026-10-14 spec 4.5 — 성공 저장과 같은 잠금 안). 버림(discarded)에는 부르지 않는다.
  */
 export async function commitBackfillCandidate(
   extractor: MemoryExtractor,
   store: SqliteMemoryStore,
   prepared: PreparedBackfill,
+  onCommitted?: () => void,
 ): Promise<BackfillCommitOutcome> {
   return withMemoryMutationLock(store, async () => {
     const node = await store.getNode(prepared.nodeId);
@@ -152,11 +155,16 @@ export async function commitBackfillCandidate(
     const snapshot = getMemoryVisibilitySnapshot(store);
     const reason = staleReason(store, node, prepared, snapshot);
     if (reason !== null) return { kind: "discarded", reason };
-    if (prepared.kind === "rechunk") return rechunkLongOrigin(store, node, prepared.chunking);
+    if (prepared.kind === "rechunk") {
+      const rechunked = await rechunkLongOrigin(store, node, prepared.chunking);
+      onCommitted?.();
+      return rechunked;
+    }
 
     const extraction = prepared.extraction;
     if (extraction === null) {
       await store.markNodeExtracted(node.id, []);
+      onCommitted?.();
       return { kind: "stored", storedNodeIds: [], bumpedNodeIds: [] };
     }
     const result = await extractor.storeExtraction(
@@ -172,6 +180,7 @@ export async function commitBackfillCandidate(
     // 으로 하면 두 relation 을 혼동한다. 추출 결과 0건이어도 "처리 시도 완료" 표시 → 무한 재처리
     // 차단. getBackfillCandidates 의 미추출 조건과 짝.
     await store.markNodeExtracted(node.id, result.storedNodeIds);
+    onCommitted?.();
     return {
       kind: "stored",
       storedNodeIds: result.storedNodeIds,
@@ -197,8 +206,9 @@ async function rechunkLongOrigin(
     return { kind: "rechunked", chunkNodeIds };
   } catch (e) {
     const cause = e instanceof Error ? e.message : String(e);
-    throw new Error(
-      `긴 원문 재청크 실패(${cause}) — 원문 전체를 추출하지 않았고 추출 완료로 표시하지 않았다, 다음 주기에 다시 시도`,
+    // 2026-10-14 spec 4.3 — 백필이 cause 를 풀어 분류하도록 이름 붙은 오류로 감싼다.
+    throw new BackfillRechunkError(
+      `긴 원문 재청크 실패(${cause}) — 원문 전체를 추출하지 않았고 추출 완료로 표시하지 않았다, 재시도 간격 뒤 다시 시도(상한에 닿으면 멈춤)`,
       { cause: e },
     );
   }

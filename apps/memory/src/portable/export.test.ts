@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Database } from 'bun:sqlite';
 import * as sqliteVec from 'sqlite-vec';
-import { openMemoryDatabase, runMigrations } from '../db/migrations.ts';
+import { CURRENT_SCHEMA_VERSION, openMemoryDatabase, runMigrations } from '../db/migrations.ts';
 import { DEFAULT_EMBEDDING_DIM } from '../db/vec-dimension-guard.ts';
 import { removeTempDir } from '../db/migration-safety.test-helpers.ts';
 import { COLLECTIONS, assertSourceSchema } from './collections.ts';
@@ -297,16 +297,17 @@ test('relational validation fails before an exporter creates any staging directo
   expect(after.filter(name => name !== 'source.sqlite-wal' && name !== 'source.sqlite-shm')).toEqual(before);
 });
 
-test('a current source exports and lists the auto-register and server OCR ledger tables as excluded with a reason', async () => {
+test('a current source exports and lists the auto-register, server OCR ledger and backfill retry tables as excluded with a reason', async () => {
   const f = await fixture();
   await exportPortableArchive(f);
   const manifest = JSON.parse(await readFile(join(f.destination, 'manifest.json'), 'utf8'));
-  expect(manifest.source.schemaVersion).toBe(49);
+  expect(manifest.source.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
   const byName = new Map<string, string>(manifest.exclusions.map((e: { name: string; reason: string }) => [e.name, e.reason]));
   expect(byName.get('entity_register_records')).toBeTruthy();
   expect(byName.get('entity_register_ignores')).toBeTruthy();
   expect(byName.get('document_ocr_page_results')).toBeTruthy();
   expect(byName.get('document_ocr_daily_usage')).toBeTruthy();
+  expect(byName.get('backfill_attempts')).toBeTruthy();
   await validatePortableArchive(f.destination);
 });
 test('a v47 source (before the upgrade) still exports without the v48 exclusions', async () => {

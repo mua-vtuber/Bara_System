@@ -13,6 +13,7 @@
 import type { DocumentOcrSettings } from "../../settings/memory-settings.ts";
 import { maskProviderText } from "../../llm/provider-http.ts";
 import { parseRetryAfterMs } from "../../llm/errors.ts";
+import { BUN_FETCH_NO_DEFAULT_TIMEOUT } from "../../llm/bun-fetch.ts";
 
 /** 파일 업로드 OCR API 전송 실패 — 상태 코드(응답이 없으면 null)·시간 초과·Retry-After 를 필드로 둔다. */
 export class HttpFileOcrError extends Error {
@@ -57,6 +58,15 @@ function parseMarkdownFromApiResponse(
   throw new Error("OCR API JSON 응답에 markdown 문자열이 없습니다");
 }
 
+/** 파일 업로드 요청 옵션 — Bun 기본 300초 제한을 끄고 설정 제한(schedule.timeoutMs) signal 만 쓴다(llm/bun-fetch.ts). */
+export function buildHttpFileOcrInit(
+  headers: Record<string, string>,
+  form: FormData,
+  signal: AbortSignal,
+): RequestInit & typeof BUN_FETCH_NO_DEFAULT_TIMEOUT {
+  return { method: "POST", headers, body: form, signal, ...BUN_FETCH_NO_DEFAULT_TIMEOUT };
+}
+
 function isTimeoutAbort(error: unknown): boolean {
   return error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
 }
@@ -87,7 +97,7 @@ export async function callHttpFileOcrApi(
   const combined = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
   let response: Response;
   try {
-    response = await fetch(endpoint, { method: "POST", headers, body: form, signal: combined });
+    response = await fetch(endpoint, buildHttpFileOcrInit(headers, form, combined));
   } catch (error) {
     if (signal?.aborted) throw error;
     const timedOut = timeoutSignal.aborted || isTimeoutAbort(error);

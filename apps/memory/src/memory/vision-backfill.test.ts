@@ -25,6 +25,9 @@ import {
   startDelayedOllamaChatServer,
   type DelayedOllamaChatServer,
 } from "../test-utils/delayed-ollama-chat-server.ts";
+import { BackfillAttemptsLedger } from "./backfill-attempts/ledger.ts";
+import { captionFingerprint } from "./backfill-attempts/fingerprint.ts";
+import { TEST_CAPTION_BACKFILL_RETRY } from "../test-utils/backfill-retry.ts";
 import { withMemoryMutationLock } from "./shared-memory-mutation-lock.ts";
 import { runVisionBackfillCycle } from "./vision-backfill.ts";
 
@@ -34,6 +37,8 @@ const VLM_CAPTION = "창가에 앉은 회색 고양이, 햇빛이 드는 방";
 const LOG_PREFIX = "[vision-backfill.test]";
 const IMAGE_MIME = "image/png";
 const IMAGE_EXT = "png";
+/** 주기 시계 고정값 — 기록 줄의 시각과 같은 시계를 쓰므로 시험이 시각에 기대지 않는다. */
+const TEST_NOW_MS = Date.UTC(2026, 9, 14, 0, 0, 0);
 
 let embedder: Bgem3Embedder;
 beforeAll(async () => {
@@ -79,6 +84,7 @@ function startCycle() {
   if (provider === null) throw new Error("createVisionProvider 가 ollama 설정에서 provider 를 만들지 않았다");
   return runVisionBackfillCycle({
     store, assetStore, visionSettings: settings, provider, batchSize: 5, logPrefix: LOG_PREFIX,
+    retry: TEST_CAPTION_BACKFILL_RETRY, now: () => TEST_NOW_MS,
   });
 }
 
@@ -188,5 +194,25 @@ describe("비전 백필 — 잠금 안 재확인이 어긋나면 캡션을 버�
     }
     expect(captionNodeCount()).toBe(0);
     expect(hasCaptionAuto(image.sha256)).toBe(0);
+  }, 30_000);
+});
+
+describe("비전 백필 — 실패 기록 (2026-10-14 backfill-retry-ledger spec 4.5)", () => {
+  test("캡션 성공이면 지난 실패 줄이 저장과 같은 잠금 안에서 지워진다", async () => {
+    const { nodeId, sha256 } = await seedImage();
+    const settings = visionSettings();
+    const ledger = new BackfillAttemptsLedger(db);
+    // 지금 지문과 같은 줄을 심어 reconcile 이 남기게 한다 — 지워지는 것이 성공 경로임을 보장한다.
+    const fingerprint = captionFingerprint({ provider: settings.provider, model: settings.model, captionPrompt: undefined, assetSha256: sha256 });
+    ledger.recordCounted(
+      { kind: "caption", targetKey: sha256, nodeId, fingerprint, error: "이전 실패", policy: TEST_CAPTION_BACKFILL_RETRY.policy },
+      TEST_NOW_MS - 60 * 60_000,
+    );
+    // 다음 시도 시각을 지나게 해 이번 주기의 후보가 되게 한다.
+    db.query("UPDATE backfill_attempts SET next_retry_at = '2000-01-01 00:00:00'").run();
+    expect(ledger.get("caption", sha256)).not.toBeNull();
+    const summary = await startCycle();
+    expect(summary.storedNodes).toBe(1);
+    expect(ledger.get("caption", sha256)).toBeNull();
   }, 30_000);
 });

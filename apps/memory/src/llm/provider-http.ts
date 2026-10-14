@@ -17,6 +17,7 @@
 
 import type { LlmProvider } from "./provider-registry.ts";
 import { errorMessage, isAbortError, LlmRequestError, parseRetryAfterMs } from "./errors.ts";
+import { BUN_FETCH_NO_DEFAULT_TIMEOUT } from "./bun-fetch.ts";
 
 /** 오류 문장에 실을 공급자 응답 본문 최대 글자 수. */
 export const PROVIDER_ERROR_BODY_MAX_CHARS = 300;
@@ -68,6 +69,20 @@ export function maskProviderText(text: string, secrets: readonly string[] | unde
   return maskExactSecrets(text, secrets).slice(0, PROVIDER_ERROR_BODY_MAX_CHARS);
 }
 
+/** 공급자 호출 한 번의 요청 옵션 — Bun 기본 300초 제한을 끄고 내부 제한 타이머(signal)만 쓴다(bun-fetch.ts). */
+export function buildProviderFetchInit(
+  req: ProviderRequest,
+  signal: AbortSignal,
+): RequestInit & typeof BUN_FETCH_NO_DEFAULT_TIMEOUT {
+  return {
+    method: req.method,
+    headers: req.headers,
+    ...(req.body !== undefined ? { body: JSON.stringify(req.body) } : {}),
+    signal,
+    ...BUN_FETCH_NO_DEFAULT_TIMEOUT,
+  };
+}
+
 /** 공급자 HTTP 호출 한 번 → 파싱한 JSON 본문. 실패 규칙은 파일 머리말 참고. */
 export async function requestProviderJson(req: ProviderRequest): Promise<unknown> {
   const timeoutController = new AbortController();
@@ -85,12 +100,7 @@ export async function requestProviderJson(req: ProviderRequest): Promise<unknown
   try {
     let res: Response;
     try {
-      res = await fetch(req.url, {
-        method: req.method,
-        headers: req.headers,
-        ...(req.body !== undefined ? { body: JSON.stringify(req.body) } : {}),
-        signal: timeoutController.signal,
-      });
+      res = await fetch(req.url, buildProviderFetchInit(req, timeoutController.signal));
     } catch (error) {
       if (isAbortError(error)) {
         if (timedOut) {

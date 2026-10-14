@@ -306,6 +306,7 @@ export function NodeMixin<TBase extends Constructor<StoreInternals>>(
       limit: number;
       since?: string;
       minImportance?: number;
+      excludeBlockedAt?: string;
     }): Promise<MemoryNode[]> {
       return this.nodeRepo.getBackfillCandidates(opts);
     }
@@ -329,6 +330,7 @@ export function NodeMixin<TBase extends Constructor<StoreInternals>>(
      */
     getUncaptionedImageCandidates(opts: {
       limit: number;
+      excludeBlockedAt?: string;
     }): Array<{ nodeId: number; assetSha256: string; mime: string }> {
       return this.nodeRepo.getUncaptionedImageCandidates(opts);
     }

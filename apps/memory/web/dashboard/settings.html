@@ -641,6 +641,29 @@
         align-items: center;
         gap: 4px;
       }
+      .backfill-attempts-line,
+      .backfill-attempts-preview,
+      .backfill-attempts-error-text {
+        margin: var(--sp-1) 0;
+        color: var(--text-soft);
+        font-size: var(--fs-sm);
+        line-height: 1.45;
+      }
+      .backfill-attempts-line.error {
+        color: var(--danger);
+      }
+      .backfill-attempts-list {
+        list-style: none;
+        margin: var(--sp-2) 0;
+        padding: 0;
+      }
+      .backfill-attempts-item {
+        margin-bottom: var(--sp-2);
+        padding: var(--sp-2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg-card);
+      }
       .document-processing-panel {
         display: flex;
         flex-direction: column;

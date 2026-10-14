@@ -384,7 +384,7 @@ describe("toVisionProviderSettings — LlmVisionSlot → VisionProviderSettings"
     tokenCap: 200,
     timeoutMs: 360000,
     captionPrompt: "",
-    backfill: { batchSize: 10 },
+    backfill: { batchSize: 10, maxAttempts: 5, retryDelayMin: 30, retryMaxDelayMin: 1440 },
   };
 
   test("(11) provider='anthropic' → model=anthropicModel + apiKey=anthropicApiKey + endpoint=null", () => {
@@ -565,6 +565,8 @@ describe("requestVlmCaption — 저장과 분리한 요청 단계 (WP-B1-07)", (
 
   test("(21) provider throw → called=true + caption=null", async () => {
     const request = await requestVlmCaption({ ...requestArgs, provider: throwingVisionProvider() });
-    expect(request).toEqual({ called: true, caption: null });
+    expect(request).toMatchObject({ called: true, caption: null });
+    // 2026-10-14 spec 4.6 — 잡은 예외를 그대로 실어 백필이 분류할 수 있게 한다.
+    expect((request as { failure?: unknown }).failure).toBeInstanceOf(Error);
   });
 });

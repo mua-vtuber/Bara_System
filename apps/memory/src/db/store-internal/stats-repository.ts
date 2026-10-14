@@ -17,7 +17,7 @@
  *   8) 경계 테이블: concept_alias_suggestions · cleanup_proposal_item_journal ·
  *      cleanup_proposals · cleanup_stage_results · cleanup_runs ·
  *      entity_register_records · entity_register_ignores · document_ocr_page_results ·
- *      document_ocr_daily_usage · events · tag_reflow_log · project_vocabularies (전부 "비움" — 설계 D-1~D-5)
+ *      document_ocr_daily_usage · backfill_attempts · events · tag_reflow_log · project_vocabularies (전부 "비움" — 설계 D-1~D-5)
  *   9) 부모 본체: 범용 entities(정적 8 타입 + 새 종류) + projects + concept_nodes
  *      + persons + knowledge_nodes
  *   9b) 사용자 사전: synonym_user_entries · classify_vocab_user_entries ·
@@ -326,6 +326,8 @@ export class StatsRepository {
       // 지워진 문서의 처리 흔적이다. 원장은 documents 보다 먼저 비운다(FK).
       boundary += wipe("document_ocr_page_results");
       boundary += wipe("document_ocr_daily_usage");
+      // 자동 추출·캡션 백필 실패 기록(v50) — 기억을 비우면 기댈 대상이 없다. knowledge_nodes 보다 먼저 비운다(FK).
+      boundary += wipe("backfill_attempts");
       boundary += wipe("events");
       boundary += wipe("tag_reflow_log");
       boundary += wipe("project_vocabularies");

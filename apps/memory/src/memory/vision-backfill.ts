@@ -17,12 +17,11 @@
  *     캡션을 버리고 이유를 로그에 남긴다(WP-B1-07).
  *  4. 사이클 요약(처리/성공/실패) 집계.
  *
- * 실패 흐름(graceful — [[graceful-degradation-principle-2026-05-22]] 정합):
- *  - 자산 파일 부재 / 디코드 실패 / VLM throw → requestVlmCaption 이 warn + caption=null
- *    정직 회수(자산 흐름 차단 X). has_caption_auto 는 1 로 안 올라가므로 그 이미지는
- *    *다음 주기에 또 후보로 잡힌다*(재시도) — 실패를 성공으로 위장 안 함.
- *  - AssetStore.read 가 throw(파일 없음)면 try/catch 로 잡아 failures 누적 + warn +
- *    다음 후보 자연 진행(batch 전체 멈춤 금지 — re-embed-images.ts 선례 정합).
+ * 실패 흐름(2026-10-14 backfill-retry-ledger spec 4.5·4.6 — 추출 백필과 같은 기록 표·규칙):
+ *  - 주기 시작에 후보가 아닌 줄을 정리하고 지문(공급자·모델·자산·캡션 지시문)이 바뀐 줄을 푼다. 막힌 이미지는 후보 SQL 이 뺀다.
+ *  - VLM 실패·빈 캡션(caption-flow 의 failure)·자산 파일 없음 → 분류대로 세거나(간격 뒤 재시도, 상한에서 멈춤) 무시하거나
+ *    주기를 멈춘다. called=false(설정상 호출 안 함)는 실패 기록 대상이 아니다 — 경고만 남긴다.
+ *  - 성공하면 캡션 저장과 같은 잠금 안에서 줄을 지운다. 잠금 안 재확인으로 버린 캡션은 실패가 아니라 기록하지 않는다.
  *
  * 회귀 0 불변식:
  *  - RRF 코어·리랭커·봇 글 통로 무수정.
@@ -36,6 +35,10 @@
 import type { AssetStore } from "../assets/asset-store.ts";
 import type { SqliteMemoryStore } from "../db/store.ts";
 import type { BackfillCycleSummary } from "../scheduler.ts";
+import { BackfillAttemptsLedger, type BackfillRetryPolicy } from "./backfill-attempts/ledger.ts";
+import { BackfillCycleGuard, formatRetrySummary, type BackfillTargetRef } from "./backfill-attempts/cycle-guard.ts";
+import { captionFingerprint, type CaptionIdentity } from "./backfill-attempts/fingerprint.ts";
+import { inspectCaptionAttempt } from "./backfill-attempts/targets.ts";
 import { getMemoryVisibilitySnapshot } from "./shared-memory-read.ts";
 import { withMemoryMutationLock } from "./shared-memory-mutation-lock.ts";
 import { requestVlmCaption, storeVlmCaption } from "../llm/vision/caption-flow.ts";
@@ -84,6 +87,10 @@ export interface RunVisionBackfillCycleArgs {
   captionPrompt?: string;
   /** 로그 prefix (스케줄러와 같은 prefix 공유). */
   logPrefix: string;
+  /** 실패 기록·재시도 규칙(2026-10-14 spec 4.4) — settings.llm.vision.backfill 의 세 칸. 필수. */
+  retry: { policy: BackfillRetryPolicy };
+  /** 현재 시각 주입(테스트용). 주기 시작·요약 시간·막힘 기준·다음 시도 시각이 모두 이 시계 하나에서 나온다. 미주입 시 Date.now. */
+  now?: () => number;
 }
 
 /**
@@ -102,20 +109,48 @@ export async function runVisionBackfillCycle(
   const { store, assetStore, provider, visionSettings, batchSize, logPrefix } =
     args;
 
-  const startedAtMs = Date.now();
+  const clock = args.now ?? Date.now;
+  const startedAtMs = clock();
   const startedAt = new Date(startedAtMs).toISOString();
   let processed = 0;
   let storedNodes = 0;
   let failures = 0;
 
-  const candidates = store.getUncaptionedImageCandidates({ limit: batchSize });
+  // 2026-10-14 spec 4.5 — 주기 시작: 후보가 아닌 줄 정리 + 지문이 바뀐 줄 해제, 그다음 막힌 이미지를 SQL 안에서 뺀다.
+  const identity: CaptionIdentity = {
+    provider: visionSettings.provider,
+    model: visionSettings.model,
+    captionPrompt: args.captionPrompt,
+  };
+  const guard = new BackfillCycleGuard({
+    ledger: new BackfillAttemptsLedger(store.getRawDb()),
+    kind: "caption",
+    policy: args.retry.policy,
+    logPrefix,
+    clock,
+  });
+  await guard.reconcile((row) => inspectCaptionAttempt(store, identity, row));
+
+  const candidates = store.getUncaptionedImageCandidates({ limit: batchSize, excludeBlockedAt: guard.now });
+
+  // 같은 파일을 두 번 가져오면 노드가 둘이지만 기록 줄·캡션 칸(has_caption_auto)은 asset_sha256 하나다.
+  // 한 주기에 sha 당 한 번만 시도한다 — 성공은 같은 sha 의 모든 노드를 덮고, 실패는 한 번만 센다.
+  const attemptedShas = new Set<string>();
 
   for (const candidate of candidates) {
+    const target: BackfillTargetRef = {
+      targetKey: candidate.assetSha256,
+      nodeId: candidate.nodeId,
+      fingerprint: captionFingerprint({ ...identity, assetSha256: candidate.assetSha256 }),
+      label: `node ${candidate.nodeId} (asset ${candidate.assetSha256})`,
+    };
     try {
       // WP-B1-07 — 부모 확인·자산 읽기·VLM 호출은 쓰기 잠금 밖에서 한다(VLM 은 수십 초가
       // 걸릴 수 있다). 저장만 잠금 안에서, 부모와 캡션 대기 상태를 다시 확인한 뒤에 한다.
       const parent = await store.getNode(candidate.nodeId);
       if (!parent || !getMemoryVisibilitySnapshot(store).isAllowed(parent.id)) continue;
+      if (attemptedShas.has(candidate.assetSha256)) continue;
+      attemptedShas.add(candidate.assetSha256);
       const ext = extOfMime(candidate.mime);
       const bytes = assetStore.read(candidate.assetSha256, ext);
       const request = await requestVlmCaption({
@@ -134,16 +169,17 @@ export async function runVisionBackfillCycle(
         prompt: args.captionPrompt,
       });
       processed += 1;
-      if (!request.called || typeof request.caption !== "string") {
-        // called=true + caption=null (VLM throw / 빈 캡션) 또는 called=false
-        // (provider 양식 어긋남 / 옵션 OFF) — has_caption_auto 미갱신이라 다음 주기
-        // 재시도. 실패를 성공으로 위장 안 함 — failures 누적 + 이유를 로그로 남긴다
-        // (silent fail 금지 — [[graceful-degradation-principle-2026-05-22]] 정합).
+      if (!request.called) {
+        // 설정상 호출하지 않음(provider 양식 어긋남 / 옵션 OFF) — 실패 기록 대상이 아니다(spec 4.6). 경고만 남긴다.
         failures += 1;
-        console.warn(
-          `${logPrefix} 캡션 미생성 node ${candidate.nodeId} ` +
-            `(called=${request.called}, caption=${request.caption === null ? "null" : "미시도"})`,
-        );
+        console.warn(`${logPrefix} 캡션 미생성 node ${candidate.nodeId} (called=false, caption=미시도)`);
+        continue;
+      }
+      if (request.caption === null) {
+        // called=true + caption=null (VLM throw / 빈 캡션) — 원인을 분류해 기록한다.
+        failures += 1;
+        console.warn(`${logPrefix} 캡션 미생성 node ${candidate.nodeId} (called=true, caption=null)`);
+        if (guard.recordFailure(target, request.failure) === "stop") break;
         continue;
       }
       const discardReason = await withMemoryMutationLock(store, async () => {
@@ -155,29 +191,34 @@ export async function runVisionBackfillCycle(
           { store, parentNodeId: candidate.nodeId, assetSha256: candidate.assetSha256 },
           request,
         );
+        // 2026-10-14 spec 4.5 — 성공 저장 직후 같은 잠금 안에서 지난 실패 줄을 지운다.
+        guard.recordSuccess(candidate.assetSha256, target.label);
         return null;
       });
       if (discardReason !== null) {
-        // 저장하지 않은 캡션 — 실패가 아니라 VLM 호출 중 후보가 바뀐 것이다. 이유를 남긴다.
+        // 저장하지 않은 캡션 — 실패가 아니라 VLM 호출 중 후보가 바뀐 것이다. 이유를 남긴다(기록하지 않는다).
         console.warn(
           `${logPrefix} 캡션 결과 버림 node ${candidate.nodeId} (asset ${candidate.assetSha256}): ${discardReason}`,
         );
         continue;
       }
       storedNodes += 1;
+      // 성공 저장은 끝났지만 지난 실패 줄을 지우지 못했다면(guard 가 크게 알리고 중단 사유를 정했다) 주기를 끝낸다.
+      if (guard.isStopped) break;
     } catch (e) {
-      // AssetStore.read 파일 부재 / extOfMime throw 등 — 다음 후보 자연 진행
-      // (batch 전체 멈춤 금지). has_caption_auto 미갱신이라 다음 주기 재시도.
+      // AssetStore.read 파일 부재 / extOfMime throw 등 — 분류대로 기록하고 다음 후보로(batch 전체 멈춤 금지).
       failures += 1;
       console.warn(
         `${logPrefix} 캡션 실패 node ${candidate.nodeId} (asset ${candidate.assetSha256}): ${e instanceof Error ? e.message : String(e)}`,
       );
+      if (guard.recordFailure(target, e) === "stop") break;
     }
   }
 
+  const retry = guard.summary();
   const summary: BackfillCycleSummary = {
     startedAt,
-    durationMs: Date.now() - startedAtMs,
+    durationMs: clock() - startedAtMs,
     candidatesFound: candidates.length,
     processed,
     storedNodes,
@@ -186,11 +227,12 @@ export async function runVisionBackfillCycle(
     // WP-B1-08R (Minor 3) — vision backfill has no rechunk/discard concept (extractor-only fields).
     rechunked: 0,
     discarded: 0,
+    retry,
   };
 
   if (candidates.length > 0) {
     console.log(
-      `${logPrefix} cycle: ${storedNodes}/${candidates.length} captioned, ${failures} fail in ${summary.durationMs}ms`,
+      `${logPrefix} cycle: ${storedNodes}/${candidates.length} captioned, ${failures} fail in ${summary.durationMs}ms, ${formatRetrySummary(retry)}`,
     );
   }
 

@@ -1,6 +1,7 @@
 import { CORE_DEFAULT_PORT, INPUT_MAX_CHARS, LOCAL_INSTALL_MARGIN_BYTES, LOCAL_INSTALL_MODEL_BYTES, QUESTION_MAX_CHARS,
   type CaptureKind, type ProgressStage } from "../shared/contracts.ts";
 import nativeHost from "../shared/native-host.json";
+import { recentMessages } from "./messages-recent.ts";
 import { serviceAiMessages } from "./messages-service-ai.ts";
 import { causeOrEmpty, serviceCoreMessages, withCause, withCauseThen } from "./messages-service-core.ts";
 import { serviceInstallMessages } from "./messages-service-install.ts";
@@ -680,4 +681,5 @@ export const messages = {
   ...serviceInstallMessages,
   ...serviceReleaseMessages,
   ...selfUpdateMessages,
+  ...recentMessages,
 };

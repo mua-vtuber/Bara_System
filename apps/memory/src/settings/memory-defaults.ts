@@ -57,6 +57,9 @@ export const MEMORY_DEFAULTS = {
         intervalMin: 30,
         batchSize: 10,
         minImportance: 0,
+        maxAttempts: 5,
+        retryDelayMin: 30,
+        retryMaxDelayMin: 1440,
       },
     },
     cleanup: {
@@ -114,6 +117,9 @@ export const MEMORY_DEFAULTS = {
       // AI 공통 설정(llm.extractor 권위)을 따른다. vision 슬롯에는 한 사이클 batchSize 만.
       backfill: {
         batchSize: 10,
+        maxAttempts: 5,
+        retryDelayMin: 30,
+        retryMaxDelayMin: 1440,
       },
     },
   },

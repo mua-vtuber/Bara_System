@@ -17,6 +17,7 @@ import {
   extractionPendingSql,
   lineageInvalidatedChunkSql,
 } from "./extraction-state-sql.ts";
+import { backfillBlockedSql } from "./backfill-attempts-sql.ts";
 
 /** 백필 후보 조회의 노드 별칭 — 추출 상태 SQL 조각이 이 별칭으로 행을 가리킨다. */
 const CANDIDATE_ALIAS = "candidate";
@@ -194,11 +195,14 @@ export function NodeRepoReadMixin<
      * @param opts.since          ISO 시각 — 본 시점 이후 created_at 만.
      * @param opts.minImportance  importance 하한 (낮은 importance 는 노이즈
      *                            가능성 → 백필 우선순위 낮음).
+     * @param opts.excludeBlockedAt 지금 시각(설정 시간대 문자열). 주면 실패 기록 표(v50)에서 막힌 대상(멈춤·재시도 시각 전)을
+     *                            SQL 안에서 뺀다 — 백필 스케줄러만 넘긴다. 수동 POST /cleanup 은 넘기지 않는다.
      */
     async getBackfillCandidates(opts: {
       limit: number;
       since?: string;
       minImportance?: number;
+      excludeBlockedAt?: string;
     }): Promise<MemoryNode[]> {
       if (opts.limit <= 0) return [];
       const conditions: string[] = [backfillEligibilitySql(CANDIDATE_ALIAS)];
@@ -210,6 +214,10 @@ export function NodeRepoReadMixin<
       if (typeof opts.minImportance === "number") {
         conditions.push(`${CANDIDATE_ALIAS}.importance >= ?`);
         params.push(opts.minImportance);
+      }
+      if (opts.excludeBlockedAt !== undefined) {
+        conditions.push(`NOT ${backfillBlockedSql("extraction", `CAST(${CANDIDATE_ALIAS}.id AS TEXT)`)}`);
+        params.push(opts.excludeBlockedAt);
       }
       const where = conditions.join(" AND ");
       const visible = readMemoryVisibilityFromDatabase(this.db).allowedIds;
@@ -290,14 +298,22 @@ export function NodeRepoReadMixin<
      * 자체가 images row 부재면 갱신 대상이 없는 자연 귀결).
      *
      * @param opts.limit  한 호출당 최대 후보 수 (batchSize).
+     * @param opts.excludeBlockedAt 지금 시각(설정 시간대 문자열). 주면 실패 기록 표(v50)에서 막힌 이미지(멈춤·재시도 시각 전)를
+     *                            SQL 안에서 LIMIT 전에 뺀다 — 비전 백필 스케줄러만 넘긴다.
      */
     getUncaptionedImageCandidates(opts: {
       limit: number;
+      excludeBlockedAt?: string;
     }): Array<{ nodeId: number; assetSha256: string; mime: string }> {
       if (opts.limit <= 0) return [];
       const visible = readMemoryVisibilityFromDatabase(this.db).allowedIds;
+      const blocked = opts.excludeBlockedAt !== undefined
+        ? ` AND NOT ${backfillBlockedSql("caption", "json_extract(kn.metadata_json, '$.asset_sha256')")}`
+        : "";
+      const params = opts.excludeBlockedAt !== undefined ? [opts.excludeBlockedAt] : [];
       const rows = this.db
-        .query(
+        // dynamic SQL: 막힘 조건 유무로 문장이 달라진다, prepare() 유지
+        .prepare(
           `SELECT kn.id AS node_id,
                   json_extract(kn.metadata_json, '$.asset_sha256') AS sha256,
                   img.mime AS mime,
@@ -306,10 +322,10 @@ export function NodeRepoReadMixin<
              JOIN images img
                ON img.asset_sha256 = json_extract(kn.metadata_json, '$.asset_sha256')
             WHERE kn.source_type = 'image_asset'
-              AND img.has_caption_auto = 0
+              AND img.has_caption_auto = 0${blocked}
             ORDER BY img.created_at ASC, kn.id ASC`,
         )
-        .iterate() as Iterable<{
+        .iterate(...params) as Iterable<{
         node_id: number;
         sha256: string | null;
         mime: string | null;
