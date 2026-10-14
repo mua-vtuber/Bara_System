@@ -52,7 +52,7 @@ test("CLI succeeds or fails without changing manifests", () => {
 test("package and direct Tauri builds check versions before assets", async () => {
   const pkg = await Bun.file(join(import.meta.dir, "../package.json")).json();
   const tauri = await Bun.file(join(import.meta.dir, "../src-tauri/tauri.conf.json")).json();
-  expect(pkg.scripts.build).toBe("bun run check:release-version && bun run build:service && tauri build && bun run check:native-exe");
+  expect(pkg.scripts.build).toBe("bun run check:release-version && bun run package:runtime && bun run build:service && tauri build && bun run check:native-exe");
   expect(tauri.build.beforeBuildCommand).toBe("bun run check:release-version && bun run build:ui");
 });
 
