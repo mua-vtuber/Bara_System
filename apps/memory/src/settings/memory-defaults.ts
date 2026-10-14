@@ -10,6 +10,8 @@
  * search / valueDecay).
  */
 
+import { EXTRACTOR_MAX_OUTPUT_TOKENS_DEFAULT } from "../memory/extractor-output-limit.ts";
+
 export const MEMORY_DEFAULTS = {
   db: {
     path: "data/bara.sqlite",
@@ -53,6 +55,7 @@ export const MEMORY_DEFAULTS = {
       // 옛 120초를 넘겨 끊기던 흠을 푼다.
       forceJsonFormat: false,
       timeoutMs: 900000,
+      maxOutputTokens: EXTRACTOR_MAX_OUTPUT_TOKENS_DEFAULT,
       backfill: {
         intervalMin: 30,
         batchSize: 10,
@@ -267,6 +270,7 @@ export const MEMORY_DEFAULTS = {
     model: "onnx-community/bge-reranker-v2-m3-ONNX",
     topK_input: 30,
     topK_output: 5,
+    maxPairTokens: 512,
     host: "local",
   },
   valueDecay: {

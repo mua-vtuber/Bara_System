@@ -11,6 +11,7 @@
  * S10 정착 (2026-05-19) 후 env 직접 읽기는 제거. 옛 OLLAMA_BASE_URL/OLLAMA_MODEL 은
  * `data/memory-settings.json` 의 llm.ollamaUrl/ollamaModel 로 이전. 단,
  * `OLLAMA_NUM_CTX` 는 튜닝 노브 (settings UI 비노출) — env 유지, 부트스트랩 예외.
+ * 양의 정수가 아니면 추출기가 ollama 일 때 시작이 멈추고 다른 슬롯은 슬롯별 초기화 실패로 남는다(resolveOllamaNumCtx — 조용히 8192 로 바꾸지 않음).
  *
  * 모델 선택 가이드:
  *   - qwen3:4b-instruct (Apache 2.0·상업 안전·non-thinking). 추출 default.
@@ -34,10 +35,9 @@ import {
   parseRetryAfterMs,
 } from "./errors.ts";
 import { BUN_FETCH_NO_DEFAULT_TIMEOUT } from "./bun-fetch.ts";
-import {
-  DEFAULT_OLLAMA_NUM_CTX,
-  DEFAULT_OLLAMA_TIMEOUT_MS,
-} from "./constants.ts";
+import { DEFAULT_OLLAMA_TIMEOUT_MS } from "./constants.ts";
+import { resolveOllamaNumCtx } from "./ollama-num-ctx.ts";
+import { formatOllamaTimingLine, parseOllamaTimingFields } from "./ollama-timing.ts";
 
 export interface OllamaClientOptions {
   /** Ollama 서버 URL. caller (createMemoryApi) 가 settings.llm.ollamaUrl 전달. */
@@ -54,7 +54,7 @@ export interface OllamaClientOptions {
    * 2048~4096이라 잘릴 수 있음. 8192면 여유. 더 길게 잡고 싶으면 매뉴얼
    * 입력(긴 일기) 지원 시점에 16384로.
    *
-   * env `OLLAMA_NUM_CTX` 로 덮어쓸 수 있음 — settings UI 비노출 튜닝 노브 (S10 부트스트랩 예외).
+   * env `OLLAMA_NUM_CTX` 로 덮어쓸 수 있음 — settings UI 비노출 튜닝 노브 (S10 부트스트랩 예외). 양의 정수가 아니면 추출기가 ollama 일 때 시작이 멈추고, 다른 슬롯은 슬롯별 초기화 실패로 남는다.
    */
   numCtx?: number;
 }
@@ -94,6 +94,11 @@ interface OllamaChatResponse {
   prompt_eval_count?: number;
   /** 출력(생성) 토큰 수. */
   eval_count?: number;
+  /** Ollama 시간 칸(나노초) — 로그 한 줄용. 읽는 쪽은 ollama-timing.ts. */
+  total_duration?: number;
+  load_duration?: number;
+  prompt_eval_duration?: number;
+  eval_duration?: number;
   /** 에러 시 채워짐. ollama가 200으로 돌려보내도 message가 비고 error만 채울 수 있음. */
   error?: string;
 }
@@ -131,10 +136,7 @@ export class OllamaClient implements ObservableLlmClient {
     this.baseUrl = opts.baseUrl;
     this.model = opts.model;
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_OLLAMA_TIMEOUT_MS;
-    const envCtx = Number.parseInt(process.env.OLLAMA_NUM_CTX ?? "", 10);
-    this.numCtx =
-      opts.numCtx ??
-      (Number.isFinite(envCtx) && envCtx > 0 ? envCtx : DEFAULT_OLLAMA_NUM_CTX);
+    this.numCtx = resolveOllamaNumCtx(opts.numCtx, process.env);
   }
 
   get name(): string {
@@ -205,6 +207,8 @@ export class OllamaClient implements ObservableLlmClient {
       // fetch 전송 실패(timeout abort·네트워크 단절)만 이 좁은 try 에서 LlmRequestError
       // 로 래핑한다 — 응답 형태 오류(json.error·content 부재)는 fetch 성공 이후라 이
       // 래핑에 걸리지 않고 generic Error 로 남는다(요청 오류와 결정적 오류의 경계).
+      // wall: fetch 직전 ~ 응답 JSON 읽기 끝(오류 응답은 잴 필요 없이 던진다).
+      const wallStart = performance.now();
       let res: Response;
       try {
         res = await fetch(`${this.baseUrl}/api/chat`, buildOllamaChatInit(body, timeoutController.signal));
@@ -250,12 +254,26 @@ export class OllamaClient implements ObservableLlmClient {
       }
 
       const json = (await res.json()) as OllamaChatResponse;
+      const wallMs = Math.round(performance.now() - wallStart);
       if (json.error) {
         throw new Error(`Ollama error: ${json.error}`);
       }
       if (!json.message || typeof json.message.content !== "string") {
         throw new Error("Ollama response missing message.content");
       }
+
+      // 오류 검사를 통과한 응답마다 시간 한 줄(spec 5.3). 길이·시간만, 글 내용은 싣지 않는다.
+      console.log(
+        formatOllamaTimingLine({
+          caller: options.callLabel,
+          model: this.model,
+          doneReason: typeof json.done_reason === "string" ? json.done_reason : null,
+          inputChars: messages.reduce((sum, m) => sum + m.content.length, 0),
+          imageBytes: null,
+          wallMs,
+          ...parseOllamaTimingFields(json as unknown as Record<string, unknown>),
+        }),
+      );
 
       // Ollama 는 캐시 개념이 없는 provider — cacheReadTokens/cacheWriteTokens 는
       // "그 provider 에 캐시가 없다"는 사실 표현으로 0 고정(누락값 은폐 아님).

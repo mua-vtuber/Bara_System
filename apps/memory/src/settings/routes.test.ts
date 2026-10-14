@@ -7,7 +7,7 @@
  */
 
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { Hono } from "hono";
@@ -197,6 +197,75 @@ describe("settings routes — $secretsSet (저장된 키 여부)", () => {
 });
 
 describe("settings routes — PUT /", () => {
+  describe("저장 검증 실패는 400 (서버 오류 500 이 아님)", () => {
+    const savedNumCtx = process.env.OLLAMA_NUM_CTX;
+    afterEach(() => {
+      if (savedNumCtx === undefined) delete process.env.OLLAMA_NUM_CTX;
+      else process.env.OLLAMA_NUM_CTX = savedNumCtx;
+    });
+
+    async function putAndCheckUnchanged(
+      path: string,
+      body: unknown,
+      beforeBadPut?: () => void,
+      setup: unknown = { db: { port: 4321 } },
+    ) {
+      const app = createSettingsRoutes({ reloadBus: new ReloadBus(), settingsPath: path, secretsPath: secretsPathOf() });
+      const first = await app.request("/", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(setup),
+      });
+      expect(first.status).toBe(200);
+      const before = readFileSync(path, "utf-8");
+      beforeBadPut?.();
+      const res = await app.request("/", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      expect(readFileSync(path, "utf-8")).toBe(before);
+      return res;
+    }
+
+    test("Ollama 추출기에서 출력 한도가 컨텍스트 창을 넘으면 400 + 관계 문장", async () => {
+      delete process.env.OLLAMA_NUM_CTX;
+      const res = await putAndCheckUnchanged(join(tmpDir, "limit-over-window.json"), {
+        llm: { extractor: { provider: "ollama", maxOutputTokens: 8000 } },
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string; errors: string[] };
+      expect(body.error).toBe("검증 실패");
+      expect(body.errors).toHaveLength(1);
+      expect(body.errors[0]).toContain("Ollama 컨텍스트 창");
+    });
+
+    test("잘못된 OLLAMA_NUM_CTX 는 400 + 환경 변수 이름이 든 문장", async () => {
+      const res = await putAndCheckUnchanged(
+        join(tmpDir, "bad-num-ctx.json"),
+        { llm: { extractor: { provider: "ollama", maxOutputTokens: 4096 } } },
+        () => {
+          process.env.OLLAMA_NUM_CTX = "abc";
+        },
+        // 저장된 파일의 추출기는 ollama 가 아니라 읽기는 통과하고, 저장하려는 쪽(ollama 로 전환)에서만 걸린다.
+        { llm: { extractor: { provider: "openai_compatible" } } },
+      );
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { errors: string[] };
+      expect(body.errors[0]).toContain("OLLAMA_NUM_CTX 가 양의 정수가 아님");
+    });
+
+    test("stageAllocation 합이 1.0 이 아니면 400", async () => {
+      const res = await putAndCheckUnchanged(join(tmpDir, "stage-alloc.json"), {
+        cleanupDeepPass: { budget: { stageAllocation: { regexStrengthen: 0.5 } } },
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string; errors: string[] };
+      expect(body.error).toBe("검증 실패");
+      expect(body.errors[0]).toContain("stageAllocation");
+    });
+  });
+
   test("정상 PUT = 200 + reload-bus emit + 갱신 값 반환", async () => {
     const bus = new ReloadBus();
     let reloadCount = 0;

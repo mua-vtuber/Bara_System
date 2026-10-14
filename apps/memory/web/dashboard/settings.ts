@@ -184,6 +184,8 @@ const MEMORY_SECTION_PATHS: Record<MemorySectionId, string[]> = {
     "reranker.model",
     "reranker.topK_input",
     "reranker.topK_output",
+    "reranker.maxPairTokens",
+    "llm.extractor.maxOutputTokens",
     "reranker.host",
     "valueDecay",
     "images.passthroughMaxPx",
@@ -517,6 +519,12 @@ const MEMORY_SCHEMA_OVERRIDES: Record<
     title: "최종 결과 수",
     description: "",
   },
+  "reranker.maxPairTokens": {
+    title: "재정렬 글 길이 한도(토큰)",
+    description: "",
+  },
+  // 추출 출력 한도는 스키마 설명(한도·시간 제한·Ollama 창 관계)이 사용자에게 보여야 해서 빈 설명으로 덮지 않고 표시만 켠다(spec 3.1).
+  "llm.extractor.maxOutputTokens": { "x-ui": { showDescription: true } },
   "reranker.host": {
     title: "재정렬 실행 위치",
     description: "",

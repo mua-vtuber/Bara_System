@@ -25,6 +25,7 @@ import {
   SIGLIP2_REVISION,
   RERANKER_REVISION,
 } from "./model-revisions";
+import { MEMORY_DEFAULTS } from "../settings/memory-defaults.ts";
 
 const EMBEDDING_DIR = path.resolve(__dirname);
 const MEMORY_DIR = path.resolve(__dirname, "..", "memory");
@@ -112,6 +113,7 @@ describe("reranker.ts pinnedRevision — 조건부 적용(실 로드 없는 생�
       topKInput: 30,
       topKOutput: 5,
       host: "local",
+      maxPairTokens: MEMORY_DEFAULTS.reranker.maxPairTokens,
     });
     expect((r as unknown as { pinnedRevision: string }).pinnedRevision).toBe(
       RERANKER_REVISION,
@@ -125,6 +127,7 @@ describe("reranker.ts pinnedRevision — 조건부 적용(실 로드 없는 생�
       topKInput: 30,
       topKOutput: 5,
       host: "local",
+      maxPairTokens: MEMORY_DEFAULTS.reranker.maxPairTokens,
     });
     expect(
       (r as unknown as { pinnedRevision: string | undefined }).pinnedRevision,

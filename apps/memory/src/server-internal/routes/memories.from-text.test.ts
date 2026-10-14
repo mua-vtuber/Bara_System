@@ -31,7 +31,8 @@ import { ContextAssembler } from "../../memory/context-assembler.ts";
 import { buildMemoryApi } from "../../server.ts";
 import { MemoryExtractor } from "../../memory/extractor.ts";
 import { OllamaClient } from "../../llm/ollama-client.ts";
-import type { LlmClient } from "../../llm/types.ts";
+import { startProviderStandIn, type ProviderStandIn } from "../../test-utils/provider-stand-in.ts";
+import type { ObservableLlmClient } from "../../llm/types.ts";
 
 let embedder: Bgem3Embedder;
 let ollamaUp = false;
@@ -78,7 +79,7 @@ describe("POST /memories/from-text — 태그 wiring 합류 (메인 결정 2)", 
     const store = new SqliteMemoryStore(db, embedder);
     const retriever = new HybridRetriever(store, embedder);
     const assembler = new ContextAssembler();
-    const llm: LlmClient = {
+    const llm: ObservableLlmClient = {
       name: "fixture:from-text-project",
       chat: async () =>
         JSON.stringify([
@@ -88,6 +89,17 @@ describe("POST /memories/from-text — 태그 wiring 합류 (메인 결정 2)", 
             importance: 0.8,
           },
         ]),
+      chatDetailed: async () => ({
+        text: JSON.stringify([
+          {
+            content: "from-text 경로는 project_id를 자식에 보존한다",
+            memoryType: "fact",
+            importance: 0.8,
+          },
+        ]),
+        stopReason: "stop",
+        usage: null,
+      }),
     };
     const extractor = new MemoryExtractor(llm, store, embedder);
     const app = buildMemoryApi({ store, retriever, assembler, extractor });
@@ -255,4 +267,63 @@ describe("POST /memories/from-text — 태그 wiring 합류 (메인 결정 2)", 
     expect(e2).toHaveLength(1);
     expect(e1[0]!.conceptId).toBe(e2[0]!.conceptId);
   }, 120_000);
+});
+
+/**
+ * 추출 실패 경로 (2026-10-14 speed-step1 spec 4.2·4.4 표) — 준비가 쓰기 전에 실패하므로 아무것도 저장되지 않고
+ * 500 `extraction failed: …` 가 된다. 형식이 두 번 깨진 응답은 예전에는 201 + 0건이었다. Ollama 자리에는 진짜 로컬
+ * HTTP 서버를 세운다(mock 클래스 0).
+ */
+describe("POST /memories/from-text — 추출 실패 (잘림·형식 두 번 깨짐)", () => {
+  const TRUNCATED_BODY = {
+    message: { role: "assistant", content: "[{\"content\":\"잘" }, done_reason: "length", prompt_eval_count: 10, eval_count: 4096,
+  };
+  const GARBLED_BODY = { message: { role: "assistant", content: "JSON 이 아닌 답" }, done_reason: "stop" };
+  const TEXT = "3번째 회의에서 예산을 정했다. 다음 주에는 일정표를 다시 본다.";
+
+  let standIn: ProviderStandIn;
+  let h: Harness | undefined;
+  beforeAll(() => { standIn = startProviderStandIn(); });
+  afterAll(() => standIn.stop());
+  afterEach(() => {
+    standIn.requests.length = 0;
+    h?.db.close();
+    h = undefined;
+  });
+
+  function harness(): Harness {
+    const db = openMemoryDatabase(":memory:", { embeddingDim: 1024 });
+    const store = new SqliteMemoryStore(db, embedder);
+    const llm = new OllamaClient({ baseUrl: standIn.origin, model: "test-model", timeoutMs: 5000 });
+    const extractor = new MemoryExtractor(llm, store, embedder);
+    const app = buildMemoryApi({ store, retriever: new HybridRetriever(store, embedder), assembler: new ContextAssembler(), extractor });
+    return { app, db, store };
+  }
+
+  function nodeCount(): number {
+    return (h!.db.query("SELECT COUNT(*) AS n FROM knowledge_nodes").get() as { n: number }).n;
+  }
+
+  for (const [label, body, expected] of [
+    ["출력 한도에 잘림", TRUNCATED_BODY, "출력 한도"],
+    ["형식 두 번 깨짐", GARBLED_BODY, "두 번 모두 읽지 못했습니다"],
+  ] as const) {
+    for (const preserveRaw of [true, false]) {
+      test(`${label} (preserveRaw=${preserveRaw}) → 500 extraction failed, 원문·추출 노드 저장 0건`, async () => {
+        standIn.reply = () => ({ body });
+        h = harness();
+        const res = await h.app.request("/memories/from-text", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: TEXT, author: "tester", platform: "test", preserveRaw }),
+        });
+        expect(res.status).toBe(500);
+        const parsed = (await res.json()) as { error: string };
+        expect(parsed.error).toStartWith("extraction failed: ");
+        expect(parsed.error).toContain(expected);
+        expect(nodeCount()).toBe(0);
+        expect((h.db.query("SELECT COUNT(*) AS n FROM backfill_attempts").get() as { n: number }).n).toBe(0);
+      }, 120_000);
+    }
+  }
 });

@@ -113,11 +113,18 @@ export interface ExtractionStoreResult {
   items: ExtractedItem[];
 }
 
+/**
+ * 추출 시도의 지문 조건 칸 — 실패 기록의 지문에 들어간다.
+ * 이 값이 바뀌면(모델 교체·출력 한도 변경) 멈춘 줄이 풀려 다시 시도된다.
+ */
+export interface ExtractionAttemptIdentity {
+  readonly llmName: string;
+  readonly maxOutputTokens: number;
+}
+
 export interface ExtractorOptions {
   /** LLM 호출 temperature. 추출은 낮게 (기본 0.2). */
   temperature?: number;
-  /** LLM 응답 토큰 한도. 기본 1024 — 한 입력에서 보통 1~10 항목. */
-  maxOutputTokens?: number;
   /** AbortSignal 전달용. */
   signal?: AbortSignal;
   /**

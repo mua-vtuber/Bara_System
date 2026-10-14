@@ -58,6 +58,11 @@ import {
   parseResponseMode,
   POINTER_SENTENCE,
 } from "./search-index-mode.ts";
+import { StageTimer } from "../../memory/stage-timer.ts";
+import {
+  formatSearchTimingLine,
+  type SearchTimingRecord,
+} from "./search-timing.ts";
 
 /** query 부재·비문자열 등 입력 오류 — 라우트가 400, MCP 도구가 isError 로 매핑. */
 export class SearchInputError extends Error {}
@@ -285,6 +290,7 @@ export async function runSearchPipeline(
   // 슬롯으로 모으고, budget 없는 full 호출과도 슬롯을 공유하게** 한다. 다만
   // budget > 0 인 full 호출과는 여전히 갈리는데, 그쪽은 컨텍스트를 실제로 조립하므로
   // 조립 분기 값이 다른 것이 맞다(같은 슬롯에 넣으면 캐시가 거짓말을 한다).
+  const timer = new StageTimer(); // 단계 시간(speed-step1 5.2) — 로그 한 줄용
   const outcome = await runSearchRetrieval(deps, store, retriever, settings, {
     scope,
     includeInactive,
@@ -302,6 +308,7 @@ export async function runSearchPipeline(
     imageSearch,
     relaxFilters: body.relaxFilters === true,
   });
+  const retrievalMs = timer.lap("retrieval");
   let results = outcome.results;
   // 부가 출력(부모 치환·이웃 청크·요약·엔티티·개념 확장·캡션)은 결과가 아닌 다른 노드·
   // 문서에서 온다. 응답 하나에 판정기 하나를 두고 결과 필터와 모든 부가 출력이 같은
@@ -309,6 +316,7 @@ export async function runSearchPipeline(
   // omittedAncillary 에 적는다(WP-B1-03 / search-ancillary-visibility.ts).
   const ancillary = readAncillaryVisibility(store, scope, includeInactive);
   results = results.filter((result) => ancillary.admits(result.node.id));
+  const ancillaryMs = timer.lap("ancillary");
   const { searchMode, relaxed, strictCount, removedFilters, stats, appliedFilters } =
     outcome;
 
@@ -326,8 +334,11 @@ export async function runSearchPipeline(
   // RRF 순서를 정직하게 회신한다(spec 11.2 degrade). 입력 상위 N(topKInput) 선별·
   // 회신 상위 N(topKOutput) 한도·정렬은 Reranker 가 책임진다(라우트는 wiring 만).
   const rerankerStage = deps.reranker;
+  let rerank: SearchTimingRecord["rerank"] = null;
   if (rerankerStage) {
-    results = await rerankerStage.rerank(query, results);
+    const reranked = await rerankerStage.rerankWithStats(query, results);
+    results = reranked.results;
+    rerank = { ms: timer.lap("rerank"), stats: reranked.stats };
   }
 
   // ── T20 결과 하한선 (spec F / 결정 D-B / 단락 11 확정 3) ────────────────
@@ -350,6 +361,14 @@ export async function runSearchPipeline(
     options?.applyResultFloor === true,
   );
   results = floorOutcome.kept;
+  const floorMs = timer.lap("floor");
+  // 두 갈래(index·full) 모두 return 직전에 한 번 부른다. 질의 글은 길이만 쓴다.
+  const logTiming = (resultCount: number, tail: SearchTimingRecord["tail"]): void => {
+    console.log(formatSearchTimingLine({
+      totalMs: timer.elapsed(), floorOn: floorOutcome.applied, queryChars: query.length,
+      resultCount, retrievalMs, passes: outcome.passes, ancillaryMs, rerank, floorMs, tail,
+    }));
+  };
 
   // ── T21 index 모드 분기 (spec C) ─────────────────────────────────────────
   // 여기서 갈라져 아래 무거운 후처리를 통째로 건너뛴다. **분기 위치가 계약이다**:
@@ -372,6 +391,7 @@ export async function runSearchPipeline(
   // 센다(totalFound >= afterFiltering >= returned 단조성 유지).
   if (responseMode === "index") {
     const indexItems = await buildIndexItems(store, results, ancillary);
+    const indexMs = timer.lap("index");
     const omittedAncillary = ancillary.omittedKinds(indexItems.map((item) => item.id));
     const indexProcessingInfo: ProcessingInfo = {
       totalFound: stats.totalFound,
@@ -383,6 +403,7 @@ export async function runSearchPipeline(
       // 없으므로 0 이 정직한 값이다(fallback 아님 / T10 contextBudget=0 선례와 동형).
       trimmedByBudget: 0,
     };
+    logTiming(indexItems.length, { kind: "index", indexMs });
     return {
       query,
       responseMode,
@@ -443,6 +464,8 @@ export async function runSearchPipeline(
     ),
   );
 
+  const enrichMs = timer.lap("enrich");
+
   // ── 14b T3 인접 청크 + 문서 ref 후처리 — search-post-process.ts ─────────
   // maxContextTokens 는 settings.chunking 에서 흘러 들어온다(T2). settings 미주입
   // (buildMemoryApi 직호출 / 테스트)이면 DEFAULT_MAX_CONTEXT_TOKENS(2000) 로 degrade.
@@ -461,6 +484,7 @@ export async function runSearchPipeline(
 
   // ── Phase 7 둘째 단계 Task 8 요약 검색 채널 — search-post-process.ts ─────
   await applySummaries(store, settings, body.withSummaries, dedupedResults, ancillary);
+  const postMs = timer.lap("post");
 
   // ── 새 종류 검색 별 통로 entityHits (분류 단계3 T5·D14) ──────────────────
   // 새 종류(사용자가 화면으로 더한 종류) 엔티티를 *엔티티 자체* 로 찾는 별 통로다.
@@ -479,10 +503,12 @@ export async function runSearchPipeline(
   // WP-B1-03 — 엔티티는 결과가 아닌 출처 노드에서 만들어진다. 출처 판정에 걸린 엔티티는
   // 빼고 다음 순위가 자리를 채운다(ancillary.admitsEntityHit).
   let entityHits: EntitySearchHit[] = [];
+  let entityEmbedMs: number | null = null;
   const hasUserEntityTypes =
     store.entityTypeRegistryDb.listUserEntityTypes().length > 0;
   if (hasUserEntityTypes) {
     const entityQueryVec = await store.embedQuery(query);
+    entityEmbedMs = timer.lap("entityEmbed");
     entityHits = await retrieveEntities(
       store.entitiesRepo,
       query,
@@ -491,6 +517,7 @@ export async function runSearchPipeline(
       (entityId) => ancillary.admitsEntityHit(entityId),
     );
   }
+  const entityMs = timer.lap("entity");
   // 모든 부가 출력 단계가 끝난 뒤 — 실제로 표시한 항목에서 뺀 부가 출력이 있는 종류만
   // (부모로 바뀌어 안 보이는 자식의 개념 펼침 생략은 세지 않는다).
   const omittedAncillary = ancillary.omittedKinds(dedupedResults.map((item) => item.id));
@@ -504,6 +531,8 @@ export async function runSearchPipeline(
     contextBudget > 0
       ? assembler.assemble(results, { memoryBudget: contextBudget, scope, includeInactive })
       : undefined;
+
+  const assembleMs = assembled ? timer.lap("assemble") : null;
 
   // T10 — processing_info(spec B 항목1). afterFiltering 의 의미는 **"이 단계에서
   // 모든 거름망(retriever 필터 + T20 하한선)을 통과해 살아남은 수"** 다(context
@@ -558,5 +587,9 @@ export async function runSearchPipeline(
     };
   }
 
+  logTiming(dedupedResults.length, {
+    kind: "full", enrichMs, postMs, assembleMs,
+    entity: hasUserEntityTypes ? { ms: entityMs + (entityEmbedMs ?? 0), embedMs: entityEmbedMs } : null,
+  });
   return response;
 }

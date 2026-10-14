@@ -35,8 +35,13 @@
 
 import type { Embedder } from "../embedding/types.ts";
 import { distanceToSimilarity } from "../embedding/vector-utils.ts";
-import type { LlmClient } from "../llm/types.ts";
+import type { ObservableLlmClient } from "../llm/types.ts";
+import { LLM_CALL_LABELS } from "../llm/call-labels.ts";
 import type { SqliteMemoryStore } from "../db/store.ts";
+import {
+  EXTRACTOR_MAX_OUTPUT_TOKENS_DEFAULT,
+  extractorMaxOutputTokensError,
+} from "./extractor-output-limit.ts";
 import { autoLinkMentions } from "./auto-mention.ts";
 import type { AutoCleanupTriggerHandle } from "./auto-cleanup-trigger.ts";
 import { ConflictChecker, highSimilarityRoute } from "./conflict-checker.ts";
@@ -58,6 +63,7 @@ import {
   extractedChildProvenance,
   normalizeExtractedPersonCandidates,
   type ExtractInput,
+  type ExtractionAttemptIdentity,
   type ExtractedItem,
   type ExtractionLineage,
   type ExtractionPlacement,
@@ -87,6 +93,11 @@ import {
   applyHashtagWiring,
   hashtagLlmInputText,
 } from "./extractor-internal/hashtag-wiring.ts";
+import {
+  ExtractionMalformedResponseError,
+  throwIfTruncated,
+  type ExtractionAttempt,
+} from "./extractor-internal/response-errors.ts";
 import { ExtractionVisibility } from "./extraction-visibility.ts";
 import { withMemoryMutationLock } from "./shared-memory-mutation-lock.ts";
 import type { MemoryVisibilitySnapshot } from "./shared-memory-read.ts";
@@ -95,6 +106,7 @@ import type { MemoryVisibilitySnapshot } from "./shared-memory-read.ts";
 
 export type {
   ExtractInput,
+  ExtractionAttemptIdentity,
   ExtractedItem,
   ExtractionLineage,
   ExtractionPlacement,
@@ -147,7 +159,7 @@ export class MemoryExtractor {
   private autoCleanupTrigger: AutoCleanupTriggerHandle | undefined;
 
   constructor(
-    private readonly llm: LlmClient,
+    private readonly llm: ObservableLlmClient,
     private readonly store: SqliteMemoryStore,
     private readonly embedder: Embedder,
     options: {
@@ -166,6 +178,12 @@ export class MemoryExtractor {
        * 는 schema default 와 같은 안전망 (server.ts 가 항상 settings 값 전달).
        */
       forceJsonFormat?: boolean;
+      /**
+       * LLM 응답 한 번의 최대 출력 토큰 수. 인스턴스 수명 동안 고정 설정값이라 생성자 옵션.
+       * 생략 시 EXTRACTOR_MAX_OUTPUT_TOKENS_DEFAULT. 범위 밖이면 키 이름이 든 오류로 던진다.
+       * server.ts 가 settings.llm.extractor.maxOutputTokens 로 주입.
+       */
+      maxOutputTokens?: number;
     } = {},
   ) {
     this.conflictChecker =
@@ -174,6 +192,11 @@ export class MemoryExtractor {
     this.duplicateSim = options.duplicateSim ?? EXTRACTOR_DUPLICATE_SIM;
     this.minImportance = options.minImportance ?? EXTRACTOR_MIN_IMPORTANCE;
     this.forceJsonFormat = options.forceJsonFormat ?? false;
+    const maxOutputTokens = options.maxOutputTokens ?? EXTRACTOR_MAX_OUTPUT_TOKENS_DEFAULT;
+    const limitError = extractorMaxOutputTokensError(maxOutputTokens);
+    if (limitError !== null) throw new Error(`MemoryExtractor: ${limitError}`);
+    this.maxOutputTokensValue = maxOutputTokens;
+    this.attemptIdentityValue = Object.freeze({ llmName: llm.name, maxOutputTokens });
   }
 
   /**
@@ -189,6 +212,18 @@ export class MemoryExtractor {
   private readonly duplicateSim: number;
   private readonly minImportance: number;
   private readonly forceJsonFormat: boolean;
+  private readonly maxOutputTokensValue: number;
+  private readonly attemptIdentityValue: ExtractionAttemptIdentity;
+
+  /** 응답 한 번의 최대 출력 토큰 수 (생성자 값, 생략 시 기본값). */
+  get maxOutputTokens(): number {
+    return this.maxOutputTokensValue;
+  }
+
+  /** 실패 기록 지문의 조건 칸 — 모델 이름과 출력 한도. */
+  get attemptIdentity(): ExtractionAttemptIdentity {
+    return this.attemptIdentityValue;
+  }
 
   /** 사용 중인 LLM 클라이언트 이름 (로그·응답 메타에 노출). */
   get llmName(): string {
@@ -257,10 +292,15 @@ export class MemoryExtractor {
         ? { jsonMode: true, jsonSchema: EXTRACTION_RESPONSE_SCHEMA }
         : {};
     const baseTemperature = options.temperature ?? 0.1;
-    const maxOutputTokens = options.maxOutputTokens ?? 1024;
+    const maxOutputTokens = this.maxOutputTokensValue;
 
-    const callLlm = (temperature: number): Promise<string> =>
-      this.llm.chat(messages, {
+    // chatDetailed 로 종료 사유를 받아, 응답마다 파싱 전에 출력 한도 잘림부터 본다(spec 4.1).
+    // 잘렸으면 파싱도 재요청도 하지 않고 ExtractionOutputTruncatedError 로 멈춘다.
+    const callLlm = async (
+      temperature: number,
+      attempt: ExtractionAttempt,
+    ): Promise<string> => {
+      const result = await this.llm.chatDetailed(messages, {
         // 0.1로 낮춤 (이전 0.2): 본인 입력에서 같은 결과 재현성을 높이고
         // 모델이 시스템 프롬프트의 명시적 예시를 더 강하게 따르도록.
         // 0으로 가면 한국어 자연스러움 약간 손실 — 0.1이 절충점.
@@ -268,9 +308,20 @@ export class MemoryExtractor {
         maxOutputTokens,
         ...formatOptions,
         signal: options.signal,
+        callLabel:
+          attempt === "first"
+            ? LLM_CALL_LABELS.extraction
+            : LLM_CALL_LABELS.extractionRetry,
       });
+      throwIfTruncated(result, {
+        llmName: this.llm.name,
+        maxOutputTokens,
+        attempt,
+      });
+      return result.text;
+    };
 
-    let raw = await callLlm(baseTemperature);
+    let raw = await callLlm(baseTemperature, "first");
     let parsed = parseExtractionResponse(raw);
 
     // 2026-06-02 T3 — 형식-깨짐 한정 1회 재요청. 형식 강제를 끈 (T2) 안전망:
@@ -281,10 +332,18 @@ export class MemoryExtractor {
     // 는 쓰지 않는다 — 형식 깨짐 (200 정상 반환) 은 재시도 판정 대상이 아니라
     // (§4.3 명시 결정). 재요청 temperature 는 0.3 (코드 상수) —
     // 같은 입력 + 같은 temperature 면 deterministic 하게 또 깨질 위험이라 다른
-    // 샘플링 경로를 타게 한다.
+    // 샘플링 경로를 타게 한다. 두 번 다 깨지면 0건이 아니라 ExtractionMalformedResponseError 로 실패한다.
     if (parsed.length === 0 && classifyEmptyResponse(raw) === "garbled") {
-      raw = await callLlm(EXTRACTION_RETRY_TEMPERATURE);
+      const firstRaw = raw;
+      raw = await callLlm(EXTRACTION_RETRY_TEMPERATURE, "retry");
       parsed = parseExtractionResponse(raw);
+      if (parsed.length === 0 && classifyEmptyResponse(raw) === "garbled") {
+        throw new ExtractionMalformedResponseError({
+          llmName: this.llm.name,
+          firstLength: firstRaw.length,
+          retryLength: raw.length,
+        });
+      }
     }
 
     const filtered = filterByImportance(parsed, this.minImportance);

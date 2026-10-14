@@ -32,6 +32,7 @@ import {
   ENRICHED_SWEEP_VARIANTS,
   DEFAULT_ENRICHED_RETRIEVAL_LIMIT,
 } from "./harness.ts";
+import { MEMORY_DEFAULTS } from "../../settings/memory-defaults.ts";
 
 /**
  * 측정용 reranker 설정. settings default 의 topK_output(5)는 회신을 5개로 잘라
@@ -53,6 +54,7 @@ beforeAll(async () => {
     topKInput: 30, // RRF 상위 30 채점(spec 11.1)
     topKOutput: 30, // 측정 창 — eval limit(20)보다 커 metric 이 전부 본다
     host: "local",
+    maxPairTokens: MEMORY_DEFAULTS.reranker.maxPairTokens,
   });
   await reranker.load();
 }, 600_000);

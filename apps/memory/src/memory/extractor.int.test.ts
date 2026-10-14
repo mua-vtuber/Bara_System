@@ -27,7 +27,7 @@ import { SqliteMemoryStore } from "../db/store.ts";
 import { Bgem3Embedder } from "../embedding/bge-m3.ts";
 import { OllamaClient } from "../llm/ollama-client.ts";
 import { AnthropicClient } from "../llm/anthropic-client.ts";
-import type { LlmClient } from "../llm/types.ts";
+import type { ObservableLlmClient } from "../llm/types.ts";
 import { inputChildSource } from "../test-utils/extraction-placement.ts";
 import { MemoryExtractor } from "./extractor.ts";
 
@@ -36,7 +36,7 @@ const PROVIDER = process.env.BARA_TEST_LLM as
   | "anthropic"
   | undefined;
 
-function buildClient(): LlmClient | null {
+function buildClient(): ObservableLlmClient | null {
   if (PROVIDER === "ollama") {
     return new OllamaClient({
       baseUrl: process.env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434",

@@ -23,7 +23,7 @@ import { openMemoryDatabase } from "../db/migrations.ts";
 import { SqliteMemoryStore } from "../db/store.ts";
 import { Bgem3Embedder } from "../embedding/bge-m3.ts";
 import { MemoryExtractor } from "./extractor.ts";
-import type { LlmClient } from "../llm/types.ts";
+import type { ObservableLlmClient } from "../llm/types.ts";
 import { inputChildSource } from "../test-utils/extraction-placement.ts";
 
 /**
@@ -43,9 +43,12 @@ function makeVec(seed: number, jitter = 0): Float32Array {
 
 // tripwire — findDedupTarget 는 store + embedder 만 쓰고 LLM 을 안 부른다.
 // 호출되면 안 되는 chat 이 호출됐는지 잡는 감지선(인터페이스 mock 데이터 아님).
-const tripwireLlm: LlmClient = {
+const tripwireLlm: ObservableLlmClient = {
   name: "tripwire:dedup-scope",
   chat: async () => {
+    throw new Error("findDedupTarget 는 LLM 을 부르면 안 된다");
+  },
+  chatDetailed: async () => {
     throw new Error("findDedupTarget 는 LLM 을 부르면 안 된다");
   },
 };
@@ -210,7 +213,7 @@ describe("extractAndStore — projectId 전파 dedup 회귀", () => {
     await loadedEmbedder.load();
     db = openMemoryDatabase(":memory:", { embeddingDim: 1024 });
     store = new SqliteMemoryStore(db, loadedEmbedder);
-    const fixtureLlm: LlmClient = {
+    const fixtureLlm: ObservableLlmClient = {
       name: "fixture:project-scope",
       chat: async () =>
         JSON.stringify([
@@ -220,6 +223,17 @@ describe("extractAndStore — projectId 전파 dedup 회귀", () => {
             importance: 0.8,
           },
         ]),
+      chatDetailed: async () => ({
+        text: JSON.stringify([
+          {
+            content: "Bara System은 프로젝트별 메모리를 분리한다",
+            memoryType: "fact",
+            importance: 0.8,
+          },
+        ]),
+        stopReason: "stop",
+        usage: null,
+      }),
     };
     extractor = new MemoryExtractor(fixtureLlm, store, loadedEmbedder, {
       duplicateSim: 0.99,

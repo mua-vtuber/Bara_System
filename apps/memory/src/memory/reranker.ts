@@ -38,6 +38,11 @@ import {
 } from "@huggingface/transformers";
 import type { RetrievalResult } from "./retriever.ts";
 import { RERANKER_REVISION } from "../embedding/model-revisions";
+import type { MemorySettings } from "../settings/memory-settings-types.ts";
+import {
+  pairTokensExceedModelReason,
+  rerankerMaxPairTokensError,
+} from "./reranker-limits.ts";
 
 /**
  * `RERANKER_REVISION` 이 실제로 대조를 마친 저장소는 이 상수(운영 default 모델
@@ -70,6 +75,8 @@ export interface RerankerConfig {
   topKInput: number;
   /** 회신 후보 수(settings.reranker.topK_output). 재정렬·degrade 둘 다 이 한도를 지킨다. */
   topKOutput: number;
+  /** (질의, 글) 한 쌍의 최대 토큰 수(settings.reranker.maxPairTokens). 넘으면 글 뒷부분을 자른다. */
+  maxPairTokens: number;
   /** 실행 위치(settings.reranker.host). 현재 "local" 한정 — 작은 로컬 cross-encoder. */
   host: "local";
   /** q8 기본값(미지정 = q8). q8 로드 실패 시 fp32 fallback 없이 degrade. */
@@ -91,6 +98,44 @@ export type RerankedResult = Omit<RetrievalResult, "components"> & {
   };
 };
 
+/**
+ * 채점 관측값(speed-step1 spec 3.4). null 은 "그 단계가 돌지 않았다" 는 뜻이며 0 으로 채우지 않는다.
+ */
+export interface RerankStats {
+  /** cross-encoder 로 실제 채점했는가. 모델 미가용·글 후보 0건이면 false. */
+  scored: boolean;
+  /** 채점한 (질의, 글) 쌍 수. scored=false 면 0. */
+  pairs: number;
+  /** 채움 뒤 쌍 길이(토큰) = input_ids 텐서의 두 번째 차원. scored=false 면 null. */
+  seqLen: number | null;
+  /** 토크나이저 시간(ms). scored=false 면 null. */
+  tokenizeMs: number | null;
+  /** 모델 추론 시간(ms). scored=false 면 null. */
+  inferMs: number | null;
+}
+
+/** 채점이 돌지 않은 경로의 관측값. 모든 호출자가 같은 객체를 받으므로 얼려 둔다. */
+const NOT_SCORED_STATS: RerankStats = Object.freeze({
+  scored: false,
+  pairs: 0,
+  seqLen: null,
+  tokenizeMs: null,
+  inferMs: null,
+});
+
+/** settings.reranker → RerankerConfig. server.ts 와 prefetch 스크립트가 같은 매핑을 쓴다. */
+export function rerankerConfigFromSettings(
+  r: MemorySettings["reranker"],
+): RerankerConfig {
+  return {
+    model: r.model,
+    topKInput: r.topK_input,
+    topKOutput: r.topK_output,
+    maxPairTokens: r.maxPairTokens,
+    host: r.host,
+  };
+}
+
 function sigmoid(x: number): number {
   return 1 / (1 + Math.exp(-x));
 }
@@ -99,6 +144,7 @@ export class Reranker {
   readonly model: string;
   readonly topKInput: number;
   readonly topKOutput: number;
+  readonly maxPairTokens: number;
   readonly host: "local";
 
   private readonly dtype: RerankerDtype;
@@ -121,6 +167,9 @@ export class Reranker {
     this.model = config.model;
     this.topKInput = config.topKInput;
     this.topKOutput = config.topKOutput;
+    const pairTokensError = rerankerMaxPairTokensError(config.maxPairTokens);
+    if (pairTokensError !== null) throw new Error(pairTokensError);
+    this.maxPairTokens = config.maxPairTokens;
     this.host = config.host;
     this.dtype = config.dtype ?? RERANKER_DTYPE;
     this.pinnedRevision =
@@ -148,6 +197,29 @@ export class Reranker {
         revision: this.pinnedRevision,
         progress_callback: progressCallback,
       });
+      const modelMaxLength = (
+        this.tokenizer as unknown as { model_max_length?: unknown }
+      ).model_max_length;
+      if (typeof modelMaxLength !== "number") {
+        throw new Error(
+          `토크나이저 "${this.model}" 에 model_max_length 숫자가 없음 (받은 값 ${String(modelMaxLength)})`,
+        );
+      }
+      const exceedReason = pairTokensExceedModelReason(
+        this.maxPairTokens,
+        modelMaxLength,
+      );
+      if (exceedReason !== null) {
+        // 모델 로드 실패와 같은 길(spec 3.2): 서버는 멈추지 않고 재정렬 없이 RRF 순서.
+        // 모델 본체는 읽지 않는다.
+        console.error(
+          `[reranker] ${exceedReason} — 재정렬 없이 RRF 순서로 degrade (모델 "${this.model}")`,
+        );
+        this.tokenizer = null;
+        this.encoder = null;
+        this.loaded = false;
+        return;
+      }
       this.encoder = await this.loadEncoderWithDtype(progressCallback);
       this.loaded = true;
     } catch (err) {
@@ -203,7 +275,20 @@ export class Reranker {
     query: string,
     candidates: RetrievalResult[],
   ): Promise<RerankedResult[]> {
-    if (candidates.length === 0) return [];
+    return (await this.rerankWithStats(query, candidates)).results;
+  }
+
+  /**
+   * rerank() 와 같은 재정렬에 채점 관측값(RerankStats)을 더해 돌려준다.
+   * rerank() 는 이 함수의 results 만 돌려주는 얇은 함수다.
+   */
+  async rerankWithStats(
+    query: string,
+    candidates: RetrievalResult[],
+  ): Promise<{ results: RerankedResult[]; stats: RerankStats }> {
+    if (candidates.length === 0) {
+      return { results: [], stats: NOT_SCORED_STATS };
+    }
 
     // 입력 RRF score 내림차순 정렬(audit score 기준). 동점은 입력 순서 유지.
     // 이 byRrf 순서가 retriever 가 매긴 진실의 순위 = 슬롯 보존의 기준이다.
@@ -211,7 +296,10 @@ export class Reranker {
 
     if (!this.loaded || !this.tokenizer || !this.encoder) {
       // graceful degrade: RRF 순서 그대로 상위 topKOutput. rerankerScore 없음.
-      return byRrf.slice(0, this.topKOutput) as RerankedResult[];
+      return {
+        results: byRrf.slice(0, this.topKOutput) as RerankedResult[],
+        stats: NOT_SCORED_STATS,
+      };
     }
 
     // 분리(spec DCL-3): image_asset 은 cross-encoder 채점에서 제외해 RRF 순위 보존.
@@ -230,17 +318,30 @@ export class Reranker {
     // 모든 슬롯이 image_asset 이라 아래 병합 루프가 byRrf(RRF score) 순위를 그대로
     // 보존한다(DCL-3 — "이미지만이면 image_vec 순위 그대로").
     let textReranked: RerankedResult[] = [];
+    let stats: RerankStats = NOT_SCORED_STATS;
     if (textScored.length > 0) {
       const docs = textScored.map((r) => r.node.content);
 
       // batch: query 를 글 후보 수만큼 반복해 각 doc 과 pair 로 채점.
+      const tokenizeStart = performance.now();
       const inputs = this.tokenizer(new Array(docs.length).fill(query), {
         text_pair: docs,
         padding: true,
         truncation: true,
+        max_length: this.maxPairTokens,
       });
+      const tokenizeMs = performance.now() - tokenizeStart;
+      const inferStart = performance.now();
       const output = (await this.encoder(inputs)) as {
         logits: { tolist(): number[][] };
+      };
+      const inferMs = performance.now() - inferStart;
+      stats = {
+        scored: true,
+        pairs: docs.length,
+        seqLen: (inputs.input_ids as { dims: number[] }).dims[1]!,
+        tokenizeMs,
+        inferMs,
       };
       const rows = output.logits.tolist();
       // bge-reranker = single-logit relevance → sigmoid 로 0~1 적합도.
@@ -274,6 +375,6 @@ export class Reranker {
         ti++;
       }
     }
-    return result;
+    return { results: result, stats };
   }
 }

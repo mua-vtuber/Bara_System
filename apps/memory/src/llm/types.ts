@@ -45,6 +45,11 @@ export interface LlmChatOptions {
   jsonSchema?: Record<string, unknown>;
 
   /**
+   * 로그용 호출 이름(LLM_CALL_LABELS). 동작에 영향 없음. Ollama 만 쓰고 다른 공급자는 무시한다.
+   */
+  callLabel?: string;
+
+  /**
    * AbortController 신호. 봇이 죽거나 SIGTERM 받으면 진행 중인 LLM
    * 호출 빨리 끊을 수 있게. 클라이언트가 fetch에 그대로 전달.
    */

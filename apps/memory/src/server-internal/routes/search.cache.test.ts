@@ -162,6 +162,22 @@ describe("POST /search — R4 캐시 hit/miss/회귀 (6b T3)", () => {
     );
   });
 
+  test("캐시에 저장되는 값에는 timings 가 없다 — hit 이 옛 단계 시간을 재생하지 않음", async () => {
+    const stored: object[] = [];
+    const realSet = h.searchCache.set.bind(h.searchCache);
+    h.searchCache.set = ((key, value) => {
+      stored.push(value);
+      realSet(key, value);
+    }) as typeof h.searchCache.set;
+
+    await postSearch(h, { query: "메모리 검색", limit: 5 });
+    expect(stored.length).toBeGreaterThan(0);
+    for (const entry of stored) {
+      expect("timings" in entry).toBe(false);
+      expect("stats" in entry).toBe(true);
+    }
+  });
+
   test("addNode 후 같은 query — db_revision 상승으로 캐시 miss → retriever 재실행", async () => {
     await postSearch(h, { query: "분산 설계", limit: 5 });
     expect(h.retrieveCalls()).toBe(1);

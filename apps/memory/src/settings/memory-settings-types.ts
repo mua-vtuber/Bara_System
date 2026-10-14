@@ -356,6 +356,8 @@ export interface MemorySettings {
     topK_input: number;
     /** 재정렬 후 회신할 상위 N 결과 수. */
     topK_output: number;
+    /** (질의, 글) 한 쌍을 리랭커에 넣을 최대 토큰 수. 넘으면 글 뒷부분을 자른다. */
+    maxPairTokens: number;
     /** 리랭커 가동 위치 — 현 단계 'local' 한 갈래. */
     host: "local";
   };

@@ -32,26 +32,11 @@ import type {
   ChatMessage,
   LlmChatOptions,
   LlmChatResult,
-  LlmClient,
   ObservableLlmClient,
 } from "../../llm/types.ts";
 import { LlmRequestError } from "../../llm/errors.ts";
+import { LLM_CALL_LABELS } from "../../llm/call-labels.ts";
 import { classifyLlmError, type LlmErrorClass } from "./error-classifier.ts";
-
-/**
- * LlmClient 가 ObservableLlmClient(chatDetailed 보유)인지 확인하고 그 타입으로 좁힌다.
- * cleanup 슬롯은 관측(usage·stopReason)이 필수라 실행층이 Observable 을 요구한다 —
- * buildLlmClient 반환 타입은 넓은 LlmClient 지만 3 구현체가 전부 chatDetailed 를 갖는다.
- * 없으면 loud fail(구성 결함을 조용히 넘기지 않는다 — spec 4.A-1).
- */
-export function asObservableLlmClient(client: LlmClient): ObservableLlmClient {
-  if (typeof (client as Partial<ObservableLlmClient>).chatDetailed !== "function") {
-    throw new Error(
-      `cleanup 슬롯 LLM 클라이언트(${client.name})가 chatDetailed 를 구현하지 않음 — ObservableLlmClient 필요(spec 4.A-1)`,
-    );
-  }
-  return client as ObservableLlmClient;
-}
 
 // ── 실행층 기본 상수(spec 4.A 표 — T5 설정 등록 전 잠정 단일 출처) ───────────────
 
@@ -369,6 +354,7 @@ export class CleanupLlmExecutor {
         const options: LlmChatOptions = {
           temperature: req.temperature,
           maxOutputTokens,
+          callLabel: LLM_CALL_LABELS.cleanup,
           ...(req.jsonMode !== undefined ? { jsonMode: req.jsonMode } : {}),
           ...(this.cancelSignal !== undefined ? { signal: this.cancelSignal } : {}),
         };

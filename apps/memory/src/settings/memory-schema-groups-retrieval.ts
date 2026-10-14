@@ -8,6 +8,7 @@
  * 7 그룹은 memory-schema-groups-pipeline.ts 에 있다.
  */
 
+import { RERANKER_MAX_PAIR_TOKENS_MAX, RERANKER_MAX_PAIR_TOKENS_MIN } from "../memory/reranker-limits.ts";
 import type { GroupSchema } from "./memory-schema-types.ts";
 
 export const searchGroup = {
@@ -183,6 +184,15 @@ export const rerankerGroup = {
       default: 5,
       minimum: 1,
     },
+    maxPairTokens: {
+      type: "integer",
+      title: "재정렬 쌍 최대 토큰 수",
+      description:
+        "(질의, 글) 한 쌍을 리랭커에 넣을 때의 최대 토큰 수. 넘으면 글 뒷부분을 자른다. default 512. 바꾸면 서버 재시작 뒤 반영된다.",
+      default: 512,
+      minimum: RERANKER_MAX_PAIR_TOKENS_MIN,
+      maximum: RERANKER_MAX_PAIR_TOKENS_MAX,
+    },
     host: {
       type: "string",
       title: "리랭커 가동 위치",
@@ -198,6 +208,7 @@ export const rerankerGroup = {
     "model",
     "topK_input",
     "topK_output",
+    "maxPairTokens",
     "host",
   ] as const,
 } as const satisfies GroupSchema;

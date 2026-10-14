@@ -135,6 +135,7 @@ function makeHarness(options?: HarnessOptions): Harness {
       topKInput: settings.reranker.topK_input,
       topKOutput: options.rerankerTopKOutput,
       host: "local",
+      maxPairTokens: MEMORY_DEFAULTS.reranker.maxPairTokens,
     });
   }
   const app = buildMemoryApi(deps);

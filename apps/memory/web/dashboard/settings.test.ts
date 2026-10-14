@@ -1040,6 +1040,7 @@ describe("settings memory sections — 사용자용 schema 분리", () => {
       {}) as Record<string, unknown>;
     expect(Object.keys(rerankerProps).sort()).toEqual([
       "host",
+      "maxPairTokens",
       "model",
       "topK_input",
       "topK_output",

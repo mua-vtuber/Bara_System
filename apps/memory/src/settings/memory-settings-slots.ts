@@ -57,6 +57,8 @@ export interface LlmExtractorSlot {
    * 120초를 넘겨 끊기던 흠을 푼다.
    */
   timeoutMs: number;
+  /** 추출 LLM 응답 한 번의 최대 출력 토큰 수. 바꾸면 재시작 뒤 반영되고, 추출 지문에 들어간다(2026-10-15 extractor-output-limit spec 3.1). */
+  maxOutputTokens: number;
   /** Phase 5.7.1 W1 — 정해진 주기 추출 갈래 3 칸 그룹 (mode='backfill' 갈래에서만 가동). */
   backfill: {
     intervalMin: number;

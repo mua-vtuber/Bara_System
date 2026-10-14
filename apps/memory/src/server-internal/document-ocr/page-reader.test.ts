@@ -2,7 +2,7 @@
  * 서버 OCR 한 쪽 읽기 — 리더 6종 + 파일 업로드 리더 (2026-10-11 document-ocr spec T5).
  * 공급자 자리에 진짜 로컬 HTTP 서버(Bun.serve)를 세운다(mock 클래스 0, 실키 없음).
  */
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { MEMORY_DEFAULTS } from "../../settings/memory-schema.ts";
 import type { DocumentOcrSettings } from "../../settings/memory-settings.ts";
 import { startProviderStandIn, type ProviderStandIn, type RecordedRequest, type StandInReply } from "../../test-utils/provider-stand-in.ts";
@@ -174,6 +174,33 @@ describe("리더 6종 — 요청 모양과 판정", () => {
       expect((await createDocumentOcrPageReader(c.settings(), overrides()).readPage(PAGE)).blank).toBe(true);
     });
   }
+});
+
+describe("Ollama 처리 시간 줄", () => {
+  async function timingLinesFor(c: Case): Promise<string[]> {
+    replyWith({ body: c.reply("ok", "# 본문") });
+    const spy = spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await createDocumentOcrPageReader(c.settings(), overrides()).readPage(PAGE);
+      return spy.mock.calls.map((x) => String(x[0])).filter((l) => l.startsWith("[ollama-timing]"));
+    } finally {
+      spy.mockRestore();
+    }
+  }
+
+  test("ollama_vision 한 쪽 → caller=document-ocr 한 줄, 요청 본문에 callLabel 없음", async () => {
+    const lines = await timingLinesFor(CASES.find((c) => c.name === "local:ollama_vision")!);
+    expect(lines.length).toBe(1);
+    expect(lines[0]).toContain("caller=document-ocr");
+    expect(lines[0]).toContain(`imageBytes=${PAGE.bytes.length}`);
+    expect(JSON.stringify(standIn.requests[0]!.body)).not.toContain("callLabel");
+  });
+
+  test("다른 공급자(API·LM Studio)는 줄이 없다", async () => {
+    for (const c of CASES.filter((x) => x.name !== "local:ollama_vision")) {
+      expect(await timingLinesFor(c)).toEqual([]);
+    }
+  });
 });
 
 describe("오류 3분류·키 가림", () => {

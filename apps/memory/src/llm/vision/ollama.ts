@@ -26,6 +26,7 @@ import type {
 } from "./index.ts";
 import { DEFAULT_OLLAMA_TIMEOUT_MS } from "../constants.ts";
 import { requestProviderJson } from "../provider-http.ts";
+import { formatOllamaTimingLine, parseOllamaTimingFields } from "../ollama-timing.ts";
 import { emptyTruncatedOutputError, requireLimitSettingPath } from "./caption-result.ts";
 
 export interface OllamaVisionProviderOptions {
@@ -79,6 +80,11 @@ interface OllamaChatResponse {
   /** Ollama usage 메트릭 — 가용 시 응답에 포함. */
   prompt_eval_count?: number;
   eval_count?: number;
+  /** 시간 칸(나노초) — 가용 시 응답에 포함. 로그 한 줄에만 쓴다. */
+  total_duration?: number;
+  load_duration?: number;
+  prompt_eval_duration?: number;
+  eval_duration?: number;
 }
 
 /** Ollama done_reason → 공통 종료 사유. stop→stop, length→max_tokens, 그 밖·없음→other. */
@@ -147,6 +153,8 @@ export class OllamaVisionProvider implements VisionProvider {
     // 전송 실패 규칙(내부 timeout → LlmRequestError{timedOut}, 2xx 아님 → LlmRequestError{status},
     // 연결 실패 → LlmRequestError{status:null}, 바깥 취소는 그대로)은 공급자 공통 함수가 맡는다 —
     // 문서 OCR 이 상태 코드로 일시/결정/설정을 가른다.
+    // wall: 요청 시작 ~ 응답 JSON 읽기 끝(전송 실패는 줄 없이 던진다).
+    const wallStart = performance.now();
     const json = (await requestProviderJson({
       provider: "ollama",
       label: "OllamaVisionProvider /api/chat",
@@ -157,6 +165,7 @@ export class OllamaVisionProvider implements VisionProvider {
       timeoutMs: this.timeoutMs,
       signal: options.signal,
     })) as OllamaChatResponse;
+    const wallMs = Math.round(performance.now() - wallStart);
 
     if (json.error) {
       throw new Error(`OllamaVisionProvider error: ${json.error}`);
@@ -166,6 +175,19 @@ export class OllamaVisionProvider implements VisionProvider {
         "OllamaVisionProvider: response 안 message.content 가 없음.",
       );
     }
+
+    // 오류 검사를 통과한 응답마다 시간 한 줄(spec 5.4). 프롬프트 글자 수·그림 바이트 수만, 내용은 싣지 않는다.
+    console.log(
+      formatOllamaTimingLine({
+        caller: options.callLabel,
+        model: this.model,
+        doneReason: typeof json.done_reason === "string" ? json.done_reason : null,
+        inputChars: prompt.length,
+        imageBytes: imageBuffer.byteLength,
+        wallMs,
+        ...parseOllamaTimingFields(json as unknown as Record<string, unknown>),
+      }),
+    );
 
     const stopReason = ollamaStopReason(json.done_reason);
     const caption = json.message.content.trim();

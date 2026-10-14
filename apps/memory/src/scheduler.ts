@@ -230,7 +230,10 @@ export function startBackfillScheduler(
       logPrefix,
       clock,
     });
-    await guard.reconcile((row) => inspectExtractionAttempt(store, extractor.llmName, row));
+    const { pruned, fingerprintCleared } = await guard.reconcile((row) => inspectExtractionAttempt(store, extractor.attemptIdentity, row));
+    if (pruned > 0 || fingerprintCleared > 0) {
+      console.log(`${logPrefix} extraction ledger reconcile: pruned=${pruned} fingerprintCleared=${fingerprintCleared}`);
+    }
 
     const candidates = await store.getBackfillCandidates({
       limit: batchSize,
@@ -279,7 +282,7 @@ export function startBackfillScheduler(
           {
             targetKey,
             nodeId: listedCandidate.id,
-            fingerprint: extractionFingerprint(extractor.llmName, listedCandidate.content),
+            fingerprint: extractionFingerprint(extractor.attemptIdentity, listedCandidate.content),
             label: `node ${listedCandidate.id}`,
           },
           e,

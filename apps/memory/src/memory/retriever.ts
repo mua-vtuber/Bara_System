@@ -83,6 +83,7 @@ import {
 import { assembleNodeScore } from "./retrieve-assemble.ts";
 // 질의 임베딩 LRU 캐시 — 배치 결정·모델 교체 안전·복사 규약은 그 모듈 헤더 참조.
 import { QueryEmbeddingCache, embedQueryCached } from "./query-embedding-cache.ts";
+import { StageTimer, buildRetrieveTimings, type RetrieveStageTimings } from "./stage-timer.ts";
 
 // ── Tunables ─────────────────────────────────────────────────────────────
 //
@@ -204,6 +205,8 @@ export interface RetrieveStats {
 export interface RetrieveWithStatsResult {
   results: RetrievalResult[];
   stats: RetrieveStats;
+  /** 단계별 시간 — 검색 캐시에 저장하지 않는다(호출부가 stats 만 캐시에 넣는다). */
+  timings: RetrieveStageTimings;
 }
 
 // ── Pure RRF ─────────────────────────────────────────────────────────────
@@ -325,6 +328,7 @@ export class HybridRetriever {
     // 모든 `?? 모듈상수` fallback 체인·cue 적용 규칙·mask `?? true` 정규화가 그
     // 순수 함수 안에 byte 동일하게 들어간다. 아래에서 config.X 로 참조하고, 자주
     // 쓰는 값만 구조분해해 읽는다(값은 동일).
+    const timer = new StageTimer();
     const config = resolveRetrieveConfig(query, options, {
       defaultVectorBaseline: this.defaultVectorBaseline,
       searchCues: this.searchCues,
@@ -371,11 +375,15 @@ export class HybridRetriever {
     //     텍스트로 1회). synonym 은 여기 합류 X — spec 13.3 중복 가중 회피.
     //     같은 baseQuery 반복 검색은 LRU 적중으로 모델 재실행(실측 37~60ms)을 건너
     //     뛴다. 키 = 확장 *후* 텍스트라 project vocab 이 바뀌면 키도 달라져 stale 없음.
+    timer.lap("prepMs");
+    const embedHitsBefore = this.queryEmbeddingCache.stats().hits;
     const queryVec = await embedQueryCached(
       this.queryEmbeddingCache,
       this.embedder,
       baseQuery,
     );
+    timer.lap("embedMs");
+    const embedCacheHit = this.queryEmbeddingCache.stats().hits > embedHitsBefore;
 
     // 1.6 fts 계열 채널 입력 query — baseQuery 위에 synonym 확장(BM25 한정).
     //     미주입이면 baseQuery 그대로(1.1a 동작 불변). 임베딩 입력(queryVec)과는
@@ -415,6 +423,7 @@ export class HybridRetriever {
     //    (baseQuery 위에 synonym 확장한 글자 query) — 입력 분리.
     // let — step 4.5 polarity 필터가 hits 를 polarity 통과 후보로 재할당할 수 있다.
     // 두 공급 모두 상위 vectorK·ftsLimit 로 잘라 돌려준다(retrieve-visibility-pushdown.ts).
+    timer.lap("planMs");
     let [vectorHits, ftsHits] = await Promise.all([
       mask.vector
         ? searchVisibleVectors(this.store, supply, options, queryVec, vectorK)
@@ -423,6 +432,8 @@ export class HybridRetriever {
         ? searchVisibleFts(this.store, supply, ftsQuery, ftsLimit)
         : Promise.resolve([]),
     ]);
+
+    timer.lap("vectorFtsMs");
 
     // T2(강도-반영 융합) — vector 채널 원시 cosine 강도 노출. VectorHit.distance
     // 는 cosine distance(0 = 동일 / args-types.ts:49). 강도 = 1 - distance
@@ -443,6 +454,7 @@ export class HybridRetriever {
     //     독립 채널. 채널 로직은 retrieve-channels.ts 자유 함수로 추출했다(H-3 분해 —
     //     byte 동일). mask.concept 가 false 면 빈 배열을 회신한다.
     let conceptNodeIds = await collectConceptChannel(this.store, ftsQuery, queryVec, config);
+    timer.lap("conceptMs");
 
     // 3.7 image_vec 채널 — Phase 11b T5. 로직은 collectImageVecChannel 로 추출했다
     //     (H-3 분해 — byte 동일). magnitude 맵을 함께 회신한다 — 후처리 루프의
@@ -450,14 +462,17 @@ export class HybridRetriever {
     const { ids: imageVecCandidatesInit, magnitude: imageVecMagnitude } =
       await collectImageVecChannel(this.store, query, config);
     let imageVecCandidates = imageVecCandidatesInit;
+    timer.lap("imageVecMs");
 
     // 3.8 프로젝트 엔티티 채널 — 1.2 T8. 로직은 collectProjectChannel 로 추출했다
     //     (H-3 분해 — byte 동일). mask.project 가 false 면 빈 배열을 회신한다.
     let projectNodeIds = await collectProjectChannel(this.store, ftsQuery, queryVec, config);
+    timer.lap("projectMs");
 
     // 3.9 사람 엔티티 채널 — 1.2 T8. 로직은 collectPersonChannel 로 추출했다
     //     (H-3 분해 — byte 동일). mask.person 이 false 면 빈 배열을 회신한다.
     let personNodeIds = await collectPersonChannel(this.store, ftsQuery, queryVec, config);
+    timer.lap("personMs");
 
     // 4. Graph expansion from top seeds. 마스크가 graph 를 끄면 seed 단계를
     //    통째로 건너뛰어 graphHits 가 빈 배열이 된다.
@@ -468,6 +483,7 @@ export class HybridRetriever {
           maxHops: graphMaxHops,
           limit: graphLimit,
         });
+    timer.lap("graphMs");
 
     // 4.5 후보 축소 필터(RRF 합산 *전*) — pending_review 무조건 제외(6a T9.5 /
     //     결정 #5) + polarity(D7 / spec 5.5 / 1.1c T3) + 학술 분류 filter(spec 5.7 /
@@ -695,7 +711,7 @@ export class HybridRetriever {
     const imageVecFloor = CALIBRATION_FLOOR[effectiveImageVecCalibration];
 
     if (fusedRrf.size === 0) {
-      return { results: [], stats: { totalFound, afterFiltering: 0 } };
+      return { results: [], stats: { totalFound, afterFiltering: 0 }, timings: buildRetrieveTimings(timer, embedCacheHit) };
     }
 
     // 6. Source attribution for each hit.
@@ -891,12 +907,14 @@ export class HybridRetriever {
     // 10. Sort by final score and trim.
     results.sort((a, b) => b.score - a.score);
     const trimmed = results.slice(0, limit);
+    timer.lap("scoreMs");
 
     // 11. Touch returned nodes so recency reflects access patterns.
     if (trimmed.length > 0) {
       await this.store.touchNodesBatch(trimmed.map((r) => r.node.id));
+      timer.lap("touchMs");
     }
 
-    return { results: trimmed, stats: { totalFound, afterFiltering } };
+    return { results: trimmed, stats: { totalFound, afterFiltering }, timings: buildRetrieveTimings(timer, embedCacheHit) };
   }
 }

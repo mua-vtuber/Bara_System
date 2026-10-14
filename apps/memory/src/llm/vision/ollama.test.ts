@@ -9,7 +9,7 @@
  *   (6) Ollama 가동 실패 (500 에러) → 정직 throw + 구체 메시지
  */
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { OllamaVisionProvider } from "./ollama.ts";
 import { createVisionProvider } from "./index.ts";
 
@@ -217,5 +217,69 @@ describe("createVisionProvider — vision timeoutMs 전달 (ollama 갈래)", () 
       "test",
     );
     expect(result.caption).toBe("강아지 한 마리가 잔디 위에서 뛰고 있다");
+  });
+});
+
+describe("OllamaVisionProvider 시간 한 줄 ([ollama-timing])", () => {
+  test("호출마다 한 줄: caller·imageBytes·시간 칸, 프롬프트 글·callLabel 은 새지 않는다", async () => {
+    fakeServer.setMode("ok");
+    const provider = new OllamaVisionProvider({ limitSettingPath: "llm.vision.tokenCap",
+      baseUrl: fakeServer.url,
+      model: "qwen3-vl:4b",
+    });
+    const imageBuffer = new Uint8Array(37);
+    const prompt = "비밀스러운 프롬프트 본문 XYZ";
+    const spy = spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await provider.captionImage(imageBuffer, "image/png", prompt, { callLabel: "caption" });
+      const lines = spy.mock.calls.map((c) => String(c[0])).filter((l) => l.startsWith("[ollama-timing]"));
+      expect(lines.length).toBe(1);
+      const line = lines[0]!;
+      expect(line).toContain("caller=caption");
+      expect(line).toContain("model=qwen3-vl:4b");
+      expect(line).toContain("imageBytes=37");
+      expect(line).toContain(`inputChars=${prompt.length}`);
+      expect(line).toContain("prompt=512tok/");
+      expect(line).toContain("output=18tok/");
+      expect(line).not.toContain("XYZ");
+    } finally {
+      spy.mockRestore();
+    }
+    const body = fakeServer.lastRequestBody() as Record<string, unknown>;
+    expect(JSON.stringify(body)).not.toContain("callLabel");
+  });
+
+  test("callLabel 이 없으면 caller=미지정", async () => {
+    fakeServer.setMode("ok");
+    const provider = new OllamaVisionProvider({ limitSettingPath: "llm.vision.tokenCap",
+      baseUrl: fakeServer.url,
+      model: "qwen3-vl:4b",
+    });
+    const spy = spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await provider.captionImage(new Uint8Array(4), "image/png", "p");
+      const lines = spy.mock.calls.map((c) => String(c[0])).filter((l) => l.startsWith("[ollama-timing]"));
+      expect(lines.length).toBe(1);
+      expect(lines[0]).toContain("caller=미지정");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test("오류 응답(500)이면 줄을 남기지 않는다", async () => {
+    fakeServer.setMode("500");
+    const provider = new OllamaVisionProvider({ limitSettingPath: "llm.vision.tokenCap",
+      baseUrl: fakeServer.url,
+      model: "qwen3-vl:4b",
+    });
+    const spy = spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await expect(provider.captionImage(new Uint8Array(4), "image/png", "p")).rejects.toThrow();
+      const lines = spy.mock.calls.map((c) => String(c[0])).filter((l) => l.startsWith("[ollama-timing]"));
+      expect(lines.length).toBe(0);
+    } finally {
+      spy.mockRestore();
+      fakeServer.setMode("ok");
+    }
   });
 });

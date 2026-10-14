@@ -9,8 +9,8 @@
  *      줄이 있으므로 매 주기 전부 봐도 부담이 작다.
  *   2. now — 후보 SQL 의 막힘 판정 기준 시각(생성 때 한 번 읽은 주기 시작 시각을 설정 시간대 문자열로 바꾼 값).
  *   3. recordSuccess — 호출부가 성공 저장과 같은 쓰기 잠금 안에서 부른다.
- *   4. recordFailure — classifyBackfillFailure 로 나눈다. counted 는 기록(상한이면 멈춤 + 한 줄 로그), uncounted 는 기록
- *      안 함, stop_cycle 은 기록 없이 "stop" 을 돌려 호출부가 남은 대상을 건드리지 않고 주기를 끝낸다.
+ *   4. recordFailure — classifyBackfillFailure 로 나눈다. counted 는 기록(상한이면 멈춤 + 한 줄 로그), terminal(출력 한도에
+ *      잘림)은 첫 번에 멈춤으로 기록(+ 한 줄 로그)하고 다음 대상으로 넘어간다, uncounted 는 기록 안 함, stop_cycle 은 기록 없이 "stop" 을 돌려 호출부가 남은 대상을 건드리지 않고 주기를 끝낸다.
  *      기록 표 쓰기 자체가 실패하면(예: SQLITE_BUSY) 삼키지도 던지지도 않고 원래 실패와 쓰기 오류를 함께 로그에 남기고
  *      "ledger_write_failed" 로 주기를 멈춘다.
  *   5. summary — 주기 요약 줄에 붙일 대기·멈춤 수와 주기 중단 사유.
@@ -129,10 +129,11 @@ export class BackfillCycleGuard {
     }
     let result;
     try {
-      result = ledger.recordCounted(
-        { kind, targetKey: target.targetKey, nodeId: target.nodeId, fingerprint: target.fingerprint, error: message, policy },
-        clock(),
-      );
+      const entry = { kind, targetKey: target.targetKey, nodeId: target.nodeId, fingerprint: target.fingerprint, error: message };
+      result =
+        verdict.klass === "terminal"
+          ? ledger.recordTerminal(entry, clock())
+          : ledger.recordCounted({ ...entry, policy }, clock());
     } catch (writeError) {
       this.stopReason = BACKFILL_LEDGER_WRITE_FAILED;
       console.error(
@@ -141,7 +142,11 @@ export class BackfillCycleGuard {
       );
       return "stop";
     }
-    if (result.status === "terminal_failure") {
+    if (verdict.klass === "terminal") {
+      console.error(
+        `${logPrefix} ${KIND_LOG_NAME[kind]} stopped immediately for ${target.label} (${verdict.reason}): ${message}`,
+      );
+    } else if (result.status === "terminal_failure") {
       console.error(
         `${logPrefix} ${KIND_LOG_NAME[kind]} stopped for ${target.label} after ${result.attemptCount} attempts: ${message}`,
       );

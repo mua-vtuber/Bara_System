@@ -77,6 +77,7 @@ import {
   ENRICHED_SWEEP_VARIANTS,
 } from "./harness.ts";
 import { EVAL_QUERIES } from "../../../test-fixtures/sandbox/eval-queries.ts";
+import { MEMORY_DEFAULTS } from "../../settings/memory-defaults.ts";
 
 /** flat 글 코퍼스 — T1 과 같은 텍스트 자산(운영 default full-rrf 측정 대상). */
 const FLAT_CORPUS_PATH = join(
@@ -142,6 +143,7 @@ beforeAll(async () => {
     topKInput: 30,
     topKOutput: 30, // 측정 창 — eval limit(20)보다 커 결과 전체가 회신된다.
     host: "local",
+    maxPairTokens: MEMORY_DEFAULTS.reranker.maxPairTokens,
   });
   await reranker.load();
 }, 600_000);

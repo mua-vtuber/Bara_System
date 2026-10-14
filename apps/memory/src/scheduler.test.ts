@@ -38,6 +38,7 @@ import type { VisionProvider, VisionProviderSettings } from "./llm/vision/index.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { EXTRACTOR_MAX_OUTPUT_TOKENS_DEFAULT } from "./memory/extractor-output-limit.ts";
 
 let embedder: Bgem3Embedder;
 
@@ -898,6 +899,7 @@ describe("백필 재처리 — 태그 wiring 중복 누적 0 (T4)", () => {
       minImportance: 0.3,
       forceJsonFormat: false,
       timeoutMs: 900000,
+      maxOutputTokens: EXTRACTOR_MAX_OUTPUT_TOKENS_DEFAULT,
       backfill: { intervalMin: 30, batchSize: 10, minImportance: 0, maxAttempts: 5, retryDelayMin: 30, retryMaxDelayMin: 1440 },
     };
   }

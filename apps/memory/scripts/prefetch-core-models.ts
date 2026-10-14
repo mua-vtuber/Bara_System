@@ -36,7 +36,8 @@
 import { Bgem3Embedder } from "../src/embedding/bge-m3.ts";
 import { createImageEmbedder } from "../src/embedding/factory.ts";
 import { loadSiglipTextEncoder } from "../src/embedding/siglip2-text.ts";
-import { Reranker } from "../src/memory/reranker.ts";
+import { Reranker, rerankerConfigFromSettings } from "../src/memory/reranker.ts";
+import { MEMORY_DEFAULTS } from "../src/settings/memory-defaults.ts";
 import { migrateCacheToPinnedRevisions } from "../src/embedding/model-revision-cache-migration.ts";
 import {
   createInstallProgress,
@@ -138,12 +139,7 @@ async function main(): Promise<void> {
   }, 3);
 
   await runStage("bge reranker", async (onProgress) => {
-    const reranker = new Reranker({
-      model: "onnx-community/bge-reranker-v2-m3-ONNX",
-      topKInput: 30,
-      topKOutput: 5,
-      host: "local",
-    });
+    const reranker = new Reranker(rerankerConfigFromSettings(MEMORY_DEFAULTS.reranker));
     await reranker.load(onProgress);
     if (!reranker.available) {
       throw new Error("bge-reranker prefetch 실패");

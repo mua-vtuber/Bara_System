@@ -9,6 +9,10 @@ import {
   APIUserAbortError,
 } from "@anthropic-ai/sdk/error";
 import { LlmRequestError } from "../../llm/errors.ts";
+import {
+  ExtractionMalformedResponseError,
+  ExtractionOutputTruncatedError,
+} from "../extractor-internal/response-errors.ts";
 import { BackfillRechunkError, classifyBackfillFailure } from "./classify.ts";
 
 function llmError(status: number | null, timedOut = false): LlmRequestError {
@@ -84,5 +88,22 @@ describe("재청크 실패 — cause 를 풀어 같은 규칙", () => {
   });
   test("재청크 오류가 아닌 일반 Error 의 cause 는 풀지 않는다", () => {
     expect(classifyBackfillFailure(new Error("감싼 오류", { cause: llmError(null) }))).toEqual({ klass: "counted", status: null });
+  });
+});
+
+describe("추출 응답 오류 — 잘림은 첫 번에 멈춤, 형식 오류는 일반 규칙", () => {
+  const truncated = () =>
+    new ExtractionOutputTruncatedError({ llmName: "ollama:m", maxOutputTokens: 100, outputTokens: 100, attempt: "first" });
+
+  test("출력 한도에 잘림은 terminal(output_truncated)", () => {
+    expect(classifyBackfillFailure(truncated())).toEqual({ klass: "terminal", status: null, reason: "output_truncated" });
+  });
+  test("잘림을 cause 로 가진 재청크 실패도 terminal", () => {
+    expect(classifyBackfillFailure(new BackfillRechunkError("재청크 실패", { cause: truncated() })))
+      .toEqual({ klass: "terminal", status: null, reason: "output_truncated" });
+  });
+  test("응답을 두 번 읽지 못한 오류는 센다(counted)", () => {
+    const malformed = new ExtractionMalformedResponseError({ llmName: "ollama:m", firstLength: 0, retryLength: 0 });
+    expect(classifyBackfillFailure(malformed)).toEqual({ klass: "counted", status: null });
   });
 });

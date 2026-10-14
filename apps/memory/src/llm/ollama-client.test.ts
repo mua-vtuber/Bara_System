@@ -9,7 +9,7 @@
  *   options.think 정의 시에만 body.think 송신 / 미정의면 칸 없음 = 모델 기본 동작.
  */
 
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { OllamaClient } from "./ollama-client.ts";
 import { LlmRequestError } from "./errors.ts";
 
@@ -313,5 +313,130 @@ describe("OllamaClient — LlmRequestError throw 경로 (A-2)", () => {
     // 사용자 취소는 요청 실패가 아니다 — LlmRequestError 로 래핑하지 않는다.
     expect(caught).not.toBeInstanceOf(LlmRequestError);
     expect((caught as Error).name).toBe("AbortError");
+  });
+});
+
+describe("OllamaClient — [ollama-timing] 한 줄 (spec 5.3)", () => {
+  const PROMPT = "비밀프롬프트문장-타이밍로그에나오면안됨";
+  const REPLY = "비밀응답문장-타이밍로그에나오면안됨";
+
+  function timingLines(spy: { mock: { calls: unknown[][] } }): string[] {
+    return spy.mock.calls
+      .map((c) => String(c[0]))
+      .filter((l) => l.startsWith("[ollama-timing]"));
+  }
+
+  test("성공 응답마다 한 줄: 호출 이름·done·토큰 칸이 들어가고 프롬프트·응답 글은 없다", async () => {
+    fakeServer.setNextResponseOverride({
+      done_reason: "stop",
+      message: { role: "assistant", content: REPLY },
+      total_duration: 2_000_000_000,
+      load_duration: 50_000_000,
+      prompt_eval_count: 40,
+      prompt_eval_duration: 400_000_000,
+      eval_count: 10,
+      eval_duration: 1_000_000_000,
+    });
+    const spy = spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const client = new OllamaClient({ baseUrl: fakeServer.url, model: "qwen3:4b-instruct" });
+      await client.chatDetailed([{ role: "user", content: PROMPT }], { callLabel: "extraction" });
+      const lines = timingLines(spy);
+      expect(lines).toHaveLength(1);
+      const line = lines[0]!;
+      expect(line).toContain("caller=extraction");
+      expect(line).toContain("model=qwen3:4b-instruct");
+      expect(line).toContain("done=stop");
+      expect(line).toContain(`inputChars=${PROMPT.length}`);
+      expect(line).toContain("prompt=40tok/400ms(100.0tok/s)");
+      expect(line).toContain("output=10tok/1000ms(10.0tok/s)");
+      expect(line).toContain("total=2000ms");
+      expect(line).toContain("load=50ms");
+      expect(line).not.toContain(PROMPT);
+      expect(line).not.toContain(REPLY);
+      expect(line.includes("\n")).toBe(false);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test("callLabel 은 요청 본문에 실리지 않는다", async () => {
+    const spy = spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const client = new OllamaClient({ baseUrl: fakeServer.url, model: "qwen3:4b-instruct" });
+      await client.chatDetailed([{ role: "user", content: "안녕?" }], { callLabel: "cleanup" });
+      const body = fakeServer.lastRequestBody();
+      if (!body) throw new Error("body 미존재");
+      expect("callLabel" in body).toBe(false);
+      expect(JSON.stringify(body)).not.toContain("cleanup");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test("시간 칸이 없는 응답과 callLabel 미지정은 - 와 미지정으로 찍힌다", async () => {
+    const spy = spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const client = new OllamaClient({ baseUrl: fakeServer.url, model: "qwen3:4b-instruct" });
+      await client.chatDetailed([{ role: "user", content: "안녕?" }]);
+      const lines = timingLines(spy);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain("caller=미지정");
+      expect(lines[0]).toContain("done=-");
+      expect(lines[0]).toContain("total=-");
+      expect(lines[0]).toContain("prompt=-/-");
+      expect(lines[0]).toContain("output=-/-");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test("HTTP 500 이면 줄이 남지 않는다", async () => {
+    fakeServer.setNextStatusOverride({ status: 500, body: "boom" });
+    const spy = spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const client = new OllamaClient({ baseUrl: fakeServer.url, model: "qwen3:4b-instruct" });
+      await expect(
+        client.chatDetailed([{ role: "user", content: "안녕?" }], { callLabel: "extraction" }),
+      ).rejects.toBeInstanceOf(LlmRequestError);
+      expect(timingLines(spy)).toHaveLength(0);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
+describe("OllamaClient — 컨텍스트 창(num_ctx) 계산", () => {
+  const savedNumCtx = process.env.OLLAMA_NUM_CTX;
+  afterEach(() => {
+    if (savedNumCtx === undefined) delete process.env.OLLAMA_NUM_CTX;
+    else process.env.OLLAMA_NUM_CTX = savedNumCtx;
+  });
+
+  function sentNumCtx(): unknown {
+    const body = fakeServer.lastRequestBody() as { options?: { num_ctx?: unknown } } | null;
+    if (!body) throw new Error("body 미존재");
+    return body.options?.num_ctx;
+  }
+
+  test("환경 변수 없이 만들면 요청 num_ctx 는 8192", async () => {
+    delete process.env.OLLAMA_NUM_CTX;
+    const client = new OllamaClient({ baseUrl: fakeServer.url, model: "qwen3:4b-instruct" });
+    await client.chat([{ role: "user", content: "안녕?" }]);
+    expect(sentNumCtx()).toBe(8192);
+  });
+
+  test("명시 numCtx 2048 은 그대로 요청에 실린다", async () => {
+    delete process.env.OLLAMA_NUM_CTX;
+    const client = new OllamaClient({ baseUrl: fakeServer.url, model: "qwen3:4b-instruct", numCtx: 2048 });
+    await client.chat([{ role: "user", content: "안녕?" }]);
+    expect(sentNumCtx()).toBe(2048);
+  });
+
+  test("OLLAMA_NUM_CTX 가 숫자가 아니면 생성 때 던진다", () => {
+    process.env.OLLAMA_NUM_CTX = "abc";
+    expect(() => new OllamaClient({ baseUrl: fakeServer.url, model: "qwen3:4b-instruct" })).toThrow(
+      'OLLAMA_NUM_CTX 가 양의 정수가 아님 (받은 값 "abc")',
+    );
   });
 });

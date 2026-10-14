@@ -26,6 +26,7 @@ import {
   subcategoryToTypeMap, userEntityKoNameOf, type PlacementTypeName,
 } from "./concept-type-vocabulary.ts";
 import type { LlmClient } from "../llm/types.ts";
+import { LLM_CALL_LABELS } from "../llm/call-labels.ts";
 import {
   buildClassificationMessages, classificationJsonSchema, parseClassificationResponse,
 } from "./entity-type-llm-prompt.ts";
@@ -401,6 +402,7 @@ export async function classifyEntityType(
     const raw = await llm.chat(buildClassificationMessages(text), {
       temperature: 0.1,
       jsonSchema: classificationJsonSchema(),
+      callLabel: LLM_CALL_LABELS.entityClassify,
     });
     const { typeName, reason } = parseClassificationResponse(raw);
     if (typeName) {

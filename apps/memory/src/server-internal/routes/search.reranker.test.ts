@@ -21,6 +21,7 @@ import {
   beforeEach,
   describe,
   expect,
+  spyOn,
   test,
 } from "bun:test";
 import type { Database } from "bun:sqlite";
@@ -34,6 +35,7 @@ import { SearchCache } from "../../memory/search-cache.ts";
 import { Reranker, type RerankerConfig } from "../../memory/reranker.ts";
 import type { MemoryApiDeps } from "../types.ts";
 import { buildMemoryApi } from "../../server.ts";
+import { MEMORY_DEFAULTS } from "../../settings/memory-defaults.ts";
 
 const MODEL_LOAD_TIMEOUT_MS = 180_000;
 const E2E_TIMEOUT_MS = 120_000;
@@ -44,6 +46,7 @@ const REAL_CONFIG: RerankerConfig = {
   topKInput: 30,
   topKOutput: 5,
   host: "local",
+  maxPairTokens: MEMORY_DEFAULTS.reranker.maxPairTokens,
 };
 
 let embedder: Bgem3Embedder;
@@ -95,11 +98,12 @@ function makeHarness(withReranker: boolean): Harness {
   let calls = 0;
   let reranker: Reranker | undefined;
   if (withReranker) {
-    const realRerank = realReranker.rerank.bind(realReranker);
-    realReranker.rerank = ((query, candidates) => {
+    // 서비스는 관측값까지 주는 rerankWithStats 를 부른다(speed-step1 Task 11) — 그 호출을 센다.
+    const realRerank = realReranker.rerankWithStats.bind(realReranker);
+    realReranker.rerankWithStats = ((query, candidates) => {
       calls += 1;
       return realRerank(query, candidates);
-    }) as typeof realReranker.rerank;
+    }) as typeof realReranker.rerankWithStats;
     reranker = realReranker;
   }
 
@@ -211,6 +215,29 @@ describe("POST /search — reranker 가용 = cross-encoder 재정렬(6b T6)", ()
         `[6b T6 E2E] reranker 가용 → 1위 rerankerScore=${body.results[0]!.components.rerankerScore} ` +
           `(${body.results[0]!.content.slice(0, 20)}...)`,
       );
+    },
+    E2E_TIMEOUT_MS,
+  );
+
+  test(
+    "[search-timing] 줄에 리랭커 채점 관측값이 남고 seqLen 이 maxPairTokens 이하",
+    async () => {
+      const logSpy = spyOn(console, "log").mockImplementation(() => {});
+      try {
+        await postSearch(h, { query: "고양이 사료 추천", limit: 10 });
+        const lines = logSpy.mock.calls
+          .map((args) => String(args[0]))
+          .filter((line) => line.startsWith("[search-timing]"));
+        expect(lines.length).toBe(1);
+        const line = lines[0]!;
+        expect(line).toContain("scored=yes pairs=");
+        const seqLen = Number(/seqLen=(\d+)/.exec(line)?.[1]);
+        expect(Number.isInteger(seqLen)).toBe(true);
+        expect(seqLen).toBeGreaterThan(0);
+        expect(seqLen).toBeLessThanOrEqual(MEMORY_DEFAULTS.reranker.maxPairTokens);
+      } finally {
+        logSpy.mockRestore();
+      }
     },
     E2E_TIMEOUT_MS,
   );

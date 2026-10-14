@@ -166,7 +166,7 @@ export interface PreparedImmediateExtraction {
  *  - existing_origin: 같은 본문 원본이 이미 있어 LLM 을 부르지 않았다(저장은 멱등 재사용).
  *  - tags_only: 태그를 빼면 본문이 비어 LLM 을 부르지 않았다(0건 추출 완료로 저장).
  *  - extracted: LLM 응답을 파싱해 두었다(저장은 잠금 안 storeExtraction).
- *  - failed: 추출 context 구성이나 LLM 호출이 실패했다(저장은 원본만, 실패 사유를 경고로 남긴다).
+ *  - failed: 추출 context 구성이나 LLM 호출이 실패했다(저장은 원본만, 실패 사유를 경고로 남긴다. truncated 면 기록 표에도 쓴다).
  */
 export type PreparedImmediateOutcome =
   | { readonly kind: "existing_origin" }
@@ -178,7 +178,12 @@ export type PreparedImmediateOutcome =
       /** LLM 응답. sourceText(태그를 뺀 본문)를 storeExtraction 이 저장 본문과 견준다. */
       readonly prepared: PreparedExtraction;
     }
-  | { readonly kind: "failed"; readonly message: string };
+  | {
+      readonly kind: "failed";
+      readonly message: string;
+      /** 원인이 출력 한도에 잘림(ExtractionOutputTruncatedError)인가 — 저장 때 기록 표에 바로 멈춤으로 쓴다. */
+      readonly truncated: boolean;
+    };
 
 export interface EntityPatchSummary {
   typeName: string;

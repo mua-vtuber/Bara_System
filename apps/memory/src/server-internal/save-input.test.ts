@@ -23,7 +23,8 @@ import { OllamaClient } from "../llm/ollama-client.ts";
 import { parseTags } from "../memory/tag-extractor.ts";
 import { RegexL0Extractor } from "../memory/regex-l0/extractor.ts";
 import type { MemorySettings } from "../settings/memory-settings.ts";
-import type { LlmClient } from "../llm/types.ts";
+import type { ObservableLlmClient } from "../llm/types.ts";
+import { EXTRACTOR_MAX_OUTPUT_TOKENS_DEFAULT } from "../memory/extractor-output-limit.ts";
 
 /**
  * immediate 갈래(save-input.ts:301-302)·from-text 갈래(routes/memories.ts:339-340)가
@@ -88,6 +89,7 @@ function extractorSlot(
     // extractor-a1-2.4b-transition T1 (IN-1) — 신규 두 칸 형식 충족용 default 값.
     forceJsonFormat: false,
     timeoutMs: 900000,
+    maxOutputTokens: EXTRACTOR_MAX_OUTPUT_TOKENS_DEFAULT,
     backfill: { intervalMin: 30, batchSize: 10, minImportance: 0, maxAttempts: 5, retryDelayMin: 30, retryMaxDelayMin: 1440 },
   };
 }
@@ -102,18 +104,26 @@ function realExtractor(store: SqliteMemoryStore): MemoryExtractor {
 }
 
 function fixtureExtractor(store: SqliteMemoryStore, content: string): MemoryExtractor {
-  const llm: LlmClient = {
+  const llm: ObservableLlmClient = {
     name: "fixture:save-input-project",
     chat: async () =>
       JSON.stringify([{ content, memoryType: "fact", importance: 0.8 }]),
+    chatDetailed: async () => ({
+      text: JSON.stringify([{ content, memoryType: "fact", importance: 0.8 }]),
+      stopReason: "stop",
+      usage: null,
+    }),
   };
   return new MemoryExtractor(llm, store, embedder, { duplicateSim: 0.99 });
 }
 
 function failOnChatExtractor(store: SqliteMemoryStore): MemoryExtractor {
-  const llm: LlmClient = {
+  const llm: ObservableLlmClient = {
     name: "fixture:fail-on-chat",
     chat: async () => {
+      throw new Error("LLM should not be called for this input");
+    },
+    chatDetailed: async () => {
       throw new Error("LLM should not be called for this input");
     },
   };

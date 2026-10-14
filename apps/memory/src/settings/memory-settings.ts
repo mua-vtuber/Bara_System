@@ -44,6 +44,7 @@ export type {
 export {
   getMemorySettings,
   putMemorySettings,
+  MemorySettingsValidationError,
   maskSecrets,
   resolveSettingsFilePaths,
   secretsPathBesideSettings,

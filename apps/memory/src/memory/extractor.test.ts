@@ -43,6 +43,7 @@ import { openMemoryDatabase } from "../db/migrations.ts";
 import { SqliteMemoryStore } from "../db/store.ts";
 import { Bgem3Embedder } from "../embedding/bge-m3.ts";
 import { OllamaClient } from "../llm/ollama-client.ts";
+import { ExtractionMalformedResponseError } from "./extractor-internal/response-errors.ts";
 import { buildExtractionContext } from "./extraction-context.ts";
 import { inputChildSource } from "../test-utils/extraction-placement.ts";
 
@@ -1356,11 +1357,12 @@ describe("MemoryExtractor — T3 형식-깨짐 한정 1회 재요청", () => {
     expect(result.items).toEqual([]);
   });
 
-  test("재요청도 garbled → 빈 배열 종료 (chat 최대 2회, 3회째 없음)", async () => {
+  test("재요청도 garbled → ExtractionMalformedResponseError (chat 최대 2회, 3회째 없음)", async () => {
     responses = ['[{"content":"잘린', "여전히 설명문입니다"];
-    const result = await extractor.extract({ text: "커피는 좋아하지만 우유는 싫다." });
+    await expect(
+      extractor.extract({ text: "커피는 좋아하지만 우유는 싫다." }),
+    ).rejects.toBeInstanceOf(ExtractionMalformedResponseError);
     expect(callCount).toBe(2);
-    expect(result.items).toEqual([]);
   });
 
   test("재요청 시 temperature 0.3 으로 호출 (첫 호출은 0.1)", async () => {

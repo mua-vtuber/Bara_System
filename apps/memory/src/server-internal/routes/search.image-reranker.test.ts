@@ -52,6 +52,7 @@ import type { ImageEmbedder } from "../../embedding/types.ts";
 import { ingestImage } from "../../memory/ingest-image.ts";
 import type { MemoryApiDeps } from "../types.ts";
 import { buildMemoryApi } from "../../server.ts";
+import { MEMORY_DEFAULTS } from "../../settings/memory-defaults.ts";
 
 const MODEL_LOAD_TIMEOUT_MS = 600_000;
 const E2E_TIMEOUT_MS = 180_000;
@@ -62,6 +63,7 @@ const REAL_CONFIG: RerankerConfig = {
   topKInput: 30,
   topKOutput: 5,
   host: "local",
+  maxPairTokens: MEMORY_DEFAULTS.reranker.maxPairTokens,
 };
 
 /** 실 이미지 fixture — 11a 통합 검증과 같은 자산(작은 PNG). */
@@ -131,11 +133,12 @@ function makeHarness(withReranker: boolean): Harness {
   let calls = 0;
   let reranker: Reranker | undefined;
   if (withReranker) {
-    const realRerank = realReranker.rerank.bind(realReranker);
-    realReranker.rerank = ((query, candidates) => {
+    // 서비스는 관측값까지 주는 rerankWithStats 를 부른다(speed-step1 Task 11) — 그 호출을 센다.
+    const realRerank = realReranker.rerankWithStats.bind(realReranker);
+    realReranker.rerankWithStats = ((query, candidates) => {
       calls += 1;
       return realRerank(query, candidates);
-    }) as typeof realReranker.rerank;
+    }) as typeof realReranker.rerankWithStats;
     reranker = realReranker;
   }
 

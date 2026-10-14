@@ -11,6 +11,7 @@ import { openMemoryDatabase } from "../../db/migrations.ts";
 import type { BackfillAttemptKind } from "../../db/store-internal/backfill-attempts-sql.ts";
 import { pastCutoffInZone } from "../../db/store-internal/helpers.ts";
 import { LlmRequestError } from "../../llm/errors.ts";
+import { ExtractionOutputTruncatedError } from "../extractor-internal/response-errors.ts";
 import { BackfillCycleGuard, formatRetrySummary } from "./cycle-guard.ts";
 import { BackfillAttemptsLedger, type BackfillRetryPolicy } from "./ledger.ts";
 
@@ -64,6 +65,27 @@ describe("실패 기록", () => {
       expect(guard.recordFailure(target(id), llmError(null, true, TIMEOUT_MESSAGE))).toBe("continue");
       expect(lines(errors).filter((l) => l.includes("stopped for"))).toEqual([
         `${PREFIX} backfill stopped for node ${id} after 2 attempts: ${TIMEOUT_MESSAGE}`,
+      ]);
+      expect(guard.summary()).toEqual({ retryWait: 0, stopped: 1, cycleStopped: null });
+    } finally {
+      errors.mockRestore();
+    }
+  });
+
+  test("출력 한도에 잘리면 첫 번에 멈춤으로 기록하고 한 줄 남긴 뒤 계속한다", () => {
+    const id = insertNode();
+    const errors = spyOn(console, "error");
+    try {
+      const guard = guardFor();
+      const truncated = new ExtractionOutputTruncatedError({
+        llmName: "ollama:m", maxOutputTokens: 100, outputTokens: 100, attempt: "first",
+      });
+      expect(guard.recordFailure(target(id), truncated)).toBe("continue");
+      expect(ledger.get("extraction", String(id))).toMatchObject({
+        status: "terminal_failure", attemptCount: 1, nextRetryAt: null, lastError: truncated.message,
+      });
+      expect(lines(errors)).toEqual([
+        `${PREFIX} backfill stopped immediately for node ${id} (output_truncated): ${truncated.message}`,
       ]);
       expect(guard.summary()).toEqual({ retryWait: 0, stopped: 1, cycleStopped: null });
     } finally {

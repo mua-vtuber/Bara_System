@@ -20,6 +20,12 @@ import {
 import { basename, dirname, join } from "node:path";
 
 import { PASSWORD_FIELD_PATHS } from "./memory-schema";
+import { rerankerMaxPairTokensError } from "../memory/reranker-limits";
+import {
+  extractorMaxOutputTokensError,
+  extractorOutputExceedsOllamaContextError,
+} from "../memory/extractor-output-limit";
+import { resolveOllamaNumCtx } from "../llm/ollama-num-ctx";
 import { validateStageAllocation } from "../memory/cleanup-deep-pass/cycle-budget";
 import { migrateLegacyKeys } from "./migrate-legacy-keys";
 import type { SecretCopy } from "./migrate-document-ocr-api";
@@ -248,11 +254,54 @@ export function getMemorySettings(path: string, secretsPath: string): MemorySett
   if (retryDelayErrors.length > 0) {
     throw new Error(`memory-settings 검증 실패: ${path} — ${retryDelayErrors.join("; ")}`);
   }
+  // 2026-10-14 speed-step1 spec 3.2 — 손으로 고친 파일의 쌍 길이 한도도 읽기에서 멈춘다(조용히 고쳐 쓰지 않음).
+  const pairTokensError = rerankerMaxPairTokensError(merged.reranker.maxPairTokens);
+  if (pairTokensError !== null) {
+    throw new Error(`memory-settings 검증 실패: ${path} — ${pairTokensError}`);
+  }
+  // 2026-10-15 extractor-output-limit spec 3.2 — 손으로 고친 파일의 추출 출력 한도도 읽기에서 멈춘다(조용히 고쳐 쓰지 않음).
+  const outputLimitErrors = extractorOutputLimitErrors(merged);
+  if (outputLimitErrors.length > 0) {
+    throw new Error(`memory-settings 검증 실패: ${path} — ${outputLimitErrors.join("; ")}`);
+  }
   // secret 파일의 진짜 키를 settings 객체에 얹는다 — 호출처 회귀 0.
   overlaySecrets(merged, secretStore);
   // 옛 설정 옮기기가 정한 비밀 값 복사(문서 OCR spec D8) — 대상이 비었을 때만. 다음 저장 때 새 경로로 기록된다.
   applySecretCopies(merged, secretCopies);
   return merged;
+}
+
+/**
+ * 추출 출력 한도(llm.extractor.maxOutputTokens)의 범위와 Ollama 컨텍스트 창 관계를 본다 (spec 3.2·3.3).
+ * 환경 변수 OLLAMA_NUM_CTX 를 읽으므로 환경을 읽지 않는 validateMemorySettings 가 아닌 이 입출력 계층에 둔다.
+ * 공급자가 ollama 가 아니면 환경 변수를 읽지 않는다. 잘못된 환경 변수는 던지지 않고 같은 검증 실패 문장에 담는다.
+ */
+function extractorOutputLimitErrors(settings: MemorySettings): string[] {
+  const slot = settings.llm.extractor;
+  const rangeError = extractorMaxOutputTokensError(slot.maxOutputTokens);
+  if (rangeError !== null) return [rangeError];
+  if (slot.provider !== "ollama") return [];
+  let numCtx: number;
+  try {
+    numCtx = resolveOllamaNumCtx(undefined, process.env);
+  } catch (err) {
+    return [(err as Error).message];
+  }
+  const relationError = extractorOutputExceedsOllamaContextError(slot.maxOutputTokens, numCtx);
+  return relationError === null ? [] : [relationError];
+}
+
+/**
+ * 저장하려는 설정이 검증에 걸렸을 때 던진다 — 호출자(설정 라우트)가 400 으로 돌려줄 수 있게 문장 목록을 그대로 담는다.
+ * 저장된 파일을 읽다 실패하는 경우는 이 클래스가 아니라 일반 Error 로 남는다(서버 쪽 문제).
+ */
+export class MemorySettingsValidationError extends Error {
+  readonly errors: string[];
+  constructor(errors: string[]) {
+    super(`memory-settings 검증 실패: ${errors.join("; ")}`);
+    this.name = "MemorySettingsValidationError";
+    this.errors = errors;
+  }
 }
 
 /**
@@ -278,9 +327,7 @@ export function putMemorySettings(
 
   const validation = validateMemorySettings(shielded);
   if (!validation.ok) {
-    throw new Error(
-      `memory-settings 검증 실패: ${validation.errors.join("; ")}`,
-    );
+    throw new MemorySettingsValidationError(validation.errors);
   }
   // 효율 가동 spec 4.A-5 — 잘못된 stageAllocation(합≠1.0)이 디스크에 써지지 않게
   // 쓰기 전에도 검사한다(로드 검사와 대칭 — 어느 경로로도 어긋난 배분이 안 남는다).
@@ -288,7 +335,13 @@ export function putMemorySettings(
     shielded.cleanupDeepPass.budget.stageAllocation,
   );
   if (!allocValidation.ok) {
-    throw new Error(`memory-settings 검증 실패: ${allocValidation.error}`);
+    throw new MemorySettingsValidationError([allocValidation.error]);
+  }
+
+  // 2026-10-15 extractor-output-limit spec 3.2 — 추출 출력 한도가 Ollama 컨텍스트 창을 넘는 설정이 디스크에 안 써지게 쓰기 전에도 본다.
+  const outputLimitErrors = extractorOutputLimitErrors(shielded);
+  if (outputLimitErrors.length > 0) {
+    throw new MemorySettingsValidationError(outputLimitErrors);
   }
 
   // Phase 7 2차 Task 9 — 비밀값을 secret 파일로 보내고 json 에 쓸 객체에서는 비운다

@@ -36,7 +36,7 @@
  *  (21) requestVlmCaption — provider throw → called=true + caption=null
  */
 
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import {
   applyVlmCaptionFlow,
   requestVlmCaption,
@@ -52,6 +52,8 @@ import type {
   VisionProviderSettings,
 } from "./index.ts";
 import type { LlmVisionSlot } from "../../settings/memory-settings.ts";
+import { OllamaVisionProvider } from "./ollama.ts";
+import { startProviderStandIn, type ProviderStandIn } from "../../test-utils/provider-stand-in.ts";
 
 // ── 공통 fixture ────────────────────────────────────────────────────────────
 
@@ -568,5 +570,44 @@ describe("requestVlmCaption — 저장과 분리한 요청 단계 (WP-B1-07)", (
     expect(request).toMatchObject({ called: true, caption: null });
     // 2026-10-14 spec 4.6 — 잡은 예외를 그대로 실어 백필이 분류할 수 있게 한다.
     expect((request as { failure?: unknown }).failure).toBeInstanceOf(Error);
+  });
+});
+
+describe("requestVlmCaption — Ollama 처리 시간 줄", () => {
+  let standIn: ProviderStandIn;
+  beforeAll(() => {
+    standIn = startProviderStandIn();
+  });
+  afterAll(() => standIn.stop());
+
+  test("캡션 한 번 → [ollama-timing] 한 줄에 caller=caption", async () => {
+    standIn.reply = () => ({
+      body: { model: "qwen3-vl", message: { role: "assistant", content: "책상 위 노트북" }, done: true, done_reason: "stop", prompt_eval_count: 10, eval_count: 5 },
+    });
+    const provider = new OllamaVisionProvider({
+      baseUrl: standIn.origin,
+      model: "qwen3-vl",
+      limitSettingPath: "llm.vision.tokenCap",
+    });
+    const spy = spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const request = await requestVlmCaption({
+        parentNodeId: 1,
+        assetSha256: "b".repeat(64),
+        imageBuffer: Buffer.from([1, 2, 3]),
+        mimeType: "image/png",
+        visionSettings: { ...DEFAULT_VISION_SETTINGS, provider: "ollama", forceCall: true },
+        hasEmbedding: true,
+        provider,
+      });
+      expect(request).toMatchObject({ called: true, caption: "책상 위 노트북" });
+      const lines = spy.mock.calls.map((c) => String(c[0])).filter((l) => l.startsWith("[ollama-timing]"));
+      expect(lines.length).toBe(1);
+      expect(lines[0]).toContain("caller=caption");
+      expect(lines[0]).toContain("imageBytes=3");
+    } finally {
+      spy.mockRestore();
+    }
+    expect(JSON.stringify(standIn.requests[0]!.body)).not.toContain("callLabel");
   });
 });

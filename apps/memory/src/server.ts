@@ -26,6 +26,7 @@ import { ContextAssembler } from "./memory/context-assembler.ts";
 import { MemoryExtractor } from "./memory/extractor.ts";
 import { ConflictChecker } from "./memory/conflict-checker.ts";
 import type { LlmClient } from "./llm/types.ts";
+import { asObservableLlmClient } from "./llm/observable.ts";
 import type { AutoCleanupTriggerHandle } from "./memory/auto-cleanup-trigger.ts";
 import type { MemoryApiDeps, CreateMemoryApiOptions } from "./server-internal/types.ts";
 import { buildLlmClient, autoDetectProvider, EXTRACTOR_ANTHROPIC_MAX_RETRIES } from "./server-internal/llm-wiring.ts";
@@ -73,7 +74,7 @@ import { routeErrorHandler } from "./server-internal/route-error-handler.ts";
 import { loadSynonymDictionary } from "./memory/synonym-dictionary.ts";
 import { loadSearchCues } from "./memory/search-cues-loader.ts";
 import { SearchCache } from "./memory/search-cache.ts";
-import { Reranker } from "./memory/reranker.ts";
+import { Reranker, rerankerConfigFromSettings } from "./memory/reranker.ts";
 import { RegexL0Extractor } from "./memory/regex-l0/extractor.ts";
 import { RegexUserRepo } from "./memory/regex-l0/user-repo.ts";
 import { SynonymUserRepo } from "./memory/synonyms/synonym-user-repo.ts";
@@ -560,17 +561,12 @@ export async function createMemoryApi(
   // settings.reranker 주입값 — No-hardcoding.
   let reranker: Reranker | undefined;
   if (settings.reranker.enabled) {
-    reranker = new Reranker({
-      model: settings.reranker.model,
-      topKInput: settings.reranker.topK_input,
-      topKOutput: settings.reranker.topK_output,
-      host: settings.reranker.host,
-    });
+    reranker = new Reranker(rerankerConfigFromSettings(settings.reranker));
     await reranker.load();
     console.log(
       reranker.available
-        ? `[memory-api] 리랭커 로드 완료 (model ${settings.reranker.model} / topK_input ${settings.reranker.topK_input} → topK_output ${settings.reranker.topK_output})`
-        : `[memory-api] 리랭커 모델 로드 실패 — 재정렬 없이 RRF 순서로 degrade (spec 11.2)`,
+        ? `[memory-api] 리랭커 로드 완료 (model ${settings.reranker.model} / topK_input ${settings.reranker.topK_input} → topK_output ${settings.reranker.topK_output} / maxPairTokens ${settings.reranker.maxPairTokens})`
+        : `[memory-api] 리랭커를 쓸 수 없음 — 재정렬 없이 검색 순서 그대로 사용 (원인은 위 [reranker] 줄, spec 11.2)`,
     );
   } else {
     console.log("[memory-api] 리랭커 비활성 (reranker.enabled=false / 측정 전 보수 default)");
@@ -609,11 +605,12 @@ export async function createMemoryApi(
     importanceDecay: settings.valueDecay.importanceDecay,
   });
   const extractor = llm
-    ? new MemoryExtractor(llm, store, embedder, {
+    ? new MemoryExtractor(asObservableLlmClient(llm, "llm.extractor"), store, embedder, {
         conflictChecker,
         duplicateSim: mergeSimThreshold,
         minImportance: settings.llm.extractor.minImportance,
         forceJsonFormat: settings.llm.extractor.forceJsonFormat,
+        maxOutputTokens: settings.llm.extractor.maxOutputTokens,
       })
     : undefined;
 

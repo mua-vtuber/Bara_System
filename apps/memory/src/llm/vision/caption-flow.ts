@@ -29,6 +29,7 @@ import type { Database } from "bun:sqlite";
 import type { SqliteMemoryStore } from "../../db/store.ts";
 import type { LlmVisionSlot } from "../../settings/memory-settings.ts";
 import { LLM_PROVIDER_SPECS } from "../provider-registry.ts";
+import { LLM_CALL_LABELS } from "../call-labels.ts";
 import type {
   VisionCaptionOptions,
   VisionProvider,
@@ -245,6 +246,7 @@ export async function requestVlmCaption(
     const callOptions: VisionCaptionOptions = {
       maxTokens: args.visionSettings.tokenCap,
       temperature: 0.3,
+      callLabel: LLM_CALL_LABELS.caption,
       ...(args.options ?? {}),
     };
     const response = await args.provider.captionImage(

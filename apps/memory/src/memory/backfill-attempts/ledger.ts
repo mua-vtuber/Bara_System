@@ -64,13 +64,16 @@ export interface BackfillAttemptRow {
   lastAttemptAt: string;
 }
 
-export interface CountedFailureInput {
+export interface TerminalFailureInput {
   kind: BackfillAttemptKind;
   targetKey: string;
   nodeId: number;
   fingerprint: string;
   /** 화면에 보일 오류 문장(키 가림을 거친 것). */
   error: string;
+}
+
+export interface CountedFailureInput extends TerminalFailureInput {
   policy: BackfillRetryPolicy;
 }
 
@@ -140,6 +143,28 @@ export class BackfillAttemptsLedger {
     const nextRetryAt = terminal
       ? null
       : pastCutoffInZone(nowMs + backfillRetryDelayMinutes(attemptCount, input.policy) * MINUTE_MS);
+    this.upsert(input, { status, attemptCount, nextRetryAt }, nowMs);
+    return { status, attemptCount, nextRetryAt };
+  }
+
+  /**
+   * 즉시 멈춤 — 다시 보내도 같은 결과일 실패(출력 한도 잘림). 같은 지문이면 횟수 +1, 바뀌었으면 1.
+   * 상한과 무관하게 terminal_failure(재시도 시각 없음)로 둔다. recordCounted 와 같은 SQL 을 쓴다.
+   */
+  recordTerminal(input: TerminalFailureInput, nowMs: number): CountedFailureResult {
+    const existing = this.get(input.kind, input.targetKey);
+    const prior = existing !== null && existing.inputFingerprint === input.fingerprint ? existing.attemptCount : 0;
+    const result: CountedFailureResult = {
+      status: BACKFILL_TERMINAL_STATUS,
+      attemptCount: prior + 1,
+      nextRetryAt: null,
+    };
+    this.upsert(input, result, nowMs);
+    return result;
+  }
+
+  /** recordCounted·recordTerminal 이 함께 쓰는 한 줄 쓰기(없으면 넣고 있으면 덮어쓴다). */
+  private upsert(input: TerminalFailureInput, result: CountedFailureResult, nowMs: number): void {
     this.db
       .query(
         `INSERT INTO ${T} (${SELECT_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -149,10 +174,9 @@ export class BackfillAttemptsLedger {
            last_error = excluded.last_error, last_attempt_at = excluded.last_attempt_at`,
       )
       .run(
-        input.kind, input.targetKey, input.nodeId, input.fingerprint, status, attemptCount, nextRetryAt,
-        input.error, pastCutoffInZone(nowMs),
+        input.kind, input.targetKey, input.nodeId, input.fingerprint, result.status, result.attemptCount,
+        result.nextRetryAt, input.error, pastCutoffInZone(nowMs),
       );
-    return { status, attemptCount, nextRetryAt };
   }
 
   /** 한 줄을 지운다(성공·정리). @returns 지웠는지. */

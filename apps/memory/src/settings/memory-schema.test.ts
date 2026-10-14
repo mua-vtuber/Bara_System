@@ -287,13 +287,14 @@ describe("MEMORY_SCHEMA — 묶음별 칸 정합", () => {
     ]);
   });
 
-  test("reranker 그룹 = 5 칸 (enabled / model / topK_input / topK_output / host — Phase 6b T1)", () => {
+  test("reranker 그룹 = 6 칸 (enabled / model / topK_input / topK_output / maxPairTokens / host — Phase 6b T1)", () => {
     const keys = Object.keys(
       MEMORY_SCHEMA.properties.reranker.properties,
     ).sort();
     expect(keys).toEqual([
       "enabled",
       "host",
+      "maxPairTokens",
       "model",
       "topK_input",
       "topK_output",
@@ -425,6 +426,7 @@ describe("MEMORY_SCHEMA — Phase 5.6 W5 + 11b T11: llm 세 슬롯 (extractor + 
       "geminiModel",
       "gptApiKey",
       "gptModel",
+      "maxOutputTokens",
       "minImportance",
       "mode",
       "ollamaModel",
@@ -435,8 +437,8 @@ describe("MEMORY_SCHEMA — Phase 5.6 W5 + 11b T11: llm 세 슬롯 (extractor + 
       "provider",
       "timeoutMs",
     ]);
-    // required 는 그대로 — 신규 두 칸은 additive 안전 위해 required 에 추가 안 함.
-    expect([...slot.required]).toEqual(["enabled", "provider"]);
+    // required = 기본 둘 + maxOutputTokens(2026-10-15 extractor-output-limit spec 3.1 — 옛 파일은 기본값 병합이 채운다).
+    expect([...slot.required]).toEqual(["enabled", "provider", "maxOutputTokens"]);
   });
 
   test("llm.extractor.mode 는 enum ['immediate','backfill'] + default 'backfill'", () => {

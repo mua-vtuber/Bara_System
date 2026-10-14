@@ -88,6 +88,8 @@ export interface VisionCaptionOptions {
    * 종료 판정은 호출부(문서 OCR)가 stopReason 으로 한다. 미지정이면 지금처럼 빈 캡션 = 오류(이미지 캡션 그대로).
    */
   allowEmptyText?: boolean;
+  /** 로그용 호출 이름(LLM_CALL_LABELS). 동작에 영향 없음. Ollama 만 쓰고 다른 공급자는 무시한다. */
+  callLabel?: string;
 }
 
 /** 캡션 배선이 넘기는 한도 칸 경로 — 글 없이 잘렸을 때 오류 문장에 들어간다. */

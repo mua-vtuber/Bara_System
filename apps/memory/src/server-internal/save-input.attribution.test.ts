@@ -32,6 +32,7 @@ import {
   type DelayedOllamaChatServer,
 } from "../test-utils/delayed-ollama-chat-server.ts";
 import type { MemorySettings } from "../settings/memory-settings.ts";
+import { EXTRACTOR_MAX_OUTPUT_TOKENS_DEFAULT } from "../memory/extractor-output-limit.ts";
 
 let embedder: Bgem3Embedder;
 beforeAll(async () => {
@@ -61,6 +62,7 @@ function extractorSlot(
     minImportance: 0.3,
     forceJsonFormat: false,
     timeoutMs: 900000,
+    maxOutputTokens: EXTRACTOR_MAX_OUTPUT_TOKENS_DEFAULT,
     backfill: { intervalMin: 30, batchSize: 10, minImportance: 0, maxAttempts: 5, retryDelayMin: 30, retryMaxDelayMin: 1440 },
   };
 }

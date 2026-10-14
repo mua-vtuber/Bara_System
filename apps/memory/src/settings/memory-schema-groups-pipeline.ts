@@ -16,6 +16,7 @@ import {
   entityRegisterSchemaBlock,
 } from "./memory-schema-groups-entity-register.ts";
 import { BACKFILL_RETRY_REQUIRED, extractorBackfillRetryProperties, visionBackfillRetryProperties } from "./memory-schema-groups-backfill-retry.ts";
+import { EXTRACTOR_OUTPUT_LIMIT_REQUIRED, extractorOutputLimitProperties } from "./memory-schema-groups-extractor-output.ts";
 import { llmApiProviderFields } from "./memory-schema-groups-llm-providers.ts";
 import { LLM_PROVIDERS } from "../llm/provider-registry.ts";
 
@@ -148,6 +149,7 @@ export const llmGroup = {
           "x-ui": { widget: "password" },
         },
         ...llmApiProviderFields,
+        ...extractorOutputLimitProperties,
         mode: {
           type: "string",
           title: "추출 시점",
@@ -221,7 +223,7 @@ export const llmGroup = {
           required: ["intervalMin", "batchSize", "minImportance", ...BACKFILL_RETRY_REQUIRED] as const,
         },
       },
-      required: ["enabled", "provider"] as const,
+      required: ["enabled", "provider", ...EXTRACTOR_OUTPUT_LIMIT_REQUIRED] as const,
     },
     // ── Slot 2 — 데이터 정리 (cleanup) ─────────────────────────────────
     cleanup: {

@@ -21,6 +21,7 @@ import { mergeShallowGroups } from "./memory-settings-merge";
 import {
   getMemorySettings,
   maskSecrets,
+  MemorySettingsValidationError,
   putMemorySettings,
   validateMemorySettings,
   type MemorySettings,
@@ -209,6 +210,9 @@ export function createSettingsRoutes(opts: SettingsRoutesOptions): Hono {
     try {
       putMemorySettings(body as Partial<MemorySettings>, settingsPath, secretsPath);
     } catch (err) {
+      if (err instanceof MemorySettingsValidationError) {
+        return c.json({ error: "검증 실패", errors: err.errors }, 400);
+      }
       const message = err instanceof Error ? err.message : String(err);
       return serverError(c, `settings 저장 실패: ${message}`);
     }

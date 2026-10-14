@@ -14,6 +14,7 @@
 import { describe, test, expect, beforeAll } from "bun:test";
 import { Reranker, type RerankerConfig } from "./reranker.ts";
 import type { RetrievalResult } from "./retriever.ts";
+import { MEMORY_DEFAULTS } from "../settings/memory-defaults.ts";
 
 const MODEL_LOAD_TIMEOUT_MS = 180_000;
 const RERANK_TIMEOUT_MS = 60_000;
@@ -24,6 +25,7 @@ const REAL_CONFIG: RerankerConfig = {
   topKInput: 30,
   topKOutput: 5,
   host: "local",
+  maxPairTokens: MEMORY_DEFAULTS.reranker.maxPairTokens,
 };
 
 /**
@@ -205,6 +207,15 @@ describe("Reranker — graceful degrade(모델 부재)", () => {
     const out = await notLoaded.rerank("질의", candidates);
     expect(out.map((r) => r.node.id)).toEqual([1, 2]);
     expect(out[0]!.components.rerankerScore).toBeUndefined();
+  });
+
+  test("채점 안 한 경로의 stats 는 얼어 있어 공유 객체를 바꿀 수 없다", async () => {
+    const notLoaded = new Reranker(REAL_CONFIG);
+    const { stats } = await notLoaded.rerankWithStats("질의", [
+      makeResult(1, "문장 하나.", 0.7),
+    ]);
+    expect(stats.scored).toBe(false);
+    expect(Object.isFrozen(stats)).toBe(true);
   });
 
   test("degrade 경로도 topKOutput 한도를 지킨다", async () => {
@@ -412,4 +423,94 @@ describe("Reranker — 이미지 자산 분리 + RRF 순위 슬롯 보존 (Phase
     },
     RERANK_TIMEOUT_MS,
   );
+});
+
+// ── maxPairTokens 한도 + rerankWithStats 관측값 (speed-step1 spec 3.2~3.4) ──
+const LONG_FILLER = "오늘 시장에서 사과와 배를 사고 저녁에는 산책을 했다. ".repeat(400);
+const LONG_RELEVANT_FIRST = `고양이는 포유류이며 야행성 동물이다. ${LONG_FILLER}`;
+const PAIR_QUERY = "고양이는 어떤 동물인가?";
+
+describe("Reranker — maxPairTokens 한도와 rerankWithStats", () => {
+  test("생성자: 범위 밖 maxPairTokens(63) 는 키 이름이 든 오류로 던진다", () => {
+    expect(() => new Reranker({ ...REAL_CONFIG, maxPairTokens: 63 })).toThrow(
+      "reranker.maxPairTokens",
+    );
+  });
+
+  test(
+    "긴 글 + 짧은 글 둘 → scored, pairs 3, seqLen 이 maxPairTokens 로 묶인다",
+    async () => {
+      const { results, stats } = await real.rerankWithStats(PAIR_QUERY, [
+        makeResult(1, LONG_RELEVANT_FIRST, 0.9),
+        makeResult(2, "주식 시장이 어제 크게 하락했다.", 0.8),
+        makeResult(3, "오늘 점심으로 김치찌개를 먹었다.", 0.7),
+      ]);
+      expect(results.length).toBe(3);
+      expect(stats.scored).toBe(true);
+      expect(stats.pairs).toBe(3);
+      expect(stats.seqLen).toBe(MEMORY_DEFAULTS.reranker.maxPairTokens);
+      expect(typeof stats.tokenizeMs).toBe("number");
+      expect(typeof stats.inferMs).toBe("number");
+    },
+    RERANK_TIMEOUT_MS,
+  );
+
+  test(
+    "maxPairTokens 256 → seqLen 256",
+    async () => {
+      const small = new Reranker({ ...REAL_CONFIG, maxPairTokens: 256 });
+      await small.load();
+      const { stats } = await small.rerankWithStats(PAIR_QUERY, [
+        makeResult(1, LONG_RELEVANT_FIRST, 0.9),
+        makeResult(2, "짧은 글.", 0.8),
+      ]);
+      expect(stats.seqLen).toBe(256);
+    },
+    MODEL_LOAD_TIMEOUT_MS,
+  );
+
+  test(
+    "짧은 글만 → seqLen 이 한도보다 작다(지금과 같음)",
+    async () => {
+      const { stats } = await real.rerankWithStats(PAIR_QUERY, [
+        makeResult(1, "고양이는 포유류이며 야행성 동물이다.", 0.9),
+        makeResult(2, "오늘 점심으로 김치찌개를 먹었다.", 0.8),
+      ]);
+      expect(stats.seqLen).not.toBeNull();
+      expect(stats.seqLen!).toBeLessThan(MEMORY_DEFAULTS.reranker.maxPairTokens);
+    },
+    RERANK_TIMEOUT_MS,
+  );
+
+  test(
+    "앞부분이 질의와 관련된 긴 글이 512 에서 잘려도 무관한 짧은 글보다 점수가 높다",
+    async () => {
+      const { results } = await real.rerankWithStats(PAIR_QUERY, [
+        makeResult(1, "주식 시장이 어제 크게 하락했다.", 0.9),
+        makeResult(2, LONG_RELEVANT_FIRST, 0.1),
+      ]);
+      const long = results.find((r) => r.node.id === 2)!;
+      const short = results.find((r) => r.node.id === 1)!;
+      expect(long.components.rerankerScore!).toBeGreaterThan(
+        short.components.rerankerScore!,
+      );
+    },
+    RERANK_TIMEOUT_MS,
+  );
+
+  test("미가용 인스턴스 → scored false, pairs 0, seqLen 과 시간은 null(RRF 순서)", async () => {
+    const notLoaded = new Reranker(REAL_CONFIG);
+    const { results, stats } = await notLoaded.rerankWithStats(PAIR_QUERY, [
+      makeResult(1, "A.", 0.7),
+      makeResult(2, "B.", 0.4),
+    ]);
+    expect(results.map((r) => r.node.id)).toEqual([1, 2]);
+    expect(stats).toEqual({
+      scored: false,
+      pairs: 0,
+      seqLen: null,
+      tokenizeMs: null,
+      inferMs: null,
+    });
+  });
 });

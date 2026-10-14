@@ -33,6 +33,8 @@ import {
   type ExtractInput,
   type ExtractionStoreResult,
 } from "../memory/extractor.ts";
+import { ExtractionOutputTruncatedError } from "../memory/extractor-internal/response-errors.ts";
+import { recordImmediateTruncationKeepingOrigin } from "../memory/backfill-attempts/immediate-record.ts";
 import { planEntityInput } from "../memory/entity-input-plan.ts";
 import { normalizeProjectId } from "../memory/project-scope.ts";
 import { AUTO_CAPTURE_SOURCE_TYPE } from "../memory/shared-memory-contract.ts";
@@ -156,7 +158,11 @@ async function prepareOutcome(
     );
     return { kind: "extracted", context, prepared };
   } catch (e) {
-    return { kind: "failed", message: e instanceof Error ? e.message : String(e) };
+    return {
+      kind: "failed",
+      message: e instanceof Error ? e.message : String(e),
+      truncated: e instanceof ExtractionOutputTruncatedError,
+    };
   }
 }
 
@@ -310,7 +316,9 @@ async function writeImmediateOutcome(
         `[saveTextInput] mode='immediate' extractor(${args.extractor!.llmName}) 추출 실패 ` +
           `(${outcome.message}) — 원본만 저장 fallback`,
       );
-      return saveOriginThenChunks(store, args, title, false, inputSource, originEmbedding);
+      return recordTruncation(
+        store, args, outcome, await saveOriginThenChunks(store, args, title, false, inputSource, originEmbedding),
+      );
     case "tags_only": {
       // spec §4.3(T3) — 태그를 빼면 본문이 빈 입력(`#만화` 만)은 원문을 LLM 에 되살려 보내지 않고
       // 추출 0건 완료로 닫는다(태그 조각화 차단). 태그 wiring 은 plain 갈래가 입력 시점에 1회 한다.
@@ -436,4 +444,21 @@ async function saveOriginThenExtraction(
     // 프리체크·원문 저장에서 재입력이 아니었으므로 새 저장 — cacheHit false.
     cacheHit: false,
   };
+}
+
+/** 잘림으로 실패한 즉시 추출의 새 원문을 기록 표에 멈춤으로 쓴다(spec 4.2, 쓰기 잠금 안). 흡수된 원문(cacheHit)은 건드리지 않는다. */
+function recordTruncation(
+  store: SqliteMemoryStore,
+  args: SaveTextInputArgs,
+  outcome: Extract<PreparedImmediateOutcome, { kind: "failed" }>,
+  saved: SaveTextInputResult,
+): SaveTextInputResult {
+  if (outcome.truncated && !saved.cacheHit && saved.originNodeId !== null) {
+    recordImmediateTruncationKeepingOrigin(
+      store,
+      { nodeId: saved.originNodeId, nodeContent: args.content, identity: args.extractor!.attemptIdentity, error: outcome.message },
+      Date.now(),
+    );
+  }
+  return saved;
 }

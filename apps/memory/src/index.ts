@@ -14,7 +14,7 @@
  *   MEMORY_HOST          — settings.db.host 위에 오버라이드.
  *   MEMORY_STATIC        — 정적 대시보드 디렉토리. settings 비노출 (운영자급 인프라).
  *   BARA_ADAPTERS_DIR    — 펫 방식 서버의 어댑터 폴더. 있으면 <폴더> 아래 각 어댑터의 current/app.manifest.json 도 훑는다(federation/discovery.ts).
- *   OLLAMA_NUM_CTX       — Ollama 컨텍스트 윈도우 튜닝. ollama-client.ts 안에서 직접 읽음.
+ *   OLLAMA_NUM_CTX       — Ollama 컨텍스트 윈도우 튜닝. ollama-client.ts 가 읽음(양의 정수 아니면 추출기가 ollama 일 때 시작이 멈추고, 다른 슬롯은 슬롯별 초기화 실패로 남음).
  *
  * 위 10개 env 만 이 모듈이 process.env 를 *직접* 읽는 경로 — 그 외 모든 모듈
  * 코어 옵션은 settings 안.
@@ -32,7 +32,7 @@ import {
   type BackfillSchedulerHandle,
 } from "./scheduler.ts";
 import { buildLlmClientWithReason } from "./server-internal/llm-wiring.ts";
-import { asObservableLlmClient } from "./memory/cleanup-deep-pass/cleanup-llm-executor.ts";
+import { asObservableLlmClient } from "./llm/observable.ts";
 // 깊은 패스 사이클 오케스트레이션(4단계 순차·실행층·예산·요약 로그)은 run-cycle-runner.ts
 // createRunCycle 로 추출됐다(spec 5.B-1 — 수동 run API 와 정기 tick 이 한 통로). 옛 인라인
 // 클로저가 쓰던 CleanupLlmExecutor·CycleBudget·단계 cycle 함수 import 는 그쪽으로 이동.
@@ -618,7 +618,7 @@ if (shouldRunCleanupDeepPass(cleanupGateInput)) {
       "cleanup deep-pass 게이트 통과 후 cleanupLlm 이 null — 게이트 계약 위반(도달 불가).",
     );
   }
-  const cleanupObservable = asObservableLlmClient(cleanupLlm);
+  const cleanupObservable = asObservableLlmClient(cleanupLlm, "llm.cleanup");
   const reliability = settings.cleanupDeepPass.reliability;
   const budgetConfig = settings.cleanupDeepPass.budget;
 

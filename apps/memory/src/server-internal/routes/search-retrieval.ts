@@ -32,6 +32,8 @@ import {
 import { filterOcrIncompleteResults } from "./search-enrich.ts";
 import type { MemoryReadScope } from "../../memory/shared-memory-contract.ts";
 import { getMemoryVisibilitySnapshot } from "../../memory/shared-memory-read.ts";
+import { StageTimer, type RetrieveStageTimings } from "../../memory/stage-timer.ts";
+import type { SearchRetrievalPassTrace } from "./search-timing.ts";
 
 export type SearchMode = "strict" | "relaxed";
 
@@ -85,6 +87,8 @@ export interface SearchRetrievalOutcome {
   stats: RetrieveStats;
   /** T10 — 반환된 results 를 만든 pass 의 실제 적용 필터 echo. */
   appliedFilters: AppliedFilters;
+  /** speed-step1 5.2 — pass(strict, 필요하면 relaxed)마다 캐시 적중 여부·걸린 시간·retriever 단계 시간. */
+  passes: SearchRetrievalPassTrace[];
 }
 
 function buildRemovedFilters(args: {
@@ -227,6 +231,10 @@ export async function runSearchRetrieval(
   };
   const cacheKey = searchCache ? buildCacheKey(cacheKeyInput) : undefined;
 
+  const passes: SearchRetrievalPassTrace[] = [];
+  const strictTimer = new StageTimer();
+  // 새로 돈 retriever 의 단계 시간. 캐시에는 넣지 않으므로 캐시 적중이면 null 로 남는다.
+  let strictTimings: RetrieveStageTimings | null = null;
   let results: RetrievalResult[];
   let stats: RetrieveStats;
   const cached =
@@ -279,11 +287,18 @@ export async function runSearchRetrieval(
     });
     results = filterOcrIncompleteResults(store, retrieved.results);
     stats = retrieved.stats;
+    strictTimings = retrieved.timings;
     if (searchCache && cacheKey) {
       searchCache.set(cacheKey, { results, stats });
     }
   }
 
+  passes.push({
+    pass: "strict",
+    cacheHit: cached !== undefined,
+    ms: strictTimer.elapsed(),
+    timings: strictTimings,
+  });
   const strictCount = results.length;
 
   // T10 — strict pass 의 appliedFilters(relaxed 로 갈리면 아래에서 덮어씀).
@@ -316,6 +331,8 @@ export async function runSearchRetrieval(
   let relaxed = false;
   let removedFilters: string[] = [];
   if (results.length === 0 && hadFieldFilter && args.relaxFilters === true) {
+    const relaxedTimer = new StageTimer();
+    let relaxedTimings: RetrieveStageTimings | null = null;
     removedFilters = buildRemovedFilters({
       dateRange,
       placeValue,
@@ -366,10 +383,17 @@ export async function runSearchRetrieval(
       });
       results = filterOcrIncompleteResults(store, retrievedFallback.results);
       stats = retrievedFallback.stats;
+      relaxedTimings = retrievedFallback.timings;
       if (searchCache && fallbackKey) {
         searchCache.set(fallbackKey, { results, stats });
       }
     }
+    passes.push({
+      pass: "relaxed",
+      cacheHit: cachedFallback !== undefined,
+      ms: relaxedTimer.elapsed(),
+      timings: relaxedTimings,
+    });
     searchMode = "relaxed";
     relaxed = true;
     // T10 브리핑 항목4 — appliedFilters 는 *반환된 결과를 만든* pass 를 반영한다.
@@ -387,5 +411,6 @@ export async function runSearchRetrieval(
     removedFilters,
     stats,
     appliedFilters,
+    passes,
   };
 }

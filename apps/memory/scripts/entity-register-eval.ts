@@ -14,7 +14,8 @@ import { join } from "node:path";
 import { getMemorySettings, resolveSettingsFilePaths } from "../src/settings/memory-settings-io.ts";
 import { buildLlmClient } from "../src/server-internal/llm-wiring.ts";
 import { LLM_PROVIDER_SPECS } from "../src/llm/provider-registry.ts";
-import { asObservableLlmClient, CircuitBreaker, CleanupLlmExecutor, createUsageAccumulator } from "../src/memory/cleanup-deep-pass/cleanup-llm-executor.ts";
+import { asObservableLlmClient } from "../src/llm/observable.ts";
+import { CircuitBreaker, CleanupLlmExecutor, createUsageAccumulator } from "../src/memory/cleanup-deep-pass/cleanup-llm-executor.ts";
 import { cleanupModelKeyMissing } from "../src/memory/cleanup-deep-pass/scheduler-gate.ts";
 import { cleanupStageLlmLimitsOf } from "../src/memory/cleanup-deep-pass/stage-constants.ts";
 import { entityRegisterFingerprint } from "../src/memory/cleanup-deep-pass/stage-fingerprint.ts";
@@ -83,7 +84,7 @@ const lines: string[] = [
 
 for (const size of batches) {
   const usage = createUsageAccumulator();
-  const executor = new CleanupLlmExecutor({ client: asObservableLlmClient(client), usage, breaker: new CircuitBreaker(settings.cleanupDeepPass.reliability.circuitBreakerThreshold) });
+  const executor = new CleanupLlmExecutor({ client: asObservableLlmClient(client, "llm.cleanup"), usage, breaker: new CircuitBreaker(settings.cleanupDeepPass.reliability.circuitBreakerThreshold) });
   const infer = createEntityRegisterInferFn(executor);
   const plan = planEntityRegisterBatches(rows, { allowedTypes, batchSize: size, perCallInputCap });
   const results = new Map<number, EntityRegisterAiResult>();

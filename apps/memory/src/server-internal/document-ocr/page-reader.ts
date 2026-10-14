@@ -20,6 +20,7 @@ import { GeminiVisionProvider } from "../../llm/vision/gemini.ts";
 import { OpenAiCompatibleVisionProvider } from "../../llm/vision/openai-compatible.ts";
 import { OllamaVisionProvider } from "../../llm/vision/ollama.ts";
 import { errorMessage } from "../../llm/errors.ts";
+import { LLM_CALL_LABELS } from "../../llm/call-labels.ts";
 import {
   isDocumentOcrServerMode,
   isDocumentOcrVisionApiProvider,
@@ -230,6 +231,7 @@ function createVisionReader(settings: DocumentOcrSettings, build: VisionBuild): 
           ...(signal ? { signal } : {}),
           ...(build.numCtx !== undefined ? { numCtx: build.numCtx } : {}),
           allowEmptyText: true,
+          callLabel: LLM_CALL_LABELS.documentOcr,
         });
         const markdown = acceptPageText(result.caption, result.stopReason, page.pageIndex + 1, settings, build);
         const usage = result.usage && (result.usage.inputTokens !== undefined || result.usage.outputTokens !== undefined)

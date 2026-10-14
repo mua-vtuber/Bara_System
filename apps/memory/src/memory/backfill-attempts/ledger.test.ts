@@ -88,6 +88,50 @@ describe("세는 실패 기록", () => {
   });
 });
 
+function terminal(nodeId: number, opts: { fingerprint?: string; error?: string; nowMs?: number } = {}) {
+  return ledger.recordTerminal(
+    {
+      kind: "extraction", targetKey: String(nodeId), nodeId,
+      fingerprint: opts.fingerprint ?? "fp", error: opts.error ?? "잘림",
+    },
+    opts.nowMs ?? T0,
+  );
+}
+
+describe("즉시 멈춤 기록(recordTerminal)", () => {
+  test("첫 기록은 멈춤·1회·다음 시도 시각 NULL", () => {
+    const id = insertNode();
+    expect(terminal(id)).toEqual({ status: "terminal_failure", attemptCount: 1, nextRetryAt: null });
+    expect(ledger.get("extraction", String(id))).toMatchObject({
+      status: "terminal_failure", attemptCount: 1, nextRetryAt: null, lastError: "잘림", lastAttemptAt: pastCutoffInZone(T0),
+    });
+  });
+
+  test("같은 지문이면 횟수 +1, 다른 지문이면 1", () => {
+    const id = insertNode();
+    terminal(id, { fingerprint: "a" });
+    expect(terminal(id, { fingerprint: "a" }).attemptCount).toBe(2);
+    expect(terminal(id, { fingerprint: "b" }).attemptCount).toBe(1);
+    expect(ledger.get("extraction", String(id))!.inputFingerprint).toBe("b");
+  });
+
+  test("이미 대기 줄이던 대상이 멈춤으로 바뀐다(같은 지문이면 횟수는 이어서 센다)", () => {
+    const id = insertNode();
+    counted(id);
+    expect(ledger.get("extraction", String(id))!.status).toBe("retryable_failure");
+    expect(terminal(id)).toEqual({ status: "terminal_failure", attemptCount: 2, nextRetryAt: null });
+    expect(ledger.get("extraction", String(id))).toMatchObject({ status: "terminal_failure", nextRetryAt: null });
+  });
+
+  test("counts()·status() 가 멈춤으로 센다", () => {
+    const id = insertNode();
+    terminal(id);
+    expect(ledger.counts("extraction")).toEqual({ waitingRetry: 0, stopped: 1 });
+    expect(ledger.status("extraction")).toMatchObject({ stopped: 1, waitingRetry: 0 });
+    expect(ledger.status("extraction").items[0]).toMatchObject({ status: "terminal_failure", nextRetryAt: null });
+  });
+});
+
 describe("지우기·세기", () => {
   test("clear 는 그 종류의 그 줄만 지우고, 다른 종류의 같은 열쇠는 남긴다", () => {
     const id = insertNode();

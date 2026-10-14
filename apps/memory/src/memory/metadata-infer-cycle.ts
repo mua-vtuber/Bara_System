@@ -39,6 +39,7 @@
 
 import type { Database } from "bun:sqlite";
 import type { LlmClient } from "../llm/types.ts";
+import { LLM_CALL_LABELS } from "../llm/call-labels.ts";
 import type { EventPublisher } from "./events/event-contract.ts";
 import {
   groupSessions,
@@ -571,6 +572,7 @@ export function createOllamaInferFn(llm: LlmClient): SessionInferFn {
       {
         temperature: INFER_TEMPERATURE,
         maxOutputTokens: INFER_MAX_OUTPUT_TOKENS,
+        callLabel: LLM_CALL_LABELS.metadataInfer,
       },
     );
     return parseInferResponse(raw);

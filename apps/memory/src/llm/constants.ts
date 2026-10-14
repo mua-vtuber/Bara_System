@@ -16,7 +16,7 @@ export const DEFAULT_OLLAMA_TIMEOUT_MS = 120_000;
 /**
  * Ollama 모델 컨텍스트 윈도우(토큰) 기본값. system prompt + 5 few-shot pair + 실제
  * 입력이 약 2500~3500 토큰이라 모델별 기본 num_ctx(2048~4096)면 잘릴 수 있어 8192 로
- * 여유를 둔다. env OLLAMA_NUM_CTX 또는 opts.numCtx 로 덮어쓸 수 있다.
+ * 여유를 둔다. env OLLAMA_NUM_CTX 또는 opts.numCtx 로 덮어쓸 수 있다(env 가 양의 정수가 아니면 추출기가 ollama 일 때 시작이 멈추고 다른 슬롯은 슬롯별 초기화 실패로 남음 — ollama-num-ctx.ts).
  */
 export const DEFAULT_OLLAMA_NUM_CTX = 8192;
 

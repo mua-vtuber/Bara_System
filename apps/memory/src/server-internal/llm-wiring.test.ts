@@ -21,6 +21,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { buildLlmClient, autoDetectProvider } from "./llm-wiring.ts";
 import type { MemorySettings } from "../settings/memory-settings.ts";
+import { EXTRACTOR_MAX_OUTPUT_TOKENS_DEFAULT } from "../memory/extractor-output-limit.ts";
 
 interface DelayServer {
   url: string;
@@ -162,6 +163,7 @@ function extractorSlot(
     minImportance: 0.3,
     forceJsonFormat: false,
     timeoutMs,
+    maxOutputTokens: EXTRACTOR_MAX_OUTPUT_TOKENS_DEFAULT,
     backfill: { intervalMin: 30, batchSize: 10, minImportance: 0, maxAttempts: 5, retryDelayMin: 30, retryMaxDelayMin: 1440 },
   };
 }

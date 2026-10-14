@@ -35,7 +35,9 @@ const llm = new OllamaClient({
   baseUrl: settings.llm.extractor.ollamaUrl,
   model: settings.llm.extractor.ollamaModel,
 });
-const extractor = new MemoryExtractor(llm, store, embedder);
+const extractor = new MemoryExtractor(llm, store, embedder, {
+  maxOutputTokens: settings.llm.extractor.maxOutputTokens,
+});
 
 console.log(`[smoke] LLM = ${llm.name}`);
 console.log(`[smoke] input text:\n  "${text}"`);
