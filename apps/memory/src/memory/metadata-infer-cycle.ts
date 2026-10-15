@@ -26,7 +26,8 @@
  *      LLM 이 정상 회신하면(빈 배열 포함) 그 세션 전체 노드에 metaInferred=1 마킹
  *      (제안 0건도 평가 완료 — 재시도 대상 아님). LLM throw 한 세션은 마킹 안 함(재시도).
  *   6. ID 검증 — LLM 이 낸 nodeId 가 그 세션 안 노드인지 확인(환각 차단), 아니면 그
- *      제안 버림(loud console.warn).
+ *      제안 버림(loud console.warn). 이어서 값 출처 검증 — 대상 칸이 비어 있고, 값이
+ *      같은 세션 다른 노드의 실제 장소·시각 값과 같을 때만 남긴다(본문 짐작 값 차단).
  *   7. cleanup_proposals insert(kind='metadata_fill', payload 양식 Task 4 정합) +
  *      eventBus.emit("cleanup_proposals_ready", { count })(0건이면 emit 안 함).
  *
@@ -120,7 +121,7 @@ export interface MetadataInferCycleSummary {
   mixedSessions: number;
   /** insert 된 metadata_fill 제안 수. */
   proposalsInserted: number;
-  /** ID 검증에서 버린 환각 제안 수(loud warn 동반). */
+  /** ID·칸·값 검증에서 버린 환각 제안 수(loud warn 동반). */
   rejectedHallucinations: number;
   /** LLM 호출이 throw 해 건너뛴 세션 수. */
   inferFailures: number;
@@ -136,6 +137,7 @@ interface CandidateRow {
   has_place: number;
   has_event_at: number;
   place_value: string | null;
+  event_at_value: string | null;
 }
 
 export interface MetadataInferCycleDeps {
@@ -275,6 +277,15 @@ export async function runMetadataInferCycle(
         );
         continue;
       }
+      // 값 출처 검증 — 세션 안 다른 노드의 실제 값만 전파한다(본문 짐작 값 차단).
+      const valueReject = rejectReasonForValue(session, rowById, proposal, value);
+      if (valueReject) {
+        rejectedHallucinations += 1;
+        console.warn(
+          `${logPrefix} 제안 버림(${valueReject}) — nodeId=${proposal.nodeId} field=${proposal.field} value=${JSON.stringify(value)}`,
+        );
+        continue;
+      }
 
       // insert — kind='metadata_fill', payload 양식 Task 4 정합.
       insertProposal(deps.db, {
@@ -377,6 +388,7 @@ function queryCandidates(db: Database, batchSize: number): CandidateRow[] {
         )
       )                AS has_place,
       (kn.event_at IS NOT NULL) AS has_event_at,
+      kn.event_at      AS event_at_value,
       COALESCE(
         -- 경로1 우선(추론 concept→concept).
         (
@@ -487,21 +499,39 @@ function buildInferInput(
       id: n.id,
       content: row?.content ?? "",
       place: n.hasPlace ? (row?.place_value ?? null) : null,
-      eventAt: n.hasEventAt ? readEventAt(row) : null,
+      // 시각 원값을 그대로 넘긴다 — 전파는 "다른 메모에 실제로 있는 값 복사"라,
+      // 값을 가리면 LLM 이 본문에서 시각을 지어내는 것 말고는 채울 길이 없다.
+      eventAt: n.hasEventAt ? (row?.event_at_value ?? null) : null,
     };
   });
   return { nodes };
 }
 
-/** CandidateRow 에는 event_at 원값을 안 담으므로, hasEventAt 플래그만 신호로 쓴다.
- *  값 자체가 필요하면 별도 조회를 두지만, LLM 판단은 "있다/없다"로 충분하다.
- *  여기서는 플래그가 참이면 "(있음)" placeholder 대신 null 을 유지하지 않고,
- *  본문에서 LLM 이 읽도록 둔다 — 시각 원값은 ID 검증·insert 흐름에 영향 없음. */
-function readEventAt(_row: CandidateRow | undefined): string | null {
-  // hasEventAt=true 인 노드는 이미 event_at 이 차 있으므로 전파 대상이 아니다.
-  // LLM 에는 "이 노드는 시각이 있다"는 신호만 주면 되고, 정확한 ISO 값을 다시
-  // 흘릴 필요는 없다(전파는 *빈* 노드를 채우는 방향이라 채워진 값은 근거로만 쓰임).
-  return "(있음)";
+/**
+ * 제안 값 검증 — 갈래 2 는 *전파* 단계라, 채울 값은 같은 세션의 다른 노드에 이미 있는
+ * 장소·시각 값과 글자 그대로 같아야 한다. 대상 칸이 이미 차 있으면 버린다.
+ * 본문에서 짐작한 값("저장 후" 같은 날짜 아닌 시각, 화면 이름 같은 장소)이 여기서 걸린다.
+ * 통과하면 null, 버릴 사유가 있으면 그 사유 문자열을 돌려준다.
+ */
+function rejectReasonForValue(
+  session: Session,
+  rowById: Map<number, CandidateRow>,
+  proposal: { nodeId: number; field: MetadataField },
+  value: string,
+): string | null {
+  const target = session.nodes.find((n) => n.id === proposal.nodeId);
+  const filled = proposal.field === "place" ? target?.hasPlace : target?.hasEventAt;
+  if (filled) return "대상 칸이 이미 채워져 있음";
+
+  const sourceValues = new Set<string>();
+  for (const n of session.nodes) {
+    if (n.id === proposal.nodeId) continue;
+    const row = rowById.get(n.id);
+    const v = proposal.field === "place" ? row?.place_value : row?.event_at_value;
+    if (v) sourceValues.add(v.trim());
+  }
+  if (!sourceValues.has(value)) return "같은 세션 다른 메모에 없는 값";
+  return null;
 }
 
 /**
@@ -543,11 +573,13 @@ const INFER_SYSTEM_PROMPT = [
   "장소나 시각이 비어 있는 메모에 같은 사건의 다른 메모 값을 채울 제안을 만든다.",
   "",
   "규칙:",
-  "- 아래 목록에 있는 node id 만 쓴다. 없는 id 를 지어내지 마라.",
+  "- nodeId 는 목록 각 줄 맨 앞 [번호] 의 번호만 쓴다. 없는 번호를 지어내지 마라.",
   "- 이미 장소·시각이 있는 메모는 건드리지 않는다. 비어 있는 칸만 채운다.",
   "- 한 사건이 확실할 때만 채운다. 애매하면 아무것도 만들지 마라.",
-  "- 채울 값은 같은 묶음의 다른 메모에 실제로 있는 값만 쓴다.",
+  "- 채울 값은 다른 메모의 (장소=…, 시각=…) 괄호 안 값을 글자 그대로 복사한다.",
+  "- 본문 내용에서 장소·시각을 새로 짐작해 만들지 마라. 괄호 안에 값이 없으면 채울 수 없다.",
   '- field 는 "place"(장소) 또는 "event_at"(시각) 둘 중 하나.',
+  "- evidence 는 사람이 읽을 근거 한 줄이다. 메모 번호는 쓰지 말고, 근거가 된 메모의 내용으로 설명한다.",
   "",
   '회신은 JSON 배열만. 각 원소는 {"nodeId":숫자,"field":"place"|"event_at","value":"값","evidence":"근거 한 줄"}.',
   "채울 게 없으면 빈 배열 [] 만 회신한다.",
@@ -584,7 +616,7 @@ function renderSessionForPrompt(input: SessionInferInput): string {
   const lines = input.nodes.map((n) => {
     const place = n.place ? `장소=${n.place}` : "장소=없음";
     const eventAt = n.eventAt ? `시각=${n.eventAt}` : "시각=없음";
-    return `node ${n.id}: "${n.content}" (${place}, ${eventAt})`;
+    return `[${n.id}] "${n.content}" (${place}, ${eventAt})`;
   });
   return `메모 묶음:\n${lines.join("\n")}`;
 }

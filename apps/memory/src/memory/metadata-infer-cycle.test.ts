@@ -32,6 +32,7 @@ import { EventRepository } from "../db/store-internal/event-repository.ts";
 import { EventBus } from "../server-internal/event-bus.ts";
 import {
   CLEANUP_PROPOSALS_READY_EVENT,
+  createOllamaInferFn,
   METADATA_FILL_KIND,
   runMetadataInferCycle,
   type InferredProposal,
@@ -39,6 +40,7 @@ import {
   type SessionInferInput,
 } from "./metadata-infer-cycle.ts";
 import { wireHashtagEntities } from "./hashtag-entity-wiring.ts";
+import type { ChatMessage, LlmClient } from "../llm/types.ts";
 
 const MODEL = "bge-m3";
 const G = 180; // 세션 간격(분).
@@ -334,6 +336,98 @@ describe("runMetadataInferCycle — ID 검증(환각 차단)", () => {
 
     expect(summary.proposalsInserted).toBe(0);
     expect(summary.rejectedHallucinations).toBe(2);
+  });
+});
+
+describe("runMetadataInferCycle — 값 출처 검증(본문 짐작 값 차단)", () => {
+  const EVENT_AT = "2026-06-01T10:00:00+09:00";
+
+  async function runWith(fn: SessionInferFn) {
+    return runMetadataInferCycle({
+      db,
+      infer: fn,
+      eventBus,
+      gapMinutes: G,
+      batchSize: 50,
+      now: () => Date.parse("2026-06-02T00:00:00"),
+    });
+  }
+
+  test("(V1) 세션 다른 메모에 없는 장소 값 → 버림", async () => {
+    const n1 = await addMemo("에버랜드 왔다", "alice", "2026-06-01 10:00:00");
+    await store.addClassificationTag(n1, "장소", "에버랜드", "user_input", n1);
+    const n2 = await addMemo("설정은 연결·진단 화면에만 둔다", "alice", "2026-06-01 10:10:00");
+
+    const { fn } = fixtureInfer(() => [
+      { nodeId: n2, field: "place", value: "연결·진단 화면", evidence: "본문에서 짐작" },
+    ]);
+    const summary = await runWith(fn);
+
+    expect(summary.proposalsInserted).toBe(0);
+    expect(summary.rejectedHallucinations).toBe(1);
+    expect(listFillProposals()).toHaveLength(0);
+  });
+
+  test("(V2) 시각 — 실제 값이 LLM 입력에 실리고, 날짜 아닌 짐작 값은 버리고 복사 값만 남긴다", async () => {
+    const n1 = await addMemo("회의 시작", "alice", "2026-06-01 10:00:00");
+    db.prepare("UPDATE knowledge_nodes SET event_at = ? WHERE id = ?").run(EVENT_AT, n1);
+    const n2 = await addMemo("저장 후 재시작해야 적용된다", "alice", "2026-06-01 10:10:00");
+    const n3 = await addMemo("회의 안건 정리", "alice", "2026-06-01 10:20:00");
+
+    const { fn, calls } = fixtureInfer(() => [
+      { nodeId: n2, field: "event_at", value: "저장 후" },
+      { nodeId: n3, field: "event_at", value: EVENT_AT },
+    ]);
+    const summary = await runWith(fn);
+
+    expect(calls[0]!.nodes.find((n) => n.id === n1)?.eventAt).toBe(EVENT_AT);
+    expect(summary.proposalsInserted).toBe(1);
+    expect(summary.rejectedHallucinations).toBe(1);
+    const proposals = listFillProposals();
+    expect(proposals).toHaveLength(1);
+    expect(proposals[0]!.payload).toMatchObject({ nodeId: n3, field: "event_at", value: EVENT_AT });
+  });
+
+  test("(V3) 이미 채워진 칸을 대상으로 한 제안 → 버림", async () => {
+    const n1 = await addMemo("에버랜드 왔다", "alice", "2026-06-01 10:00:00");
+    await store.addClassificationTag(n1, "장소", "에버랜드", "user_input", n1);
+    const n2 = await addMemo("롯데월드도 갔다", "alice", "2026-06-01 10:10:00");
+    await store.addClassificationTag(n2, "장소", "롯데월드", "user_input", n2);
+    await addMemo("집에 왔다", "alice", "2026-06-01 10:20:00");
+
+    const { fn } = fixtureInfer(() => [
+      { nodeId: n1, field: "place", value: "롯데월드" },
+    ]);
+    const summary = await runWith(fn);
+
+    expect(summary.proposalsInserted).toBe(0);
+    expect(summary.rejectedHallucinations).toBe(1);
+  });
+});
+
+describe("createOllamaInferFn — 지시문·메모 목록 양식", () => {
+  test("메모 목록은 [번호] 양식이고 'node' 글자가 없으며, 근거에 번호를 쓰지 말라고 지시한다", async () => {
+    const seen: ChatMessage[] = [];
+    const client: LlmClient = {
+      name: "fixture",
+      chat: async (messages) => {
+        seen.push(...messages);
+        return "[]";
+      },
+    };
+    const result = await createOllamaInferFn(client)({
+      nodes: [
+        { id: 97, content: "에버랜드 왔다", place: "에버랜드", eventAt: null },
+        { id: 98, content: "롤러코스터 탔다", place: null, eventAt: null },
+      ],
+    });
+
+    expect(result).toEqual([]);
+    const system = seen.find((m) => m.role === "system")!.content;
+    const user = seen.find((m) => m.role === "user")!.content;
+    expect(user).toContain('[97] "에버랜드 왔다" (장소=에버랜드, 시각=없음)');
+    expect(user).not.toContain("node");
+    expect(system).toContain("메모 번호는 쓰지 말고");
   });
 });
 
