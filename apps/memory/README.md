@@ -38,7 +38,7 @@ Phase 2 진입 시 `memory/extractor.ts` 추가 예정.
 
 ## 사용
 
-루트의 `start-memory-api.bat`은 첫 준비와 인증된 대시보드 열기를 함께 처리한다. WSL/Linux에서 수동으로 시작하려면:
+WSL/Linux에서 첫 준비와 인증된 대시보드 열기까지 하려면:
 
 ```bash
 # 저장소 루트에서
@@ -378,7 +378,7 @@ BARA_OCR_COMMAND_JSON='["python","/opt/ocr/run.py","{input}","{output}"]' \
 bun run ocr:companion
 ```
 
-Windows 에서는 루트 `start-ocr-companion.bat` 가 같은 변수를 읽어 WSL 의 `apps/memory` 에서 실행한다. 문서 처리 UI 는 `처리 필요`, `처리 중`, `실패`, `완료` 상태와 수동 Markdown 붙이기만 보여 주며, 모델 추천이나 자동 실행 버튼은 넣지 않는다.
+문서 처리 UI 는 `처리 필요`, `처리 중`, `실패`, `완료` 상태와 수동 Markdown 붙이기만 보여 주며, 모델 추천이나 자동 실행 버튼은 넣지 않는다.
 
 ## 대시보드 최초 연결
 

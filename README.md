@@ -46,7 +46,6 @@ bara_system/
 │   └── bot-discord/   # 디스코드 어댑터 (reference 구현)
 ├── scripts/           # 루트 테스트 러너
 ├── deploy/            # 옛 직접 설치 방식이 정리됐다는 안내(README 하나)
-├── *.bat              # Windows + WSL2 개발용 가동 스크립트
 ├── package.json       # Bun workspace (apps/*, apps/pet 제외)
 ├── LICENSE, LICENSE-EXCEPTION.md, THIRD-PARTY-NOTICES.md
 └── bun.lock
@@ -71,23 +70,15 @@ bara_system/
 
 1. WSL2 안에 Bun 설치: `curl -fsSL https://bun.sh/install | bash`
 2. 저장소 루트에서 의존성 설치: `bun install` (`apps/pet` 을 뺀 workspace 를 한 번에 받는다. `apps/pet` 은 따로 `cd apps/pet && bun install --frozen-lockfile` 로 설치한다)
-3. Windows 탐색기에서 루트의 `start-memory-api.bat`을 더블클릭한다. 처음에는 AI 사용 여부와 Ollama/LM Studio를 선택하고 설정·모델 준비를 끝낸다. 실패하면 오류를 해결한 뒤 같은 파일로 재시도한다.
+3. WSL 터미널에서 `cd apps/memory` 후 `bun run ../setup/src/launch.ts --local`을 실행한다. 처음에는 AI 사용 여부와 Ollama/LM Studio를 선택하고 설정·모델 준비를 끝낸다. 실패하면 오류를 해결한 뒤 같은 명령으로 재시도한다.
 4. 빌드와 서버 준비가 끝나면 **인증된 대시보드**가 브라우저에 열린다. 첫 메모를 저장하고 검색한다. 서버 창은 계속 열어 둔다.
-5. 디스코드는 선택 사항이다. 봇 토큰·앱 ID와 코어 연결을 설정한 뒤 `start-bot-discord.bat`을 실행한다. 이후 두 서버를 함께 시작할 때 `start-all.bat`을 쓴다.
+5. 디스코드는 선택 사항이다. 봇 토큰·앱 ID와 코어 연결을 설정하고, 명령이 바뀌었을 때 `apps/bot-discord` 에서 `bun run register` 로 슬래시 명령을 등록한 뒤 `bun run start` 로 봇을 실행한다(memory-api 가 먼저 떠 있어야 한다).
 
 WSL 이나 Linux 터미널에서 먼저 준비하려면 저장소 루트에서 `bun run setup -- --local`을 실행한다. `--local`은 systemd를 변경하지 않는다. Ollama를 선택하면 설치·모델 다운로드에 별도로 동의해야 하며, 거절하거나 무인 실행에서 `--yes`를 생략하면 준비 완료로 기록하지 않는다. 명시적으로 동의한 무인 실행은 `bun run setup -- --local --ollama --yes`를 사용한다. `--lmstudio`는 LM Studio 를, `--no-ai`는 선택적인 LLM 보강을 끄며 어느 쪽이든 검색용 임베딩 모델은 준비한다. 모델 다운로드 시간은 네트워크와 캐시에 따라 몇 분 이상 걸릴 수 있다. 옛 A1 설치 방식이던 `--server`는 없앴다(넘기면 대신 쓸 경로를 알리는 오류로 멈춘다). 원격 서버는 펫의 "내 외부 서버" 설치를 쓰고, 소유자 운영 서버 반영은 `bun run deploy:a1` 이다.
 
 WSL에서 직접 시작할 때는 `cd apps/memory` 후 `bun run ../setup/src/launch.ts --local`을 실행한다. 이 위치에서 Bun이 `.env`를 읽으므로 서버와 동일한 `MEMORY_SETTINGS_PATH`, `MEMORY_PORT`, `SSE_TOKEN_PATH` 설정을 사용한다.
 
 `apps/launcher` 는 같은 준비·서버 시작·대시보드 열기를 버튼으로 제공하는 개발용 Windows 런처(Tauri 앱 "Bara")다. 이 저장소의 `apps/setup`·`apps/memory` 를 PATH 의 `bun`(또는 env `BARA_BUN`)으로 실행하므로 저장소와 Bun 이 있어야 하며, 데이터는 `%LOCALAPPDATA%/Bara/memory/` 에 둔다. 일반 사용자용 설치 경로는 펫이다.
-
-| .bat 파일 | 역할 |
-|------|------|
-| `start-memory-api.bat` | 첫 준비 확인 → 빌드 → memory-api → 준비 확인 → 인증된 대시보드 열기 |
-| `start-bot-discord.bat` | 디스코드 봇 (memory-api 가 먼저 떠 있어야 함) |
-| `start-ocr-companion.bat` | PC 로컬 OCR companion (memory-api 가 먼저 떠 있어야 함) |
-| `start-all.bat` | memory-api 준비 확인 후 디스코드 봇 가동 |
-| `register-discord-commands.bat` | 디스코드 슬래시 명령 등록 (명령 변경 시) |
 
 새 브라우저에서 일반 주소만 열면 인증 정보가 없다. 서버가 실행 중일 때 `apps/memory`에서 아래 명령으로 새 인증 링크를 받을 수 있다. 주소의 `#bara-token=…`은 접속 후 브라우저에서 제거되며 탭의 세션에 저장된다. 링크는 소유자 권한이므로 공유하지 않는다.
 
@@ -116,17 +107,17 @@ bun run ocr:companion --request-token
 bun run ocr:companion --pickup-token <requestId> <pickupSecret>
 ```
 
-2. PC Windows 환경변수에 연결 정보를 넣는다.
+2. companion 을 실행할 터미널에 연결 정보를 넣는다.
 
-```bat
-set BARA_MEMORY_URL=http://127.0.0.1:3001
-set BARA_MEMORY_TOKEN=token-from-a1-loopback
-set BARA_OCR_COMMAND_JSON=["python","D:/ocr/run.py","{input}","{output}"]
+```bash
+export BARA_MEMORY_URL=http://127.0.0.1:3001
+export BARA_MEMORY_TOKEN=token-from-a1-loopback
+export BARA_OCR_COMMAND_JSON='["python","/opt/ocr/run.py","{input}","{output}"]'
 ```
 
 `MEMORY_API_URL` 도 `BARA_MEMORY_URL` 대신 사용할 수 있다. OCR 명령은 JSON 배열이며 shell 을 거치지 않는다. `{input}`, `{output}`, `{documentId}` placeholder 와 `BARA_INPUT_PATH`, `BARA_OUTPUT_MARKDOWN_PATH`, `BARA_DOCUMENT_ID`, `BARA_ASSET_SHA256` env 를 함께 받는다.
 
-3. 루트의 `start-ocr-companion.bat` 를 실행한다.
+3. 같은 터미널의 `apps/memory` 에서 `bun run ocr:companion` 을 실행한다.
 
 대시보드의 설정 > 메모리 > 문서 처리 목록은 상태 확인과 수동 Markdown 붙이기만 제공한다. 상태 의미는 `처리 필요`(OCR 결과 필요), `처리 중`(companion lease 보유), `실패`(마지막 OCR 실패, 다시 claim 가능), `완료`(OCR Markdown 적용 완료)다. 실패 문서는 그대로 후보 목록에 남으므로 companion 을 다시 실행하거나 수동으로 Markdown 을 붙이면 재시도된다.
 

@@ -828,7 +828,7 @@ async function main() {
         `${tag()} memory-api unreachable at ${memoryUrl}: ${err instanceof Error ? err.message : String(err)}`,
       );
       console.warn(
-        `${tag()} Start memory-api first (start-memory-api.bat) or the bot can't save anything.`,
+        `${tag()} Start memory-api first or the bot can't save anything.`,
       );
     }
   }
