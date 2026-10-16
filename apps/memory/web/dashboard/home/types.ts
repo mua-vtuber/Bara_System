@@ -22,6 +22,9 @@ export interface MemorySummary {
   sourceType?: string;
   eventAt?: string | null;
   eventUntil?: string | null;
+  /** 장소 — 서버가 GET /memories/:id 에 싣는다(없으면 null). 옛 서버는 칸 자체가 없다. */
+  place?: string | null;
+  places?: string[];
   kind?: string | null;
   metadata?: Record<string, unknown>;
   imageAttachments?: ImageAttachment[];

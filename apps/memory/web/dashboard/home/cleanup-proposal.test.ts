@@ -7,6 +7,7 @@ import {
   currentProposalValue,
   describeCleanupProposal,
   proposalOutcomeMessage,
+  rawProposalText,
   renderCleanupProposal,
 } from "./cleanup-proposal.ts";
 import type { CleanupProposalDetail } from "./types.ts";
@@ -249,4 +250,45 @@ test("entity_register 오래된 제안(400 + needs_revision)은 닫히고 사유
     expect(card.querySelector(".proposal-status")?.textContent).toContain("메모가 바뀌었습니다");
     expect(card.querySelector<HTMLButtonElement>(".proposal-approve")!.disabled).toBe(true);
   } finally { stub.restore(); document.body.replaceChildren(); }
+});
+
+const placeProposal: CleanupProposalDetail = {
+  id: "cp_place", kind: "metadata_fill", status: "pending",
+  payload: { nodeId: 42, field: "place", value: "에버랜드", evidence: "같은 사건" },
+  items: [], journal: [],
+};
+
+test("장소 현재 값: 서버가 준 place/places 를 확인된 값으로, 없음은 빈 값으로, 옛 서버는 확인 불가로 구분한다", () => {
+  const at = (memory: Record<string, unknown>) => currentProposalValue(placeProposal, "metadata", "place", { memory: { id: 42, content: "원문", ...memory } });
+  expect(at({ place: "속초", places: ["속초"] })).toEqual({ known: true, value: "속초" });
+  expect(at({ place: "속초", places: ["롯데월드", "속초"] })).toEqual({ known: true, value: "롯데월드, 속초" });
+  expect(at({ place: null, places: [] })).toEqual({ known: true, value: null });
+  expect(at({ place: null })).toEqual({ known: true, value: null });
+  expect(at({})).toEqual({ known: false }); // 칸이 없는 옛 서버
+  // 다른 기억의 장소를 대상 기억 값으로 쓰지 않는다.
+  expect(currentProposalValue(placeProposal, "metadata", "place", { memory: { id: 7, content: "다른 글", place: "부산" } })).toEqual({ known: false });
+});
+
+test("metadata_fill 장소 검토: 현재 값·제안 값·대상/변경/근거·원본 데이터가 모두 보인다", () => {
+  const filled = createCleanupProposalReview(placeProposal, () => {}, { memory: { id: 42, content: "원문", place: "속초", places: ["속초"] } });
+  expect(filled.root.querySelector(".proposal-before")?.textContent).toBe("속초");
+  expect(filled.root.querySelector(".proposal-after")?.textContent).toBe("에버랜드");
+  const empty = createCleanupProposalReview(placeProposal, () => {}, { memory: { id: 42, content: "원문", place: null, places: [] } });
+  expect(empty.root.querySelector(".proposal-before")?.textContent).toBe("비어 있음");
+
+  const facts = [...empty.root.querySelectorAll(".proposal-facts dd")].map((node) => node.textContent);
+  expect(facts).toEqual(["기억 #42", "장소: 에버랜드", "같은 사건"]);
+  const raw = empty.root.querySelector(".proposal-raw pre")?.textContent ?? "";
+  expect(raw.length).toBeGreaterThan(0);
+  expect(JSON.parse(raw)).toEqual(placeProposal.payload);
+});
+
+test("원본 제안 데이터는 payload 가 비거나 빠져도 빈 블록이 아니라 받은 기록을 보여 준다", () => {
+  expect(JSON.parse(rawProposalText(placeProposal))).toEqual(placeProposal.payload);
+  const noPayload = { id: "cp_x", kind: "metadata_fill", status: "pending", createdAt: "2026-10-16 10:00:00" };
+  expect(JSON.parse(rawProposalText(noPayload))).toEqual(noPayload);
+  const emptyPayload = { ...noPayload, payload: {}, items: [{ itemKey: "a" }], journal: [] };
+  expect(JSON.parse(rawProposalText(emptyPayload as never))).toEqual({ ...noPayload, payload: {} });
+  const review = createCleanupProposalReview({ ...noPayload, items: [], journal: [] }, () => {});
+  expect(review.root.querySelector(".proposal-raw pre")?.textContent).toContain("cp_x");
 });

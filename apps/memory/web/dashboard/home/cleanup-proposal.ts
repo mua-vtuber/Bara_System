@@ -42,6 +42,20 @@ function valueText(value: unknown): string {
   return JSON.stringify(value, null, 2) ?? "정보 없음";
 }
 
+/**
+ * "원본 제안 데이터 전체 보기"에 보일 글. payload 가 정상이면 그대로 JSON 으로 펼친다.
+ * 서버 응답에 payload 가 빠졌거나(옛 서버·형식 어긋남) 비어 있으면 빈 칸으로 두지 않고, 받은
+ * 제안 기록 전체(항목·처리 기록 제외)를 보여 줘 무엇이 왔는지 확인할 수 있게 한다.
+ */
+export function rawProposalText(proposal: CleanupProposal): string {
+  const payload = proposal.payload;
+  const empty = payload === undefined || payload === null || payload === ""
+    || (typeof payload === "object" && !Array.isArray(payload) && Object.keys(payload).length === 0);
+  if (!empty) return valueText(payload);
+  const { items: _items, journal: _journal, ...received } = proposal as CleanupProposal & { items?: unknown; journal?: unknown };
+  return valueText(received);
+}
+
 export function describeCleanupProposal(proposal: CleanupProposal, context: CleanupProposalReviewContext = {}): { title: string; target: string; reason: string; change: string } {
   const p = record(proposal.payload);
   const reason = valueText(proposal.reason ?? p.reason ?? p.evidence ?? p.description ?? "제안 근거가 제공되지 않았습니다.");
@@ -95,6 +109,13 @@ export function currentProposalValue(
   if (group === "metadata" && memoryField && context.memory && context.memory.id === proposalMemoryId(proposal)
     && Object.hasOwn(context.memory, memoryField) && context.memory[memoryField] !== undefined) {
     return { known: true, value: context.memory[memoryField] };
+  }
+  // 장소는 기억 칸이 아니라 분류·엔티티에 있어, 서버가 memory.place/places 로 풀어 준다.
+  // 옛 서버는 이 칸이 없어 확인 불가로 남긴다(없음과 구별).
+  if (group === "metadata" && key === "place" && context.memory && context.memory.id === proposalMemoryId(proposal)) {
+    const { places, place } = context.memory;
+    if (Array.isArray(places)) return { known: true, value: places.length > 0 ? places.join(", ") : null };
+    if (place !== undefined) return { known: true, value: place };
   }
   if (proposal.kind === "lens_draft" && p.typeName === "project" && group === "columns"
     && context.project && context.project.projectId === p.entityId && context.project.attributes) {
@@ -217,7 +238,7 @@ export function createCleanupProposalReview(proposal: CleanupProposalDetail, onC
   updateCount();
   const raw = el("details", { className: "proposal-raw" },
     el("summary", {}, "원본 제안 데이터 전체 보기"),
-    el("pre", {}, valueText(proposal.payload)),
+    el("pre", {}, rawProposalText(proposal)),
   );
   root.append(count, raw);
   if (!ownLabel(TITLES, proposal.kind)) root.append(el("p", { className: "proposal-help" }, "이 종류의 제안은 아직 적용을 지원하지 않습니다. 내용을 검토하거나 거절할 수 있습니다."));

@@ -11,6 +11,7 @@
  * 접근한다(구조분해 금지). store 같은 부팅 시점 고정 의존만 구조분해 허용.
  */
 
+import { listNodePlaces } from "../../memory/node-places.ts";
 import type { Hono } from "hono";
 import type { MemoryApiDeps, IngestBody } from "../types.ts";
 import { isPositiveString, parseLimit, parseIntParam, err } from "../http-helpers.ts";
@@ -400,8 +401,17 @@ export function registerMemoriesCrudRoutes(app: Hono, deps: MemoryApiDeps): void
     const node = await store.getNode(id);
     if (!node) return err(c, 404, `memory ${id} not found`);
 
+    // place/places — 대시보드 검토 화면이 "현재 장소"를 보이려고 읽는다(추가형·기존 칸 불변).
+    // 장소는 노드 칸이 아니라 분류·엔티티 엣지에 있어 따로 읽는다. 없으면 place:null, places:[].
+    const places = listNodePlaces(store.getRawDb(), id);
     return c.json({
-      memory: { ...node, editableContent: stripTagsForDisplay(node.content), imageAttachments: listImageAttachments(store, id) },
+      memory: {
+        ...node,
+        editableContent: stripTagsForDisplay(node.content),
+        imageAttachments: listImageAttachments(store, id),
+        place: places[0] ?? null,
+        places,
+      },
     });
   });
 

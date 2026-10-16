@@ -71,6 +71,20 @@ export const META_CANDIDATE_SOURCE_TYPES = [
   "regex_l0",
 ] as const;
 
+/**
+ * MCP 로 저장된 기억의 knowledge_nodes.platform 값 — mcp/server.ts MCP_SOURCE 와 같은 값.
+ * (mcp/server.ts 를 import 하면 서버·SDK 의존이 끌려와 값만 맞춘다. 정합은 테스트가 지킨다.)
+ */
+export const MCP_PLATFORM = "mcp";
+
+/** 계보(원문·청크) 조상 탐색 깊이 상한 — 자식→청크→원문 정도면 충분하다. */
+const MCP_LINEAGE_MAX_DEPTH = 4;
+
+/** 상수 문자열을 SQL 문자열 리터럴로. 이 모듈의 상수 전용(사용자 입력 금지). */
+function sqlQuote(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
 /** payload·event 의 metadata_fill 식별 문자열. Task 4 KNOWN_KINDS 와 정합. */
 export const METADATA_FILL_KIND = "metadata_fill";
 
@@ -147,6 +161,8 @@ interface CandidateRow {
   has_place: number;
   has_event_at: number;
   place_value: string | null;
+  /** 이 노드에 붙은 장소 이름 전부(JSON 배열 문자열) — place_value 는 그중 한 개일 뿐이다. */
+  place_values: string | null;
   event_at_value: string | null;
 }
 
@@ -471,7 +487,30 @@ function queryCandidates(
           WHERE nce.node_id = kn.id AND nce.role = 'classification'
           LIMIT 1
         )
-      )                AS place_value
+      )                AS place_value,
+      -- 제안 값 대조용 — 노드에 붙은 장소 이름 전부(두 경로 합집합). place_value 는 LLM
+      -- 입력 맥락용 한 개뿐이라, 장소가 여럿인 노드의 다른 장소를 근거로 쓰려면 이게 필요하다.
+      (
+        SELECT json_group_array(pname) FROM (
+          SELECT cval.name AS pname FROM node_concept_edges nce
+          JOIN hierarchy_edges he
+            ON he.target_id = nce.concept_id AND he.relation = 'parent_of'
+          JOIN concept_nodes ckey
+            ON ckey.concept_id = he.source_id
+           AND ckey.is_classification_key = 1
+           AND ckey.name = '장소'
+          JOIN concept_nodes cval ON cval.concept_id = nce.concept_id
+          WHERE nce.node_id = kn.id AND nce.role = 'classification'
+          UNION
+          SELECT cval.name AS pname FROM node_concept_edges nce
+          JOIN entity_concept_edges pce
+            ON pce.concept_id = nce.concept_id AND pce.role = 'identity'
+          JOIN entities pe
+            ON pe.entity_id = pce.entity_id AND pe.type_name = 'place'
+          JOIN concept_nodes cval ON cval.concept_id = nce.concept_id
+          WHERE nce.node_id = kn.id AND nce.role = 'classification'
+        )
+      )                AS place_values
     FROM knowledge_nodes kn
     WHERE kn.source_type IN (${placeholders})
       AND NOT EXISTS(
@@ -483,6 +522,27 @@ function queryCandidates(
            OR kn.metadata_json ->> '$.metaInferred' != 1)
       AND (kn.metadata_json ->> '$.metaInferTruncatedAt' IS NULL
            OR kn.metadata_json ->> '$.metaInferTruncatedAt' != ?)
+      -- MCP(AI 클라이언트)가 쓴 기억 제외 — 후보로도, 다른 노드의 근거로도 안 쓴다.
+      -- AI 클라이언트는 서로 무관한 기술 메모를 짧은 간격으로 연달아 저장해서
+      -- "같은 사건 세션" 전제가 깨지고, 엉뚱한 장소(예: "이 pc")가 제안된다.
+      -- 표지: knowledge_nodes.platform = ${sqlQuote(MCP_PLATFORM)}(저장 시 args.source=MCP_SOURCE 가
+      -- 칼럼에 그대로 박히며 클라이언트 metadata 로는 못 바꾼다). 추출 자식(llm_extract·regex)은
+      -- 계보 엣지(자식→원문, merged_into/parent_of)로 조상을 따라가 조상 중 하나라도 MCP 면 뺀다.
+      AND COALESCE(kn.platform, '') != ${sqlQuote(MCP_PLATFORM)}
+      AND NOT EXISTS(
+        WITH RECURSIVE lineage(node_id, depth) AS (
+          SELECT ke.target_id, 1 FROM knowledge_edges ke
+          WHERE ke.source_id = kn.id AND ke.relation IN ('merged_into', 'parent_of')
+          UNION
+          SELECT ke.target_id, lineage.depth + 1 FROM lineage
+          JOIN knowledge_edges ke
+            ON ke.source_id = lineage.node_id AND ke.relation IN ('merged_into', 'parent_of')
+          WHERE lineage.depth < ${MCP_LINEAGE_MAX_DEPTH}
+        )
+        SELECT 1 FROM lineage
+        JOIN knowledge_nodes anc ON anc.id = lineage.node_id
+        WHERE COALESCE(anc.platform, '') = ${sqlQuote(MCP_PLATFORM)}
+      )
     ORDER BY kn.author ASC, kn.created_at ASC, kn.id ASC
     LIMIT ?`;
   const rows = db
@@ -571,6 +631,39 @@ function markSessionTruncated(
 
 // ── 내부 헬퍼 ─────────────────────────────────────────────────────────────────
 
+/** 장소 이름 비교 키 — NFC·trim·소문자. */
+function placeKey(raw: string): string {
+  return raw.normalize("NFC").trim().toLowerCase();
+}
+
+/** 노드 한 행에 붙은 장소 이름 전부(place_values JSON + place_value 보강). */
+function placesOf(row: CandidateRow): string[] {
+  const out: string[] = [];
+  if (row.place_values) {
+    try {
+      const parsed: unknown = JSON.parse(row.place_values);
+      if (Array.isArray(parsed)) {
+        for (const v of parsed) if (typeof v === "string") out.push(v);
+      }
+    } catch {
+      // 깨진 JSON — 아래 place_value 만으로 대조(근거 부족이면 제안이 버려질 뿐 안전한 쪽).
+    }
+  }
+  if (row.place_value) out.push(row.place_value);
+  return out;
+}
+
+/** event_at 비교 — 둘 다 시각으로 파싱되면 같은 순간인지, 아니면 문자열 그대로. */
+function sameEventAt(a: string, b: string): boolean {
+  const norm = (v: string): string => v.normalize("NFC").trim();
+  const x = norm(a);
+  const y = norm(b);
+  if (x === y) return true;
+  const tx = Date.parse(x.includes("T") ? x : x.replace(" ", "T"));
+  const ty = Date.parse(y.includes("T") ? y : y.replace(" ", "T"));
+  return !Number.isNaN(tx) && !Number.isNaN(ty) && tx === ty;
+}
+
 /**
  * 한 세션을 LLM 입력 양식으로 환산. 노드 id·본문·메타값(있으면)을 담는다 — LLM 이
  * "빈 칸을 같은 사건의 다른 노드 값으로 채울지" 판단할 자료.
@@ -595,8 +688,11 @@ function buildInferInput(
 
 /**
  * 제안 값 검증 — 갈래 2 는 *전파* 단계라, 채울 값은 같은 세션의 다른 노드에 이미 있는
- * 장소·시각 값과 글자 그대로 같아야 한다. 대상 칸이 이미 차 있으면 버린다.
+ * 장소·시각 값과 같아야 한다. 대상 칸이 이미 차 있으면 버린다.
  * 본문에서 짐작한 값("저장 후" 같은 날짜 아닌 시각, 화면 이름 같은 장소)이 여기서 걸린다.
+ *   - 장소: NFC·trim·대소문자 무시로 비교하고, 다른 노드에 붙은 장소 *전부*(place_values)와 대조한다.
+ *   - 시각: 같은 순간이면 같은 값으로 본다(표기만 다른 ISO 문자열 허용).
+ * 세션에는 MCP 노드가 이미 빠져 있어(queryCandidates) 근거로도 못 쓰인다.
  * 통과하면 null, 버릴 사유가 있으면 그 사유 문자열을 돌려준다.
  */
 function rejectReasonForValue(
@@ -609,15 +705,18 @@ function rejectReasonForValue(
   const filled = proposal.field === "place" ? target?.hasPlace : target?.hasEventAt;
   if (filled) return "대상 칸이 이미 채워져 있음";
 
-  const sourceValues = new Set<string>();
+  const wantedPlace = placeKey(value);
   for (const n of session.nodes) {
     if (n.id === proposal.nodeId) continue;
     const row = rowById.get(n.id);
-    const v = proposal.field === "place" ? row?.place_value : row?.event_at_value;
-    if (v) sourceValues.add(v.trim());
+    if (!row) continue;
+    if (proposal.field === "place") {
+      if (placesOf(row).some((p) => placeKey(p) === wantedPlace)) return null;
+    } else if (row.event_at_value && sameEventAt(row.event_at_value, value)) {
+      return null;
+    }
   }
-  if (!sourceValues.has(value)) return "같은 세션 다른 메모에 없는 값";
-  return null;
+  return "같은 세션 다른 메모에 없는 값";
 }
 
 /**

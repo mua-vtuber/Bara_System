@@ -13,6 +13,8 @@
  *   - eventBus.emit — 제안 ≥1 이면 1회, 0건이면 emit 안 함
  *   - graceful(infer=null no-op)
  *   - 섞인 세션만 LLM 호출(전부 채움/전부 빔 세션 호출 0)
+ *   - 값 출처 검증(빈 칸만, 같은 세션 다른 메모의 실제 장소·시각 값만)
+ *   - MCP(AI 클라이언트) 기억과 그 추출 자식 제외
  */
 
 import {
@@ -32,6 +34,7 @@ import { EventRepository } from "../db/store-internal/event-repository.ts";
 import { EventBus } from "../server-internal/event-bus.ts";
 import {
   CLEANUP_PROPOSALS_READY_EVENT,
+  MCP_PLATFORM,
   METADATA_FILL_KIND,
   runMetadataInferCycle,
   type InferredProposal,
@@ -40,6 +43,7 @@ import {
 } from "./metadata-infer-cycle.ts";
 import { wireHashtagEntities } from "./hashtag-entity-wiring.ts";
 import { METADATA_INFER_MAX_OUTPUT_TOKENS_DEFAULT } from "./metadata-infer-output-limit.ts";
+import { MCP_SOURCE } from "../mcp/server.ts";
 
 const MODEL = "bge-m3";
 const G = 180; // 세션 간격(분).
@@ -375,6 +379,7 @@ describe("runMetadataInferCycle — 값 출처 검증(본문 짐작 값 차단)"
     expect(summary.proposalsInserted).toBe(0);
     expect(summary.rejectedHallucinations).toBe(1);
     expect(listFillProposals()).toHaveLength(0);
+    expect(events.listRecent().length).toBe(0);
   });
 
   test("(V2) 시각 — 실제 값이 LLM 입력에 실리고, 날짜 아닌 짐작 값은 버리고 복사 값만 남긴다", async () => {
@@ -411,6 +416,69 @@ describe("runMetadataInferCycle — 값 출처 검증(본문 짐작 값 차단)"
 
     expect(summary.proposalsInserted).toBe(0);
     expect(summary.rejectedHallucinations).toBe(1);
+  });
+
+  test("(V4) 장소 — 공백·대소문자·NFC 차이는 같은 값으로 본다", async () => {
+    const n1 = await addMemo("롯데월드 왔다", "alice", "2026-06-01 10:00:00");
+    await store.addClassificationTag(n1, "장소", "Lotte World", "user_input", n1);
+    const n2 = await addMemo("자이로드롭 탔다", "alice", "2026-06-01 10:10:00");
+
+    const { fn } = fixtureInfer(() => [
+      { nodeId: n2, field: "place", value: "  lotte world ", evidence: "같은 사건" },
+    ]);
+    const summary = await runWith(fn);
+
+    expect(summary.proposalsInserted).toBe(1);
+    expect(summary.rejectedHallucinations).toBe(0);
+    expect(listFillProposals()[0]!.payload.nodeId).toBe(n2);
+  });
+
+  test("(V5) 장소가 여럿인 노드의 두 번째 장소도 근거로 인정한다", async () => {
+    const n1 = await addMemo("에버랜드 갔다가 롯데월드도 갔다", "alice", "2026-06-01 10:00:00");
+    await store.addClassificationTag(n1, "장소", "에버랜드", "user_input", n1);
+    await store.addClassificationTag(n1, "장소", "롯데월드", "user_input", n1);
+    const n2 = await addMemo("줄이 길었다", "alice", "2026-06-01 10:10:00");
+
+    const { fn } = fixtureInfer(() => [
+      { nodeId: n2, field: "place", value: "에버랜드" },
+      { nodeId: n2, field: "place", value: "롯데월드" },
+    ]);
+    const summary = await runWith(fn);
+
+    expect(summary.proposalsInserted).toBe(2);
+  });
+
+  test("(V6) 직접 입력(place 엔티티)으로 적힌 장소도 이웃 노드로 전파된다", async () => {
+    const n1 = await addMemo("여행 다녀왔다", "alice", "2026-06-01 10:00:00");
+    const res = await store.setPlace(n1, "속초", "direct");
+    expect(res.wrote).toBe(true);
+    const n2 = await addMemo("회 먹었다", "alice", "2026-06-01 10:10:00");
+
+    const { fn, calls } = fixtureInfer(() => [
+      { nodeId: n2, field: "place", value: "속초", evidence: "같은 여행" },
+    ]);
+    const summary = await runWith(fn);
+
+    expect(calls[0]!.nodes.find((n) => n.id === n1)?.place).toBe("속초");
+    expect(summary.proposalsInserted).toBe(1);
+  });
+
+  test("(V7) 시각 — 같은 순간이면 표기가 달라도 인정, 세션에 없는 날짜·이미 채워진 대상은 버림", async () => {
+    const n1 = await addMemo("콘서트 갔다", "alice", "2026-06-01 10:00:00");
+    db.prepare("UPDATE knowledge_nodes SET event_at = ? WHERE id = ?").run("2026-05-30T19:00:00", n1);
+    const n2 = await addMemo("앵콜 최고", "alice", "2026-06-01 10:10:00");
+    const n3 = await addMemo("굿즈 샀다", "alice", "2026-06-01 10:12:00");
+
+    const { fn } = fixtureInfer(() => [
+      { nodeId: n2, field: "event_at", value: "2026-05-30 19:00:00" }, // 같은 순간
+      { nodeId: n3, field: "event_at", value: "2026-05-31T19:00:00" }, // 어느 노드에도 없음
+      { nodeId: n1, field: "event_at", value: "2026-05-30T19:00:00" }, // 이미 채워진 대상
+    ]);
+    const summary = await runWith(fn);
+
+    expect(summary.proposalsInserted).toBe(1);
+    expect(summary.rejectedHallucinations).toBe(2);
+    expect(listFillProposals().map((p) => p.payload.nodeId)).toEqual([n2]);
   });
 });
 
@@ -792,5 +860,147 @@ describe("runMetadataInferCycle — has_place place-엔티티 정합(후속 M-2)
     // 전부 메타 없는 세션 → 섞임 0 → LLM 호출 0(거짓 has_place 0).
     expect(summary.mixedSessions).toBe(0);
     expect(calls).toHaveLength(0);
+  });
+});
+
+describe("runMetadataInferCycle — MCP(AI 클라이언트) 기억 제외", () => {
+  const ripeNow = (lastIso: string) => () =>
+    Date.parse(lastIso.replace(" ", "T")) + G * 60_000;
+
+  /** MCP 저장 노드 — saveTextInput 이 platform 칼럼에 MCP_SOURCE 를 박는 것과 같은 모양. */
+  async function addMcpMemo(
+    content: string,
+    author: string,
+    createdAt: string,
+    extra?: { parentId?: number; platform?: string },
+  ): Promise<number> {
+    const id = await store.addNode({
+      content,
+      sourceType: "llm_extract",
+      author,
+      platform: extra?.platform ?? MCP_SOURCE,
+      ...(extra?.parentId !== undefined
+        ? {
+            provenance: {
+              kind: "derived" as const,
+              parentId: extra.parentId,
+              relation: "merged_into" as const,
+              edgeProvenance: "llm_extract" as const,
+            },
+          }
+        : {}),
+    });
+    db.prepare("UPDATE knowledge_nodes SET created_at = ? WHERE id = ?").run(
+      createdAt,
+      id,
+    );
+    return id;
+  }
+
+  test("MCP_PLATFORM 은 MCP_SOURCE 와 같은 값이다(정합 가드)", () => {
+    expect(MCP_PLATFORM).toBe(MCP_SOURCE);
+  });
+
+  test("섞인 세션의 MCP 노드는 후보도 근거도 아니고 제안도 안 받는다", async () => {
+    const human1 = await addMemo("에버랜드 왔다", "alice", "2026-06-01 10:00:00");
+    await store.addClassificationTag(human1, "장소", "에버랜드", "user_input", human1);
+    const human2 = await addMemo("롤러코스터 탔다", "alice", "2026-06-01 10:05:00");
+    // MCP 노드: 같은 작성자·같은 시간대 + 장소가 붙어 있어도 LLM 에 안 넘어가야 한다.
+    const mcp = await addMcpMemo("bun 테스트 설정 메모", "alice", "2026-06-01 10:02:00");
+    await store.addClassificationTag(mcp, "장소", "이 pc", "user_input", mcp);
+
+    // LLM 이 MCP 노드에도 제안을 내도 검증에서 버려져야 한다(세션 밖 id).
+    const { fn, calls } = fixtureInfer(() => [
+      { nodeId: human2, field: "place", value: "에버랜드", evidence: "같은 사건" },
+      { nodeId: mcp, field: "place", value: "에버랜드", evidence: "엉뚱한 제안" },
+    ]);
+    const summary = await runMetadataInferCycle({
+      db,
+      infer: fn,
+      eventBus,
+      gapMinutes: G,
+      batchSize: 50,
+      maxOutputTokens: LIMIT,
+      now: ripeNow("2026-06-01 10:05:00"),
+    });
+
+    expect(summary.candidatesFound).toBe(2); // MCP 노드 제외.
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.nodes.map((n) => n.id).sort()).toEqual([human1, human2].sort());
+    // 내용·장소("이 pc") 둘 다 LLM 입력에 없다.
+    const serialized = JSON.stringify(calls[0]!.nodes);
+    expect(serialized).not.toContain("bun 테스트 설정 메모");
+    expect(serialized).not.toContain("이 pc");
+
+    // 사람 노드는 이전처럼 제안을 받고, MCP 노드는 제안이 없다.
+    const proposals = listFillProposals();
+    expect(proposals.map((p) => p.payload.nodeId)).toEqual([human2]);
+    expect(summary.rejectedHallucinations).toBe(1);
+    // 평가 완료 마킹도 MCP 노드엔 안 달린다.
+    const row = db
+      .prepare("SELECT metadata_json FROM knowledge_nodes WHERE id = ?")
+      .get(mcp) as { metadata_json: string };
+    expect(JSON.parse(row.metadata_json).metaInferred).toBeUndefined();
+  });
+
+  test("MCP 원문에서 추출된 자식(platform 비어도 계보로)도 후보가 아니다", async () => {
+    const origin = await store.addNode({
+      content: "MCP 로 저장한 긴 메모",
+      sourceType: "auto_capture",
+      author: "alice",
+      platform: MCP_SOURCE,
+    });
+    // 자식 — platform 이 비어 있어도(regex atomic 처럼) 계보 엣지로 MCP 원문을 찾아 뺀다.
+    const child = await addMcpMemo("추출된 자식", "alice", "2026-06-01 10:01:00", {
+      parentId: origin,
+      platform: "",
+    });
+    await store.addClassificationTag(child, "장소", "이 pc", "user_input", child);
+    // 사람 노드는 한 개뿐(메타 없음)이라 섞인 세션이 아니다 → 호출 0.
+    await addMemo("일상 글", "alice", "2026-06-01 10:02:00");
+
+    const { fn, calls } = fixtureInfer(() => []);
+    const summary = await runMetadataInferCycle({
+      db,
+      infer: fn,
+      eventBus,
+      gapMinutes: G,
+      batchSize: 50,
+      maxOutputTokens: LIMIT,
+      now: ripeNow("2026-06-01 10:02:00"),
+    });
+
+    expect(summary.candidatesFound).toBe(1);
+    expect(summary.mixedSessions).toBe(0);
+    expect(calls).toHaveLength(0);
+  });
+
+  test("사람 원문에서 추출된 자식은 그대로 후보다(회귀 0)", async () => {
+    const origin = await store.addNode({
+      content: "사람이 쓴 원문",
+      sourceType: "auto_capture",
+      author: "alice",
+      platform: "dashboard",
+    });
+    const child = await addMcpMemo("사람 글 자식", "alice", "2026-06-01 10:01:00", {
+      parentId: origin,
+      platform: "dashboard",
+    });
+    await store.addClassificationTag(child, "장소", "에버랜드", "user_input", child);
+    await addMemo("롤러코스터 탔다", "alice", "2026-06-01 10:02:00");
+
+    const { fn, calls } = fixtureInfer(() => []);
+    const summary = await runMetadataInferCycle({
+      db,
+      infer: fn,
+      eventBus,
+      gapMinutes: G,
+      batchSize: 50,
+      maxOutputTokens: LIMIT,
+      now: ripeNow("2026-06-01 10:02:00"),
+    });
+
+    expect(summary.candidatesFound).toBe(2);
+    expect(calls).toHaveLength(1);
   });
 });
