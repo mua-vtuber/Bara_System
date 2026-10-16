@@ -20,6 +20,10 @@ export interface MemorySummary {
   lastAccessedAt?: string;
   mentionCount?: number;
   sourceType?: string;
+  /** 작성자(knowledge_nodes.author) — 상세 응답에만 있다. */
+  author?: string;
+  /** 저장 경로(knowledge_nodes.platform) — 상세 응답에만 있다. */
+  platform?: string;
   eventAt?: string | null;
   eventUntil?: string | null;
   /** 장소 — 서버가 GET /memories/:id 에 싣는다(없으면 null). 옛 서버는 칸 자체가 없다. */

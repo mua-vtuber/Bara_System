@@ -59,4 +59,13 @@ describe("components.css", () => {
     expect(cssBlock(".node-window__head")).toContain("flex: 0 0 auto");
     expect(cssBlock(".node-window__body")).toContain("overflow-y: auto");
   });
+
+  test("기억 번호와 정보 블록은 토큰 색만 쓴다", () => {
+    expect(cssBlock(".memory-no")).toContain("color: var(--text-dim)");
+    expect(cssBlock(".memory-info__label")).toContain("color: var(--text-dim)");
+    expect(cssBlock(".memory-info__value")).toContain("color: var(--text-soft)");
+    for (const sel of [".memory-no", ".memory-info__row", ".memory-info__label", ".memory-info__value"]) {
+      expect(cssBlock(sel)).not.toMatch(/#[0-9a-fA-F]{3,8}\b|rgb\(/);
+    }
+  });
 });

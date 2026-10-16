@@ -5,6 +5,8 @@ import { mountIngestForm } from "./ingest-form.js";
 import { renderNavRail, type NavRailItem } from "./nav-rail.ts";
 import { el } from "./ui/dom.ts";
 import { resultRow } from "./ui/result-row.ts";
+import { memoryNumberFromNodeKey, parseMemoryNumberQuery } from "./ui/memory-number.ts";
+import { memoryInfoFromMemory } from "./ui/memory-info.ts";
 import { nodeDetail, skipNodeDetailTypewriter } from "./ui/node-detail.ts";
 import { buildEditControls } from "./graph/shell/node-window-view.ts";
 import { showToast } from "./form/toast.ts";
@@ -189,6 +191,7 @@ function memoryToCardView(memory: MemorySummary, score?: number): CardView {
   const renderMarkdown = shouldRenderAsMarkdown(memory);
   return {
     nodeId: nodeIdForMemory(memory.id),
+    memoryId: memory.id,
     title: titleFromContent(memory.content),
     snippet: renderMarkdown ? memory.content : compactText(memory.content, 420),
     nodeType: memory.sourceType ?? memory.memoryType ?? "memory",
@@ -200,6 +203,7 @@ function memoryToCardView(memory: MemorySummary, score?: number): CardView {
     kind: memory.kind ?? undefined,
     renderMode: renderMarkdown ? "markdown" : undefined,
     images: imagesFromMemory(memory),
+    info: memoryInfoFromMemory(memory),
     markers: {
       important: typeof memory.importance === "number" && memory.importance >= 0.8,
       uncertain: typeof memory.confidence === "number" && memory.confidence < 0.6,
@@ -218,6 +222,7 @@ function searchToCardView(result: SearchResult): CardView {
 function occurrenceToCardView(occ: DateOccurrence): CardView {
   return {
     nodeId: occ.target.nodeId,
+    memoryId: memoryNumberFromNodeKey(occ.target.nodeId),
     title: occ.title || occ.target.label,
     snippet: [occ.dateTime ?? occ.date, occ.originalDateText].filter(Boolean).join(" · "),
     nodeType: occ.target.type,
@@ -255,7 +260,7 @@ function buildShell(): DashboardDom {
   if (!searchInputEl) throw new Error("dashboard search input not found");
   const searchInput = searchInputEl;
   searchInput.id = "dashboard-search";
-  searchInput.placeholder = "찾을 기억을 입력하세요";
+  searchInput.placeholder = "찾을 기억을 입력하세요 (#번호로 바로 열기)";
 
   const searchClear = el("button", {
     className: "dash-icon-button",
@@ -710,9 +715,15 @@ function renderDetail(): void {
       }, async (request) => {
         const result = await editMemory(memoryId, request.content, revision, request.reason);
         if (state.selected.kind === "memory" && state.selected.memoryId === memoryId) {
+          // 수정 응답에는 장소 칸이 없다 — 정보 블록이 "장소 없음"으로 뒤바뀌지 않게 이전 값을 잇는다.
+          const edited = {
+            ...result.memory,
+            place: result.memory.place ?? state.selected.memory?.place,
+            places: result.memory.places ?? state.selected.memory?.places,
+          };
           state.selected = {
-            ...state.selected, memory: result.memory, metadata: result.memory.metadata,
-            view: { ...memoryToCardView(result.memory), snippet: result.memory.content },
+            ...state.selected, memory: edited, metadata: edited.metadata,
+            view: { ...memoryToCardView(edited), snippet: edited.content },
           };
           renderDetail();
         }
@@ -840,6 +851,16 @@ async function runSearch(payload: SearchModalSearchPayload): Promise<void> {
     }
     renderAll();
     dom.searchInput.focus();
+    return;
+  }
+  // "#87" 만 입력하면 검색 대신 그 번호의 기억을 연다(정리 제안의 "기억 #87" 과 같은 번호).
+  const memoryNumber = parseMemoryNumberQuery(query);
+  if (memoryNumber !== null) {
+    state.search = null;
+    state.compute = null;
+    state.searchFeedback = null;
+    renderAll();
+    await selectMemory(memoryNumber, "search");
     return;
   }
   state.search = null;

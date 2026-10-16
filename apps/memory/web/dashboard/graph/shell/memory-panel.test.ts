@@ -191,3 +191,16 @@ test("접기 — 목록 안의 포커스만 토글로 돌려주고 다른 입력
     input.remove();
   }
 });
+
+test("render — 기억 번호가 있는 항목은 #N 을 흐린 보조 표기로 그리고 없으면 그리지 않는다", () => {
+  const panel = createMemoryPanel({ onPick: () => {}, onTab: () => {} });
+  panel.render(
+    items(
+      { kind: "item", nodeId: "node:87", memoryId: 87, label: "번호 있는 글", type: "memory", stat: "방금" },
+      { kind: "item", nodeId: "person:p", label: "번호 없는 항목", type: "person", stat: "방금" },
+    ),
+  );
+  const [withNo, without] = [...panel.root.querySelectorAll(".mp-item")];
+  expect(withNo!.querySelector(".memory-no")?.textContent).toBe("#87");
+  expect(without!.querySelector(".memory-no")).toBeNull();
+});

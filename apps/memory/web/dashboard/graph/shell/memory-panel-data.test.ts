@@ -260,6 +260,7 @@ test("buildDateOccurrenceRows — 새 날짜 API 응답을 일정탭 행과 역�
     {
       kind: "item",
       nodeId: "node:7",
+      memoryId: 7,
       label: "지난 회의",
       type: "memory",
       badge: "일정",
@@ -329,4 +330,14 @@ test("빈 입력 — 모든 탭에서 행 0개", () => {
     expect(rows.length).toBe(0);
     expect(countItems(rows)).toBe(0);
   }
+});
+
+test("buildMemoryListRows — 글 노드 항목은 기억 번호(node:N 의 N)를 싣는다", () => {
+  const now = new Date("2026-06-18T12:00:00Z");
+  const rows = buildMemoryListRows(
+    [node({ id: "node:87", type: "memory", createdAt: "2026-06-18T11:00:00Z" })],
+    "recent",
+    now,
+  );
+  expect(rows[0]).toMatchObject({ kind: "item", nodeId: "node:87", memoryId: 87 });
 });

@@ -129,3 +129,29 @@ describe("GET /memories/:id — place/places", () => {
     expect(body.memory.places).toEqual([]);
   });
 });
+
+describe("GET /memories/:id — 대시보드 정보 블록이 읽는 칸", () => {
+  test("작성자·저장 경로·일정·metadata.fieldSources(출처)를 노드 그대로 싣는다", async () => {
+    const id = addNode("속초 여행");
+    addEntityPlace(id, "속초");
+    const store = {
+      getRawDb: () => db,
+      getNode: async (nodeId: number) => ({
+        id: nodeId, content: "속초 여행", author: "민수", platform: "mcp",
+        eventAt: "2026-10-20", eventUntil: null,
+        metadata: { fieldSources: { place: "direct", event_at: "system" } },
+      }),
+    } as unknown as SqliteMemoryStore;
+    const infoApp = new Hono({ strict: false });
+    registerMemoriesCrudRoutes(infoApp, { store } as unknown as MemoryApiDeps);
+
+    const body = (await (await infoApp.request(`/memories/${id}`)).json()) as {
+      memory: Record<string, unknown> & { metadata: { fieldSources: Record<string, string> } };
+    };
+    expect(body.memory.author).toBe("민수");
+    expect(body.memory.platform).toBe("mcp");
+    expect(body.memory.eventAt).toBe("2026-10-20");
+    expect(body.memory.places).toEqual(["속초"]);
+    expect(body.memory.metadata.fieldSources).toEqual({ place: "direct", event_at: "system" });
+  });
+});

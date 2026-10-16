@@ -6,6 +6,8 @@
  */
 
 import { el } from "./dom.ts";
+import { memoryNumberChip } from "./memory-number.ts";
+import { memoryInfoSection } from "./memory-info.ts";
 import type { CardView, ImagePreview } from "./card-view.ts";
 import { renderMarkdownSafe } from "./markdown.ts";
 import { getToken } from "../api-fetch.js";
@@ -250,6 +252,8 @@ export function nodeDetail(view: CardView, options: NodeDetailOptions = {}): HTM
 
   // 배지 목록: sourceType + score + markers + state
   const badgeItems: HTMLElement[] = [];
+  // 기억 번호 — 접히지 않는 배지 줄 맨 앞에 항상 보인다.
+  if (view.memoryId != null) badgeItems.push(memoryNumberChip(view.memoryId));
   if (view.sourceType != null && !isSameDisplayGraphKind(view.sourceType, view.nodeType)) {
     badgeItems.push(sourceBadge(view.sourceType));
   }
@@ -314,6 +318,12 @@ export function nodeDetail(view: CardView, options: NodeDetailOptions = {}): HTM
   // date — 있으면
   if (view.date != null) {
     container.append(el("div", { className: "card__date" }, view.date));
+  }
+
+  // 정보 — 장소·시각(출처)·작성자·저장 경로. 의미추출 섹션과 같은 접힘 요소(기본 접힘).
+  if (view.info != null) {
+    const infoSection = memoryInfoSection({ info: view.info });
+    if (infoSection != null) container.append(infoSection);
   }
 
   return container;

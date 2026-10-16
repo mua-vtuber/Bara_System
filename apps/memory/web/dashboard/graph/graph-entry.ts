@@ -91,6 +91,7 @@ import { createHoverTip } from "./shell/node-hover-tip.ts";
 
 import { fromGraphHit, fromGraphNode } from "../ui/card-view.ts";
 import { memoryCard } from "../ui/memory-card.ts";
+import { memoryInfoFromMemory, type MemoryInfo } from "../ui/memory-info.ts";
 import type { CardView } from "../ui/card-view.ts";
 
 import type { DashboardGraphViewModel, GraphNode } from "./graph-view-model.ts";
@@ -388,6 +389,14 @@ async function main(): Promise<void> {
     };
   }
 
+  /** 노드 창의 "정보" 블록 — 처음 펼칠 때 GET /memories/:id 로 작성자·저장 경로·출처를 읽는다. */
+  async function loadMemoryInfoForWindow(sourceId: number): Promise<MemoryInfo | undefined> {
+    const resp = await apiFetch(`/memories/${sourceId}`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const body = (await resp.json()) as { memory?: object };
+    return body.memory ? memoryInfoFromMemory(body.memory) : undefined;
+  }
+
   function createWindowElement(w: NodeWindow): HTMLElement {
     return createNodeWindowView({
       vm: currentVm,
@@ -400,6 +409,7 @@ async function main(): Promise<void> {
       onEditNode: editNodeFromWindow,
       onAddTag: addTagFromWindow,
       onTrashNode: trashNodeFromWindow,
+      onLoadMemoryInfo: loadMemoryInfoForWindow,
       onMove: (p) => {
         nodeWindowMgr.move(w.nodeId, p);
         const e = windowEls.get(w.nodeId);

@@ -1,4 +1,5 @@
 import { el } from "../ui/dom.ts";
+import { memoryNumberChip } from "../ui/memory-number.ts";
 import { DashboardApiError, getMemoryDetail, restoreArchiveItem } from "./dashboard-api.ts";
 import type { ArchiveItem } from "./types.ts";
 
@@ -10,6 +11,7 @@ export function renderArchiveItem(item: ArchiveItem, onRestored: () => Promise<v
   const row = el("article", { className: "dash-secondary-row archive-item", "aria-busy": "false" },
     el("div", { className: "archive-item-body" },
       el("p", { className: "archive-item-content" }, item.content || `기억 #${item.id}`),
+      memoryNumberChip(item.id),
       item.archivedAt ? el("span", {}, `휴지통 이동: ${item.archivedAt}`) : null,
       status),
     el("div", { className: "dash-secondary-actions" }, restore, refresh));

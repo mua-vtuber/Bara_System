@@ -42,11 +42,16 @@ beforeAll(async () => {
     if (path === "/ingest") return json({ok: true, type: "text", originNodeId: 3});
     if (path === "/memories/1" && init?.method === "PATCH") {
       lastEdit = JSON.parse(String(init.body));
-      return json({memory: {id: 1, content: lastEdit!.content, sourceType: "user_input", metadata: {sharedMemory: {revision: 1}}}});
+      // 실제 PATCH 응답처럼 노드 전체(작성자·저장 경로·출처 기록 포함)를 돌려주되 장소 칸은 없다.
+      return json({memory: {id: 1, content: lastEdit!.content, sourceType: "user_input", author: "민수", platform: "pet",
+        metadata: {sharedMemory: {revision: 1}, fieldSources: {place: "inferred"}}}});
     }
     if (path.startsWith("/memories?")) return json({ memories: [{id: 1, content: longText, sourceType: "user_input"}], count: 1 });
-    if (path === "/memories/1") return json({memory: {id: 1, content: longText, sourceType: "user_input", metadata: {}}});
-    if (path === "/memories/2") return json({memory: {id: 2, content: "검색 상세", sourceType: "user_input"}});
+    if (path === "/memories/1") return json({memory: {
+      id: 1, content: longText, sourceType: "user_input", author: "민수", platform: "pet",
+      place: "속초", places: ["속초"], metadata: { fieldSources: { place: "inferred" } },
+    }});
+    if (path === "/memories/2") return json({memory: {id: 2, content: "번호로 연 기억", sourceType: "user_input", author: "", platform: "mcp", metadata: {}}});
     if (path.startsWith("/api/date-occurrences")) return json({upcoming: [], past: []});
     if (path.startsWith("/graph/overview")) return json({nodes: [], edges: []});
     if (path === "/search") {
@@ -96,6 +101,19 @@ test("홈 일반 메모 상세는 줄바꿈과 마지막 문장을 포함한 전
   expect(query(".node-detail__snippet").textContent).toBe(longText);
 });
 
+test("홈 목록과 상세에 기억 번호가 보이고, 상세의 정보 블록은 접힌 채 장소 출처·작성자·저장 경로를 보여준다", () => {
+  expect(query('.dash-panel--list [data-node-id="node:1"] .memory-no').textContent).toBe("#1");
+  expect(query(".dash-detail .node-detail__badges .memory-no").textContent).toBe("#1");
+  const info = query<HTMLDetailsElement>(".dash-detail details.memory-info");
+  expect(info.open).toBe(false);
+  expect(info.querySelector("summary")?.textContent).toBe("정보");
+  const text = info.textContent ?? "";
+  expect(text).toContain("속초 · 추론");
+  expect(text).toContain("민수");
+  expect(text).toContain("펫 앱");
+  expect(text).toContain("없음"); // 시각(event_at)이 없다
+});
+
 test("홈에서 전체 메모를 수정하고 기존 revision 조건으로 저장할 수 있다", async () => {
   const edit = document.querySelector<HTMLButtonElement>(".dash-detail .node-window__edit-toggle");
   expect(edit).not.toBeNull();
@@ -108,6 +126,8 @@ test("홈에서 전체 메모를 수정하고 기존 revision 조건으로 저�
   await until(() => !document.querySelector(".node-edit-modal"));
   expect(lastEdit!.content).toBe("홈에서 수정한 기억");
   expect(lastEdit!.expectedRevision).toBe(0);
+  // 수정 응답에는 장소 칸이 없지만 정보 블록의 장소는 이전 값을 잇는다.
+  expect(query(".dash-detail details.memory-info").textContent).toContain("속초 · 추론");
 });
 
 test("늦은 이전 검색 응답이 최신 검색 결과를 덮지 않는다", async () => {
@@ -149,4 +169,14 @@ test("다음 검색이 실패하면 이전 검색의 상세와 쓰기 버튼을 
   await new Promise((resolve) => setTimeout(resolve, 15));
   expect(query(".dash-panel--list").textContent).toContain("검색 실패");
   expect(query(".dash-panel--list").textContent).not.toContain("성공 검색");
+});
+
+test("검색창에 #번호만 입력하면 검색 대신 그 기억을 연다", async () => {
+  query<HTMLInputElement>("#dashboard-search").value = "#2";
+  query<HTMLButtonElement>("[data-so-search-btn]").click();
+  await until(() => Boolean(document.querySelector(".dash-detail details.memory-info")));
+  skipNodeDetailTypewriter(query<HTMLElement>(".dash-detail"));
+  expect(query(".dash-detail .node-detail__snippet").textContent).toBe("번호로 연 기억");
+  expect(query(".dash-detail .node-detail__badges .memory-no").textContent).toBe("#2");
+  expect(deferred.has("#2")).toBe(false); // /search 를 부르지 않았다
 });

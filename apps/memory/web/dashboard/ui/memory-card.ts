@@ -7,6 +7,7 @@
  */
 
 import { el } from "./dom.ts";
+import { memoryNumberChip } from "./memory-number.ts";
 import type { CardView } from "./card-view.ts";
 import {
   sourceBadge,
@@ -65,6 +66,8 @@ function buildKickerRow(view: CardView): HTMLElement | null {
   if (view.nodeType != null && view.nodeType.length > 0) {
     items.push(el("span", { className: "chip card__node-type" }, displayGraphKindLabel(view.nodeType)));
   }
+  // 기억 번호 — 종류 줄 끝에 작고 흐리게. 번호만 있어도 줄을 만든다.
+  if (view.memoryId != null) items.push(memoryNumberChip(view.memoryId));
   if (items.length === 0) return null;
   return el("div", { className: "card__kicker" }, ...items);
 }

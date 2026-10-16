@@ -19,6 +19,8 @@ import { renderMarkdownSafe } from "../graph-markdown.ts";
 import { fromGraphNode } from "../../ui/card-view.ts";
 import { displayGraphKindLabel } from "../../ui/badges.ts";
 import { nodeDetail } from "../../ui/node-detail.ts";
+import { memoryInfoSection, type MemoryInfo } from "../../ui/memory-info.ts";
+import { memoryNumberFromNodeKey } from "../../ui/memory-number.ts";
 import {
   displaySnippetWithoutHashtags,
   displayTitleForNode,
@@ -48,6 +50,11 @@ export interface NodeWindowViewOpts {
    * (graph-entry.ts) 이 책임지고, 여기서는 클릭 시 요청만 그대로 전달한다.
    */
   onTrashNode?: (req: NodeWindowTrashRequest) => Promise<void>;
+  /**
+   * 글 노드의 "정보"(장소·시각 출처·작성자·저장 경로)를 불러온다. 그래프 노드에는 이 값이 없어
+   * "정보"를 처음 펼칠 때 한 번 호출한다. 없으면 "정보" 블록을 그리지 않는다.
+   */
+  onLoadMemoryInfo?: (sourceId: number) => Promise<MemoryInfo | undefined>;
 }
 
 export interface NodeWindowEditRequest {
@@ -137,6 +144,7 @@ export function createNodeWindowView(opts: NodeWindowViewOpts): HTMLElement {
     onEditNode,
     onAddTag,
     onTrashNode,
+    onLoadMemoryInfo,
   } = opts;
   const node = vm.nodes.find((n) => n.id === nodeId);
 
@@ -168,6 +176,7 @@ export function createNodeWindowView(opts: NodeWindowViewOpts): HTMLElement {
       onEditNode,
       onAddTag,
       onTrashNode,
+      onLoadMemoryInfo,
     ),
   );
 
@@ -693,6 +702,7 @@ function buildBody(
   onEditNode: ((req: NodeWindowEditRequest) => Promise<void>) | undefined,
   onAddTag: ((req: NodeWindowTagRequest) => Promise<void>) | undefined,
   onTrashNode: ((req: NodeWindowTrashRequest) => Promise<void>) | undefined,
+  onLoadMemoryInfo: ((sourceId: number) => Promise<MemoryInfo | undefined>) | undefined,
 ): HTMLElement {
   const body = el("div", { className: "node-window__body" });
 
@@ -723,6 +733,13 @@ function buildBody(
 
   // 메타 줄 — 내용 흐름을 먼저 읽은 뒤 확인할 수 있도록 본문 아래에 둔다.
   body.appendChild(buildMetaBlock(node));
+
+  // 정보 — 의미추출 바로 위. 의미추출과 같은 접힘 요소(기본 접힘)이고 처음 펼칠 때 불러온다.
+  const infoSource = memoryNumberFromNodeKey(node.id);
+  if (infoSource !== undefined && onLoadMemoryInfo !== undefined) {
+    const infoSection = memoryInfoSection({ load: () => onLoadMemoryInfo(infoSource) });
+    if (infoSection) body.appendChild(infoSection);
+  }
 
   for (const section of buildNodeLinkSections(vm, nodeId, onJumpNode)) {
     body.appendChild(section);

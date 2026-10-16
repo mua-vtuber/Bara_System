@@ -17,6 +17,8 @@ import {
   keywordTagLabelsFromText,
   mergeTagLabels,
 } from "./hashtag-display.ts";
+import { memoryNumberFromNodeKey } from "./memory-number.ts";
+import type { MemoryInfo } from "./memory-info.ts";
 
 // ──────────────────────────────────────────────
 // 1. 입력 응답 구조 인터페이스 (자체 선언 — graph 모듈 import 없음)
@@ -85,6 +87,8 @@ export interface GraphNodeRef {
 
 export type CardView = {
   nodeId: string;
+  /** 기억 번호(knowledge_nodes.id) — 정리 제안의 "기억 #87" 과 같은 번호. 글 노드가 아니면 없다. */
+  memoryId?: number;
   title: string;
   snippet?: string;
   nodeType?: string;
@@ -112,6 +116,8 @@ export type CardView = {
   kind?: string;
   /** 이 노드 자체 또는 이 노드 아래에 붙은 이미지 미리보기. */
   images?: ImagePreview[];
+  /** 상세에서 접힌 "정보" 블록으로 보일 장소·시각·작성자·저장 경로. 상세를 불러온 뒤에만 있다. */
+  info?: MemoryInfo;
 };
 
 export interface ImagePreview {
@@ -181,6 +187,7 @@ export function fromSearchHit(result: ApiSearchResult): CardView {
 
   return {
     nodeId: `mem:${result.id}`,
+    memoryId: result.id,
     title: extractTitle(result.content),
     snippet: displaySnippetWithoutHashtags(result.content),
     sourceType: result.sourceType,
@@ -220,6 +227,7 @@ export function fromGraphHit(
 
   return {
     nodeId: node.id,
+    memoryId: memoryNumberFromNodeKey(node.id),
     title: contentNode ? displayTitleForNode(node) : node.label,
     snippet: contentNode ? displaySnippetWithoutHashtags(node.snippet) : node.snippet,
     nodeType: node.type,
@@ -257,6 +265,7 @@ export function fromGraphNode(node: GraphOverviewNode): CardView {
 
   return {
     nodeId: node.id,
+    memoryId: memoryNumberFromNodeKey(node.id),
     title: contentNode ? displayTitleForNode(node) : node.label,
     snippet: contentNode ? displaySnippetWithoutHashtags(node.snippet) : node.snippet,
     nodeType: node.type,

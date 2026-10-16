@@ -13,6 +13,7 @@
  *                             접으면 본체만 숨고 탭은 셸에 남아 다시 펼칠 진입점이 된다(§4).
  */
 import { el } from "./dom.ts";
+import { memoryNumberChip } from "../../ui/memory-number.ts";
 import type {
   MemoryListItem,
   MemoryListRow,
@@ -70,6 +71,7 @@ function renderItem(
       onclick: () => onPick(row.nodeId),
     },
     el("span", { className: "mp-item__label" }, row.label),
+    row.memoryId != null ? memoryNumberChip(row.memoryId) : null,
     typeEl,
     el("span", { className: "mp-stat" }, row.stat),
   );

@@ -5,6 +5,7 @@
  */
 import type { GraphNode } from "../graph-view-model.ts";
 import { displayTitleForNode } from "../../ui/hashtag-display.ts";
+import { memoryNumberFromNodeKey } from "../../ui/memory-number.ts";
 
 /** 패널이 다루는 정렬 탭. */
 export type MemoryPanelTab = "recent" | "schedule" | "accessed";
@@ -13,6 +14,8 @@ export type MemoryPanelTab = "recent" | "schedule" | "accessed";
 export interface MemoryListItem {
   kind: "item";
   nodeId: string;
+  /** 기억 번호(knowledge_nodes.id). 글 노드("node:N")만 있다. */
+  memoryId?: number;
   label: string;
   /** 노드 종류(글/문서/이미지) — 보조 종류 표기용. */
   type: GraphNode["type"] | string;
@@ -210,6 +213,7 @@ function toItem(node: GraphNode, stat: string): MemoryListItem {
   return {
     kind: "item",
     nodeId: node.id,
+    memoryId: memoryNumberFromNodeKey(node.id),
     label: displayTitleForNode(node),
     type: node.type,
     stat,
@@ -227,6 +231,7 @@ function occurrenceToItem(occ: DateOccurrence): MemoryListItem {
   return {
     kind: "item",
     nodeId: occ.target.nodeId,
+    memoryId: memoryNumberFromNodeKey(occ.target.nodeId),
     label: occ.title,
     type: occ.target.type,
     badge: occurrenceBadge(occ),

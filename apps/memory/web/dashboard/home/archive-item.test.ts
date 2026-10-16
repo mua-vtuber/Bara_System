@@ -46,3 +46,8 @@ test("응답을 확인할 수 없으면 재복구 대신 상태 확인을 제공
   expect(button.disabled).toBe(true);
   expect(check.disabled).toBe(false);
 });
+
+test("휴지통 항목에도 정리 제안과 같은 기억 번호가 보인다", () => {
+  const row = renderArchiveItem({ id: 87, content: "번호 확인" }, async () => {});
+  expect(row.querySelector(".memory-no")?.textContent).toBe("#87");
+});

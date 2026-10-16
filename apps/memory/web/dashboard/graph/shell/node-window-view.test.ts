@@ -641,6 +641,67 @@ describe("createNodeWindowView", () => {
     expect(jumpedNodeIds).toEqual(["node:extract"]);
   });
 
+  test("정보 블록은 의미추출 바로 위에 접힌 채로 놓이고, 처음 펼칠 때 한 번 불러온다", async () => {
+    const vm = makeVm(
+      [
+        { id: "node:87", type: "memory", label: "원본 글" },
+        { id: "node:extract", type: "memory", label: "AI가 뽑은 사실" },
+      ],
+      [edge("node:87", "node:extract", "merged_into", 1)],
+    );
+    const loaded: number[] = [];
+
+    const modal = createNodeWindowView({
+      vm,
+      nodeId: "node:87",
+      pos: { x: 0, y: 0 },
+      onClose: () => {},
+      onFocus: () => {},
+      onMove: () => {},
+      onLoadMemoryInfo: async (sourceId) => {
+        loaded.push(sourceId);
+        return {
+          places: ["속초"], placeSource: "direct", eventAt: null, eventUntil: null,
+          author: "민수", platform: "mcp",
+        };
+      },
+    });
+
+    const body = modal.querySelector(".node-window__body")!;
+    expect([...body.children].map((c) => c.className)).toEqual([
+      "node-detail",
+      "node-window__meta",
+      "node-window__extracts memory-info",
+      "node-window__extracts",
+    ]);
+    // 번호는 접히지 않는 상세 배지 줄에 있다.
+    expect(body.querySelector(".node-detail__badges .memory-no")?.textContent).toBe("#87");
+
+    const info = body.querySelector<HTMLDetailsElement>("details.memory-info")!;
+    expect(info.open).toBe(false);
+    expect(info.querySelector("summary")?.textContent).toBe("정보");
+    expect(loaded).toEqual([]);
+    info.open = true;
+    info.dispatchEvent(new Event("toggle"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(loaded).toEqual([87]);
+    expect(info.textContent).toContain("속초 · 직접 입력");
+    expect(info.textContent).toContain("AI 앱(MCP)");
+  });
+
+  test("글 노드가 아니거나 불러오기 콜백이 없으면 정보 블록을 그리지 않는다", () => {
+    const vm = makeVm([
+      { id: "node:5", type: "memory", label: "글" },
+      { id: "person:p", type: "person", label: "사람" },
+    ]);
+    const base = { vm, pos: { x: 0, y: 0 }, onClose: () => {}, onFocus: () => {}, onMove: () => {} };
+    const load = async () => undefined;
+    expect(createNodeWindowView({ ...base, nodeId: "node:5" }).querySelector(".memory-info")).toBeNull();
+    expect(createNodeWindowView({ ...base, nodeId: "person:p", onLoadMemoryInfo: load }).querySelector(".memory-info")).toBeNull();
+    expect(createNodeWindowView({ ...base, nodeId: "node:5", onLoadMemoryInfo: load }).querySelector(".memory-info")).not.toBeNull();
+  });
+
   test("관련 노드 링크는 부가정보 아래 맨 아래에 놓고 클릭하면 대상 노드를 연다", () => {
     const vm = makeVm(
       [
