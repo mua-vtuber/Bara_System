@@ -46,10 +46,11 @@ test("결과 0건 — 행 0, 빈 안내 노출", () => {
   expect((empty as HTMLElement).textContent?.length ?? 0).toBeGreaterThan(0);
 });
 
-test("score 있는 행 — 점수 텍스트 포함", () => {
+test("score 있는 행 — 점수는 줄 글자 대신 툴팁으로", () => {
   const views: CardView[] = [{ nodeId: "n:1", title: "점수 있음", score: 0.754 }];
   const panel = renderResultsPanel(views, { onPick: () => {} });
-  expect(panel.textContent).toContain("0.754");
+  expect(panel.textContent).not.toContain("0.754");
+  expect(panel.querySelector<HTMLElement>(".rp-row")?.title).toBe("검색 점수 0.754");
 });
 
 test("score 없는 행 — 정상 렌더(빈 score 컬럼 없음)", () => {

@@ -2,7 +2,7 @@
  * apps/memory/web/dashboard/ui/result-row.ts
  *
  * 검색 결과 한 줄 버튼 컴포넌트.
- * compact 한 줄: 라벨 + (있으면) source 배지 + (있으면) score 칩.
+ * compact 한 줄: 라벨 + (있으면) source 배지. score 는 줄 툴팁(title)으로만 보인다.
  * 없는 배지·칩은 그리지 않는다.
  */
 
@@ -12,12 +12,14 @@ import type { CardView } from "./card-view.ts";
 import {
   sourceBadge,
   markerBadge,
-  scoreChip,
+  formatScore,
   eventTimeChip,
   kindBadge,
   displayGraphKindLabel,
   isSameDisplayGraphKind,
 } from "./badges.ts";
+
+const SCORE_TOOLTIP_PREFIX = "검색 점수";
 
 export interface ResultRowHandlers {
   onPick: (nodeId: string) => void;
@@ -58,9 +60,15 @@ export function resultRow(
   }
   if (view.markers?.supersedes === true) btn.append(markerBadge("supersedes"));
   if (view.markers?.superseded === true) btn.append(markerBadge("superseded"));
-  // 종류 배지 — 점수 앞(분류된 종류 있는 글만·빈 문자열 제외).
-  if (view.kind != null && view.kind.length > 0) btn.append(kindBadge(view.kind));
-  if (view.score != null) btn.append(scoreChip(view.score));
+  // 종류 배지 — 분류된 종류 있는 글만·빈 문자열 제외. 출처 배지와 같은 라벨이면
+  // ("프로젝트" 채널로 찾은 "프로젝트" 종류 글) 한 번만 보인다.
+  if (view.kind != null && view.kind.length > 0 &&
+    !sourceLabels.has(displayGraphKindLabel(view.kind))) {
+    btn.append(kindBadge(view.kind));
+  }
+  // 검색 점수 — 한 줄 목록에서는 제목 자리를 차지하지 않게 마우스를 올렸을 때만 보인다.
+  // 점수와 구성 요소는 상세 화면에 그대로 남는다.
+  if (view.score != null) btn.title = `${SCORE_TOOLTIP_PREFIX} ${formatScore(view.score)}`;
 
   return btn;
 }

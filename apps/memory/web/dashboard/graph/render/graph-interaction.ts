@@ -83,6 +83,7 @@ export interface InteractionHost {
 
   // 컨트롤러가 협력 모듈로 한 단계 더 넘기는 위임 tick·동작 메서드.
   refreshEdgeStates(): void;
+  tickAutoRotation(): void;
   tickTransition(elapsed: number): void;
   tickNodeTransition(elapsed: number): boolean;
   tickMergeTransition(elapsed: number): boolean;
@@ -375,6 +376,7 @@ export function runRenderLoop(host: InteractionHost): void {
       host.pulseRingLayer.update(elapsed);
       host.energyFlowLayer.update(collectFocusEdgeEndpoints(host), elapsed);
     }
+    host.tickAutoRotation();
     host.handle.controls.update();
     host.tickTransition(elapsed);
 

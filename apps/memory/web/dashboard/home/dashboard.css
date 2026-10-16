@@ -577,8 +577,23 @@ body {
   gap: 8px;
 }
 
+/* 본문 상자는 남은 높이를 채우되(flex), 위의 버튼 줄 몫까지 100% 로 늘려 스크롤을 만들지 않는다. */
 .dash-detail .node-detail {
-  min-height: 100%;
+  flex: 1 0 auto;
+}
+
+/* 수정·삭제 버튼 줄 — 그래프 노드 창용 여백·윗줄 선은 걷어내고 한 줄로 오른쪽 정렬한다. */
+.dash-detail-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.dash-detail-actions .node-window__edit,
+.dash-detail-actions .node-window__trash {
+  padding: 0;
+  border-top: none;
 }
 
 .dash-ingest {

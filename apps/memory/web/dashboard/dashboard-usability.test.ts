@@ -6,6 +6,7 @@ registerHappyDom();
 
 const originalFetch = globalThis.fetch;
 const longText = "첫 줄\n" + "긴 기억의 본문입니다. ".repeat(70) + "\n마지막 문장까지 읽기";
+const taggedText = "#프로젝트:코딩, #코딩:bara_system, #AI기록, 대시보드 목록 제목 정리 결정";
 const deferred = new Map<string, (response: Response) => void>();
 let lastEdit: Record<string, unknown> | undefined;
 const autoRegisterReads = { availability: 0, records: 0 };
@@ -46,7 +47,11 @@ beforeAll(async () => {
       return json({memory: {id: 1, content: lastEdit!.content, sourceType: "user_input", author: "민수", platform: "pet",
         metadata: {sharedMemory: {revision: 1}, fieldSources: {place: "inferred"}}}});
     }
-    if (path.startsWith("/memories?")) return json({ memories: [{id: 1, content: longText, sourceType: "user_input"}], count: 1 });
+    if (path.startsWith("/memories?")) return json({ memories: [
+      {id: 1, content: longText, sourceType: "user_input"},
+      {id: 3, content: taggedText, sourceType: "user_input"},
+    ], count: 2 });
+    if (path === "/memories/3") return json({memory: {id: 3, content: taggedText, sourceType: "user_input", author: "", platform: "mcp", metadata: {}}});
     if (path === "/memories/1") return json({memory: {
       id: 1, content: longText, sourceType: "user_input", author: "민수", platform: "pet",
       place: "속초", places: ["속초"], metadata: { fieldSources: { place: "inferred" } },
@@ -99,6 +104,38 @@ test("홈 일반 메모 상세는 줄바꿈과 마지막 문장을 포함한 전
   await new Promise((resolve) => setTimeout(resolve, 0));
   skipNodeDetailTypewriter(query<HTMLElement>(".dash-detail"));
   expect(query(".node-detail__snippet").textContent).toBe(longText);
+});
+
+test("홈 상세의 수정·삭제 버튼은 본문보다 위에 한 줄로 놓인다", () => {
+  const detail = query(".dash-detail");
+  const actions = detail.querySelector(":scope > .dash-detail-actions");
+  expect(actions).not.toBeNull();
+  expect(detail.firstElementChild).toBe(actions);
+  expect(actions!.querySelector(".node-window__edit-toggle")).not.toBeNull();
+  expect(actions!.querySelector(".detail-trash-btn")).not.toBeNull();
+});
+
+test("홈 목록 제목은 앞머리 분류 해시태그를 빼고 본문을 보여준다", () => {
+  const label = query('.dash-panel--list [data-node-id="node:3"] .rp-row__label').textContent;
+  expect(label).toBe("대시보드 목록 제목 정리 결정");
+});
+
+test("다른 기억을 열면 상세 스크롤이 맨 위로 돌아가고, 같은 기억을 다시 그릴 때는 유지된다", async () => {
+  const detail = query(".dash-detail");
+  detail.scrollTop = 200;
+  query<HTMLButtonElement>('.dash-panel--list [data-node-id="node:3"]').click();
+  await until(() => (query(".dash-detail .node-detail").textContent ?? "").includes("대시보드 목록 제목 정리 결정")
+    && Boolean(document.querySelector(".dash-detail details.memory-info")));
+  expect(detail.scrollTop).toBe(0);
+  detail.scrollTop = 50;
+  const before = detail.scrollTop;
+  query<HTMLButtonElement>('.dash-panel--list [data-node-id="node:3"]').click();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(detail.scrollTop).toBe(before);
+  query<HTMLButtonElement>('.dash-panel--list [data-node-id="node:1"]').click();
+  await until(() => Boolean(document.querySelector(".dash-detail details.memory-info")) &&
+    query(".dash-detail .memory-no").textContent === "#1");
+  skipNodeDetailTypewriter(query<HTMLElement>(".dash-detail"));
 });
 
 test("홈 목록과 상세에 기억 번호가 보이고, 상세의 정보 블록은 접힌 채 장소 출처·작성자·저장 경로를 보여준다", () => {

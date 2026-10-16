@@ -98,7 +98,12 @@ export function markerBadge(
  * 점수 칩. 소수점 세 자리 고정.
  */
 export function scoreChip(score: number): HTMLElement {
-  return el("span", { className: "chip chip--score" }, score.toFixed(3));
+  return el("span", { className: "chip chip--score" }, formatScore(score));
+}
+
+/** 점수 표기 — 칩과 목록 줄 툴팁이 같은 자릿수를 쓰도록 한 곳에서 정한다. */
+export function formatScore(score: number): string {
+  return score.toFixed(3);
 }
 
 /**

@@ -49,9 +49,28 @@ describe("resultRow", () => {
     expect(row.querySelectorAll(".badge").length).toBe(1);
   });
 
-  it("score 있으면 .chip--score 1개", () => {
+  it("score 는 줄 안에 칩으로 그리지 않고 툴팁으로만 보인다", () => {
     const row = resultRow(full, { onPick: () => {} });
-    expect(row.querySelectorAll(".chip--score").length).toBe(1);
+    expect(row.querySelectorAll(".chip--score").length).toBe(0);
+    expect(row.title).toBe("검색 점수 0.910");
+  });
+
+  it("종류 배지가 출처 배지와 같은 라벨이면 한 번만 보인다", () => {
+    const row = resultRow(
+      { nodeId: "mem:30", title: "프로젝트 글", sources: ["vector", "project"], kind: "프로젝트" },
+      { onPick: () => {} },
+    );
+    const labels = [...row.querySelectorAll(".badge")].map((b) => b.textContent);
+    expect(labels.filter((t) => t === "프로젝트").length).toBe(1);
+    expect(labels).toContain("의미");
+  });
+
+  it("출처와 다른 종류 배지는 그대로 보인다", () => {
+    const row = resultRow(
+      { nodeId: "mem:31", title: "사람 글", sources: ["vector"], kind: "사람" },
+      { onPick: () => {} },
+    );
+    expect(row.querySelector(".badge--kind")?.textContent).toBe("사람");
   });
 
   it("sourceType 없으면 .badge 0개", () => {
@@ -59,9 +78,9 @@ describe("resultRow", () => {
     expect(row.querySelectorAll(".badge").length).toBe(0);
   });
 
-  it("score 없으면 .chip--score 0개", () => {
+  it("score 없으면 툴팁도 없다", () => {
     const row = resultRow(minimal, { onPick: () => {} });
-    expect(row.querySelectorAll(".chip--score").length).toBe(0);
+    expect(row.title).toBe("");
   });
 
   it("sources 있으면 채널 배지 그림", () => {

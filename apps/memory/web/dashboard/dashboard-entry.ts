@@ -12,6 +12,7 @@ import { buildEditControls } from "./graph/shell/node-window-view.ts";
 import { showToast } from "./form/toast.ts";
 import type { CardView, ImagePreview } from "./ui/card-view.ts";
 import { fromGraphNode, fromSearchHit } from "./ui/card-view.ts";
+import { displayTitleForNode } from "./ui/hashtag-display.ts";
 import { createEntityTypeFieldPicker } from "./graph/shell/entity-type-field-picker.ts";
 import { renderSearchModal } from "./graph/shell/search/search-modal.ts";
 import type { SearchModalSearchPayload } from "./graph/shell/search/search-modal.ts";
@@ -136,10 +137,15 @@ function compactText(text: string, max = 160): string {
   return `${clean.slice(0, max - 1)}…`;
 }
 
+const MEMORY_TITLE_LIMIT = 52;
+const UNTITLED_MEMORY = "제목 없는 메모리";
+
+/** 목록·상세 제목 — 앞머리 분류 해시태그(#프로젝트:코딩, #AI기록 등)를 빼고 본문 첫 줄을 쓴다. */
 function titleFromContent(content: string): string {
-  const first = content.split("\n").find((line) => line.trim().length > 0)?.trim();
-  if (!first) return "제목 없는 메모리";
-  return compactText(first, 52);
+  return displayTitleForNode(
+    { label: content, type: "memory" },
+    { limit: MEMORY_TITLE_LIMIT, fallback: UNTITLED_MEMORY },
+  );
 }
 
 const MARKDOWN_SOURCE_TYPES = new Set(["document", "document_section", "document_chunk"]);
@@ -688,19 +694,24 @@ async function handleMemoryTrashed(
   await refreshCoreData();
 }
 
+/** 상세 패널에 마지막으로 그린 항목 — 다른 항목으로 바뀔 때만 스크롤을 맨 위로 돌리는 기준. */
+let lastRenderedDetailNodeId: string | null = null;
+
 function renderDetail(): void {
   if (state.selected.kind === "none") {
     dom.detail.replaceChildren(emptyState("항목을 선택하면 내용이 표시됩니다."));
+    lastRenderedDetailNodeId = null;
     return;
   }
   const selectedNodeId = state.selected.graphNodeId;
   const animateContent = state.skipDetailAnimationForNodeId !== selectedNodeId;
-  const children: HTMLElement[] = [
-    nodeDetail(state.selected.view ?? {
-      nodeId: state.selected.graphNodeId,
-      title: "선택한 항목",
-    }, { animateContent }),
-  ];
+  const detailCard = nodeDetail(state.selected.view ?? {
+    nodeId: state.selected.graphNodeId,
+    title: "선택한 항목",
+  }, { animateContent });
+  // 수정·삭제는 본문 위 한 줄에 둔다 — 본문 길이와 상관없이 스크롤 없이 바로 보인다.
+  const actions = el("div", { className: "dash-detail-actions" });
+  const children: HTMLElement[] = [actions, detailCard];
   if (state.selected.kind === "memory") {
     const selected = state.selected;
     const memoryId = state.selected.memoryId;
@@ -731,16 +742,20 @@ function renderDetail(): void {
         try { await refreshCoreData(true); }
         catch { showToast("수정은 완료됐지만 목록 갱신에 실패했습니다. 화면을 새로 불러오세요.", "error"); }
       });
-      if (edit) children.push(edit);
+      if (edit) actions.append(edit);
       else children.push(el("p", {}, "문서·이미지 원본은 직접 수정할 수 없습니다. 검색 가능한 텍스트나 파생 기억을 수정하세요."));
     }
-    children.push(detailTrashControl({
+    actions.append(detailTrashControl({
       memoryId,
       metadata: state.selected.metadata,
       onTrashed: (result) => handleMemoryTrashed(memoryId, result),
     }));
   }
-  dom.detail.replaceChildren(...children);
+  dom.detail.replaceChildren(...children.filter((child) => child !== actions || actions.childElementCount > 0));
+  // 다른 항목으로 바뀌었을 때만 맨 위로 — 같은 항목을 다시 그릴 때(상세 로딩 완료,
+  // 목록 갱신)는 읽던 위치를 지킨다.
+  if (lastRenderedDetailNodeId !== selectedNodeId) dom.detail.scrollTop = 0;
+  lastRenderedDetailNodeId = selectedNodeId;
   if (!animateContent) state.skipDetailAnimationForNodeId = null;
 }
 

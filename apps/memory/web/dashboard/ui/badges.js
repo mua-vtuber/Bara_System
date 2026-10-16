@@ -94,7 +94,10 @@ function markerBadge(kind) {
   return el("span", { className: `badge badge--marker-${kind}` }, label);
 }
 function scoreChip(score) {
-  return el("span", { className: "chip chip--score" }, score.toFixed(3));
+  return el("span", { className: "chip chip--score" }, formatScore(score));
+}
+function formatScore(score) {
+  return score.toFixed(3);
 }
 function tagChip(text) {
   return el("span", { className: "chip chip--tag" }, text);
@@ -285,6 +288,7 @@ export {
   markerBadge,
   kindBadge,
   isSameDisplayGraphKind,
+  formatScore,
   eventTimeChip,
   displayGraphKindLabel,
   componentChips

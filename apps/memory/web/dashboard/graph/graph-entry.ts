@@ -435,6 +435,7 @@ async function main(): Promise<void> {
    */
   function syncWindows(): void {
     const live = new Set(nodeWindowMgr.list().map((w) => w.nodeId));
+    controller.autoRotation.setDetailOpen(live.size > 0);
     for (const id of [...windowEls.keys()]) {
       if (!live.has(id)) invalidateWindowElement(id);
     }

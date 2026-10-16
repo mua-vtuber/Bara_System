@@ -8,6 +8,7 @@
 //       graph-camera.ts(카메라), graph-transitions.ts(노드·합침·창발 전환).
 // 컨트롤러는 상태를 들고 협력 모듈을 조합하는 얇은 오케스트레이터다.
 import * as THREE from "three";
+import { GraphAutoRotation } from "./auto-rotation.ts";
 
 import { createScene } from "./scene.ts";
 import type { SceneHandle } from "./scene.ts";
@@ -181,6 +182,7 @@ export class GraphController
 
   // 애니메이션 루프 ID
   rafId: number | null = null;
+  readonly autoRotation: GraphAutoRotation;
 
   constructor(container: HTMLElement) {
     this.handle = createScene(container);
@@ -197,6 +199,9 @@ export class GraphController
     // happy-dom 등 테스트 환경은 matchMedia 가 없을 수 있어 feature-detect 로 안전하게 처리한다.
     this.reducedMotion = typeof matchMedia === "function" &&
       matchMedia("(prefers-reduced-motion: reduce)").matches;
+    this.autoRotation = new GraphAutoRotation(
+      this.handle.camera, this.handle.controls.target, this.handle.renderer.domElement,
+    );
     this.dustLayer.add(this.handle.scene);
     // 창발 수렴선(2d) 임시 라인을 담는 그룹. 노드·엣지와 독립이라 연출 끝나면 통째로 비운다.
     this.handle.scene.add(this.convergeGroup);
@@ -444,6 +449,7 @@ export class GraphController
   /** 컨트롤러와 씬을 모두 정리한다. */
   dispose(): void {
     if (this.rafId !== null) cancelAnimationFrame(this.rafId);
+    this.autoRotation.dispose();
     this.handle.renderer.domElement.removeEventListener("click", this.onCanvasClick);
     this.handle.renderer.domElement.removeEventListener("dblclick", this.onCanvasDblClick);
     this.handle.renderer.domElement.removeEventListener("pointerdown", this.onPointerDown);
@@ -472,6 +478,10 @@ export class GraphController
   /** 진행 중 카메라 전환을 한 프레임 보간한다 — graph-camera.ts 의 tickTransition 에 위임. */
   tickTransition(elapsed: number): void {
     tickTransition(this, elapsed);
+  }
+
+  tickAutoRotation(): void {
+    this.autoRotation.update(this.transition !== null || this.reducedMotion);
   }
 
   // ---- 이벤트 핸들러 (graph-interaction.ts 위임) -----------------------------
