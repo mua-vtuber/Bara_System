@@ -69,6 +69,11 @@ export interface MemorySettings {
     sessionGapMinutes: number;
     /** 한 사이클 후보 메모 최대 개수. default 200. */
     batchSize: number;
+    /**
+     * 장소·시각 채우기 응답 한 번의 최대 출력 토큰 수(default 1024). 이 한도에 잘린 세션은 메모에
+     * 한도 값을 적어 같은 한도로는 다시 보내지 않는다(metadata-infer-output-limit.ts).
+     */
+    maxOutputTokens: number;
   };
   /**
    * Phase 7 깊은 패스 Task 5 — 정규식 강화 깊은 패스 설정 (spec section 8/10).

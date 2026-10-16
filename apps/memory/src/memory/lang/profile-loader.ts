@@ -238,6 +238,7 @@ function parseEventDate(root: Record<string, unknown>, path: string): EventDateP
   return {
     rollingWindow: re("rolling_window"),
     absYmd: re("abs_ymd"),
+    absYmdNumeric: re("abs_ymd_numeric"),
     absMd: re("abs_md"),
     absMdSlash: re("abs_md_slash"),
     absYm: re("abs_ym"),
@@ -254,6 +255,7 @@ function parseEventDate(root: Record<string, unknown>, path: string): EventDateP
       path,
     ),
     monthOffsets: toOffsetEntries(s.month_offsets, `${n}.month_offsets`, path),
+    monthDay: re("month_day"),
     yearOffsets: toMatchOffsetEntries(s.year_offsets, `${n}.year_offsets`, path),
     hourMinute: re("hour_minute"),
     colonTime: re("colon_time"),

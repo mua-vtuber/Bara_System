@@ -127,7 +127,9 @@ for (const size of batches) {
     scores.push(scoreCase(c, r));
     judgements.push(judgeMemo({
       memo: { nodeId: c.id, content: c.text, createdAt: c.createdAt, alreadyLinked: [] }, result: r, index,
-      allowedTypes: new Set(allowedTypes), ignoredNames: new Set(), scheduleIgnored: false, activeSchedule: null, autoApply: true, profile,
+      allowedTypes: new Set(allowedTypes), ignoredNames: new Set(), scheduleIgnored: false, activeSchedule: null,
+      // 평가 자료는 DB 없이 새 메모 한 개를 본다 — 메모 날짜 칸은 비어 있고 무시 기록도 없는 상태로 판정한다.
+      memoEventAt: { found: true, eventAt: null, source: null }, memoDateIgnored: false, autoApply: true, profile,
     }));
   }
   const sum = summarize(scores, judgements);

@@ -52,17 +52,19 @@ pub enum TrayAction {
     Search,
     Dashboard,
     Settings,
+    Guide,
     RecentResult,
     TogglePet,
     Quit,
 }
 
 impl TrayAction {
-    pub const ALL: [TrayAction; 7] = [
+    pub const ALL: [TrayAction; 8] = [
         TrayAction::Input,
         TrayAction::Search,
         TrayAction::Dashboard,
         TrayAction::Settings,
+        TrayAction::Guide,
         TrayAction::RecentResult,
         TrayAction::TogglePet,
         TrayAction::Quit,
@@ -74,6 +76,7 @@ impl TrayAction {
             TrayAction::Search => "search",
             TrayAction::Dashboard => "dashboard",
             TrayAction::Settings => "settings",
+            TrayAction::Guide => "guide",
             TrayAction::RecentResult => "recent-result",
             TrayAction::TogglePet => "toggle-pet",
             TrayAction::Quit => "quit",
@@ -324,6 +327,7 @@ fn run(app: &AppHandle, action: TrayAction) {
             Ok(())
         }
         TrayAction::Settings => crate::show_panel_mode(app, "settings"),
+        TrayAction::Guide => crate::panel::show_guide(app),
         TrayAction::RecentResult => feedback::show_last(app),
         TrayAction::TogglePet => current_display_mode(app).and_then(|mode| {
             apply_display_mode(
@@ -359,6 +363,7 @@ pub fn build(app: &tauri::App, pet_visible: bool) -> tauri::Result<()> {
     let search = item(TrayAction::Search, labels.search)?;
     let dashboard = item(TrayAction::Dashboard, labels.dashboard)?;
     let settings = item(TrayAction::Settings, labels.settings)?;
+    let guide = item(TrayAction::Guide, labels.guide)?;
     let recent_result = item(TrayAction::RecentResult, labels.recent_result)?;
     let toggle = item(TrayAction::TogglePet, toggle_label(pet_visible))?;
     let quit_item = item(TrayAction::Quit, labels.quit)?;
@@ -371,6 +376,7 @@ pub fn build(app: &tauri::App, pet_visible: bool) -> tauri::Result<()> {
             &search,
             &dashboard,
             &settings,
+            &guide,
             &recent_result,
             &PredefinedMenuItem::separator(app)?,
             &toggle,

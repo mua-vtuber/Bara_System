@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { messages } from "../messages.ts";
-import { NoticeState } from "./pet-notice.ts";
+import { NoticeState, noticeLook } from "./pet-notice.ts";
 
 // The rules of the pet window's notice line (design section 8, decision D10), with the real notice texts.
 const commandFailure = messages.pet.quickToggleFailed("창이 응답하지 않아요.");
@@ -58,4 +58,55 @@ test("an update notice passes like a command failure and leaves a lasting notice
   expect(line.text).toBe(failure);
   line.expire();
   expect(line.text).toBe(deaf);
+});
+
+test("a running install lasts above the deaf notice, passing notices cover it, and it ends only by its clear", () => {
+  const line = new NoticeState();
+  const installing = messages.installLock.petInstalling;
+  line.show("listen", deaf);
+  expect(line.show("install", installing)).toBe(false);
+  expect(line.text).toBe(installing);
+  // The stage changes the same lasting line.
+  const stage = messages.installLock.petStage(messages.installLock.petStages.server);
+  line.show("install", stage);
+  expect(line.text).toBe(stage);
+  // The pet's click refused while installing passes over it, then the install shows again.
+  expect(line.show("installNote", messages.installLock.petClickRefused)).toBe(true);
+  expect(line.text).toBe(messages.installLock.petClickRefused);
+  line.expire();
+  expect(line.text).toBe(stage);
+  // A successful command does not end it; its own clear does, and the deaf notice shows again.
+  expect(line.clear("command")).toBe(false);
+  expect(line.text).toBe(stage);
+  expect(line.clear("install")).toBe(false);
+  expect(line.text).toBe(deaf);
+});
+
+test("ending the install leaves a passing notice and its time alone", () => {
+  const line = new NoticeState();
+  line.show("install", messages.installLock.petInstalling);
+  line.show("command", commandFailure);
+  // No passing notice ended, so the screen keeps its timer.
+  expect(line.clear("install")).toBe(false);
+  expect(line.text).toBe(commandFailure);
+  line.expire();
+  expect(line.text).toBeNull();
+});
+
+test("the line reports the kind it shows, and only an install told is looked at as information", () => {
+  const line = new NoticeState();
+  expect(line.kind).toBeNull();
+  line.show("listen", deaf);
+  expect(line.kind).toBe("listen");
+  line.show("install", messages.installLock.petClickRefused);
+  expect(line.kind).toBe("install");
+  line.show("command", commandFailure);
+  expect(line.kind).toBe("command");
+  line.expire();
+  expect(line.kind).toBe("install");
+  line.clear("install");
+  expect(line.kind).toBe("listen");
+  expect(noticeLook("install")).toBe("info");
+  expect(noticeLook("installNote")).toBe("info");
+  for (const kind of ["command", "contract", "listen", "update"] as const) expect(noticeLook(kind)).toBe("error");
 });

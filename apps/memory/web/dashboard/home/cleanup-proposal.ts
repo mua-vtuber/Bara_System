@@ -65,7 +65,11 @@ export function describeCleanupProposal(proposal: CleanupProposal, context: Clea
     change = "선택한 항목을 적용합니다. 이미 채워진 정보는 제안의 변경 규칙에 따라 보호됩니다.";
   } else if (proposal.kind === "entity_register") {
     target = ENTITY_REGISTER_STRINGS.proposalTarget(p.nodeId);
-    change = ENTITY_REGISTER_STRINGS.proposalChange(Array.isArray(p.items) ? p.items.length : 0, p.schedule !== null && p.schedule !== undefined);
+    change = ENTITY_REGISTER_STRINGS.proposalChange(
+      Array.isArray(p.items) ? p.items.length : 0,
+      p.schedule !== null && p.schedule !== undefined,
+      p.memoDate !== null && p.memoDate !== undefined,
+    );
   }
   return { title: ownLabel(TITLES, proposal.kind) ?? `기타 정리 제안 (${proposal.kind})`, target, reason, change };
 }

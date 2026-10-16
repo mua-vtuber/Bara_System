@@ -11,13 +11,14 @@ import { RELEASE_COMPLETE_MARKER, RELEASE_RECORD_FILE, releaseRecordText } from 
 import { ShellReleaseHost, SystemdControl, sshTransport } from "./release-host.ts";
 import { bundledServerDraft, serverUnitText } from "./server-component.ts";
 import { scpFile, sshRun, sshRunIdle, type RemoteSession as Session } from "./remote-session.ts";
+import { clientTokenFailure } from "./client-token-failure.ts";
 import { restoreAndSwap, uploadForRestore, type RemoteRestoreRun, type RemoteRestoreSource } from "./remote-restore.ts";
 import { CORE_CLI, MANAGED_ENV_KEYS, MANAGED_HOST, MANAGED_PATH_KEYS, PET_SERVICE_UNIT, RELEASE_LAYOUT, REMOTE_LAYOUT,
   assertServiceStarted, dependencyInstallScript, parseRemoteFacts, planRemoteInstall, probeCommand, remoteBlockError, serviceStartCommand,
   type InstalledServer, type RemoteHost, type RemoteRequest } from "./remote-probe.ts";
 import { INSTALL_MODEL_DICTIONARY_TIMEOUT_MS, INSTALL_PREPARE_TIMEOUT_MS, MODEL_PREFETCH_IDLE_MS,
   REMOTE_DEPENDENCIES_TIMEOUT_MS, REMOTE_EXTRACT_TIMEOUT_MS, REMOTE_SERVICE_ACTIVE_WAIT_MS, REMOTE_SERVICE_TIMEOUT_MS,
-  REMOTE_TOKEN_TIMEOUT_MS } from "./limits.ts";
+  REMOTE_TOKEN_TIMEOUT_MS, TUNNEL_KEEPALIVE_INTERVAL_S, TUNNEL_KEEPALIVE_MAX_MISSED } from "./limits.ts";
 
 interface Tokens { clientToken: string; ownerToken: string }
 /** What an install run did with the server it found. */
@@ -78,7 +79,7 @@ async function readTokens(s: Session, server: InstalledServer): Promise<Tokens> 
   if (readable !== "readable") throw serviceError("REMOTE_TOKENS_MISSING", messages.connectionErrors.REMOTE_TOKENS_MISSING);
   return parseTokens(await sshRun(s, `cd ${shQuote(server.release)} && ` +
     remoteCommand([`${server.release}/${RELEASE_LAYOUT.bun}`, CORE_CLI.clientToken, "--url", `http://${MANAGED_HOST}:${server.port}/`,
-      "--tokens-file", server.tokenFile, "--read-existing"]), messages.installSteps.remoteCredentialsRead, REMOTE_TOKEN_TIMEOUT_MS, true));
+      "--tokens-file", server.tokenFile, "--read-existing"]), messages.installSteps.remoteCredentialsRead, REMOTE_TOKEN_TIMEOUT_MS, clientTokenFailure));
 }
 
 /** The idempotent install steps. Each can run again over a partial install of the same path: files are
@@ -136,7 +137,7 @@ async function installServer(s: Session, host: RemoteHost, port: number, manifes
   const mode = await sshRun(s, `if test -e ${shQuote(tokenFile)}; then printf existing; else printf fresh; fi`, messages.installSteps.remoteTokenFileCheck);
   const tokens = parseTokens(await sshRun(s, `cd ${shQuote(release)} && ${remoteCommand([bun, CORE_CLI.clientToken,
     "--url", `http://${MANAGED_HOST}:${port}/`, "--tokens-file", tokenFile, mode === "existing" ? "--read-existing" : "--fresh"])}`,
-    messages.installSteps.remoteCredentialsPrepare, REMOTE_TOKEN_TIMEOUT_MS, true));
+    messages.installSteps.remoteCredentialsPrepare, REMOTE_TOKEN_TIMEOUT_MS, clientTokenFailure));
   await files.pointLink(`${host.serverPath}/${REMOTE_LAYOUT.current}`, release);
   ctx.progress("service");
   await control.install(serverUnitText(s.ssh.user, host.serverPath, env));
@@ -178,10 +179,17 @@ export async function prepareRemoteServer(input: RemoteInstallInput, paths: Runt
   return { ssh, tools, knownHosts, tokens: await readTokens(session, plan.server), outcome: plan.kind === "repair" ? "repaired" : "connected" };
 }
 
-export function startTunnel(tools: SshTools, ssh: SshConnection, knownHosts: string, localPort: number, serverPort: number): Bun.Subprocess {
+/** The tunnel's `ssh` command. It exits when the server stops answering its keepalive asks, so a connection that died
+ * under it (sleep, network change) ends the process and the service opens the tunnel again (`tunnel-keeper.ts`). */
+export function tunnelCommand(tools: SshTools, ssh: SshConnection, knownHosts: string, localPort: number, serverPort: number): string[] {
   const base = sshBase(tools, ssh, knownHosts);
-  base.splice(-1, 0, "-o", "ExitOnForwardFailure=yes", "-N", "-L", `127.0.0.1:${localPort}:127.0.0.1:${serverPort}`);
-  return spawnResident(base);
+  base.splice(-1, 0, "-o", "ExitOnForwardFailure=yes", "-o", `ServerAliveInterval=${TUNNEL_KEEPALIVE_INTERVAL_S}`,
+    "-o", `ServerAliveCountMax=${TUNNEL_KEEPALIVE_MAX_MISSED}`, "-N", "-L", `127.0.0.1:${localPort}:127.0.0.1:${serverPort}`);
+  return base;
+}
+
+export function startTunnel(tools: SshTools, ssh: SshConnection, knownHosts: string, localPort: number, serverPort: number): Bun.Subprocess {
+  return spawnResident(tunnelCommand(tools, ssh, knownHosts, localPort, serverPort));
 }
 
 export async function ensureRemoteTunnel(ssh: SshConnection, paths: RuntimePaths,

@@ -18,6 +18,11 @@ export interface CaseScore { id: number; hits: number; required: number; extra: 
 export interface EvalSummary {
   hits: number; required: number; extra: number; forbiddenHit: number; scheduleOk: number; scheduleScored: number;
   decisions: { auto: number; propose: number; discard: number };
+  /**
+   * 메모 날짜 채우기 판정(yearless-date-cleanup spec 3.3) — 항목·일정 판정(decisions)과 따로 센다. autoNodeIds 는
+   * 자동으로 채울 메모 번호(과거형 메모의 지난 날짜가 실제로 채워지는지 평가 결과에서 바로 보이게).
+   */
+  memoDate: { auto: number; propose: number; none: number; autoNodeIds: number[] };
 }
 
 export function loadEvalFixture(path: string): EvalFixture {
@@ -64,7 +69,13 @@ export function scoreMissing(c: EvalCase): CaseScore {
 
 export function summarize(scores: CaseScore[], judgements: MemoJudgement[]): EvalSummary {
   const decisions = { auto: 0, propose: 0, discard: 0 };
+  const memoDate = { auto: 0, propose: 0, none: 0, autoNodeIds: [] as number[] };
   for (const j of judgements) {
+    if (j.memoDate.action === "auto") {
+      memoDate.auto += 1;
+      memoDate.autoNodeIds.push(j.nodeId);
+    } else if (j.memoDate.action === "propose") memoDate.propose += 1;
+    else memoDate.none += 1;
     for (const e of j.entities) {
       if (e.action === "discard") decisions.discard += 1;
       else if (e.action === "propose") decisions.propose += 1;
@@ -81,6 +92,7 @@ export function summarize(scores: CaseScore[], judgements: MemoJudgement[]): Eva
     scheduleOk: scores.filter((s) => s.scheduleOk === true).length,
     scheduleScored: scores.filter((s) => s.scheduleOk !== null).length,
     decisions,
+    memoDate,
   };
 }
 

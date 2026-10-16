@@ -45,9 +45,12 @@ export interface EntityRegisterRecord extends NewEntityRegisterRecord {
   revertedAt: string | null;
 }
 
-export type IgnoreKind = "entity" | "schedule";
+/** 값 목록은 v51 마이그레이션의 entity_register_ignores CHECK(kind IN …)에도 적혀 있다. */
+export type IgnoreKind = "entity" | "schedule" | "memo_date";
 /** 일정 무시는 이름이 없어 빈 키 하나로 둔다. */
 export const SCHEDULE_IGNORE_NAME_KEY = "";
+/** 메모 날짜 무시도 메모마다 하나라 빈 키 하나로 둔다. */
+export const MEMO_DATE_IGNORE_NAME_KEY = "";
 
 export function emptyRecordDetail(): EntityRegisterRecordDetail {
   return { edges: [], createdRow: null, aliasAdded: null, scheduleNodeId: null, date: null, deletedRowSnapshot: null, keptRowReason: null };
@@ -251,6 +254,14 @@ export class EntityRegisterRecordsRepository {
     requirePositiveInteger(sourceNodeId, "sourceNodeId");
     return this.db
       .query("SELECT 1 FROM entity_register_ignores WHERE source_node_id = ? AND kind = 'schedule' LIMIT 1")
+      .get(sourceNodeId) !== null;
+  }
+
+  /** 이 메모에서 사용자가 메모 날짜 채우기를 거절했거나 채운 날짜를 되돌렸는가. */
+  isMemoDateIgnored(sourceNodeId: number): boolean {
+    requirePositiveInteger(sourceNodeId, "sourceNodeId");
+    return this.db
+      .query("SELECT 1 FROM entity_register_ignores WHERE source_node_id = ? AND kind = 'memo_date' LIMIT 1")
       .get(sourceNodeId) !== null;
   }
 }

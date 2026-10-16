@@ -15,6 +15,8 @@
  *   5. 행을 남기면 이 회차가 그 행에 더한 별칭(detail.aliasAdded)만 뺀다. 원래 있던 별칭은 그대로다.
  *   6. 기록을 reverted 로 바꾸고 (메모, 이름) 무시 기록(reason=reverted)을 남겨 같은 이름이 다시 자동 등록되지 않게 한다.
  *
+ * 메모 날짜 기록(memo_date_filled)은 위 갈래 대신 revertMemoDate 로 메모 날짜만 다룬다(이 회차가 채운 값 그대로일 때만 지움).
+ *
  * 원본 메모가 영구 삭제된 기록도 되돌릴 수 있다 — 메모 연결은 메모와 함께 이미 사라졌고(지울 연결 0개),
  * 만든 행은 같은 규칙으로 처리한다. 무시 기록 표는 메모 FK 가 없어 그대로 남는다(v48).
  */
@@ -24,9 +26,10 @@ import { EN_ALIASES_ATTR_KEY, KO_ALIASES_ATTR_KEY } from "../../../db/store-inte
 import { toNfc } from "../../nfc.ts";
 import { withMemoryMutationLock } from "../../shared-memory-mutation-lock.ts";
 import { runImmediateTransactionAsync } from "./apply-transaction.ts";
+import { readMemoEventAt } from "./candidate-query.ts";
 import { nameKey } from "./name-match.ts";
 import {
-  SCHEDULE_IGNORE_NAME_KEY, type EntityRegisterRecord, type EntityRegisterRecordDetail, type EntityRegisterRecordsRepository, type RecordedEdge,
+  MEMO_DATE_IGNORE_NAME_KEY, SCHEDULE_IGNORE_NAME_KEY, type EntityRegisterRecord, type EntityRegisterRecordDetail, type EntityRegisterRecordsRepository, type RecordedEdge,
 } from "./records-repository.ts";
 
 const PERSON_TYPE = "person";
@@ -51,6 +54,31 @@ export interface RevertResult {
   /** 남긴 행에서 뺀, 이 회차가 더한 별칭. 뺄 것이 없었거나 행을 지웠으면 null. */
   removedAlias: string | null;
   trashedScheduleNodeId: number | null;
+  /** 메모 날짜 기록을 되돌려 지운 날짜. 지우지 않았거나(그 사이 바뀜·메모 없음) 메모 날짜 기록이 아니면 null. */
+  clearedMemoDate: string | null;
+}
+
+/**
+ * 메모 날짜 기록 되돌리기(2026-10-16 yearless-date-cleanup spec 3.8). 메모 날짜가 이 기록이 채운 값 그대로(날짜 부분 같음 +
+ * 출처 inferred)일 때만 지운다. 사용자가 고쳤거나(direct) 다른 경로가 그 사이 썼으면 지우지 않고 keptRowReason 칸에
+ * 이유를 적는다(칸 이름은 "행을 남긴 이유"지만 옛 기록 읽기를 깨지 않으려 이 칸을 함께 쓴다). 메모가 영구 삭제됐으면 지울 것이 없다.
+ */
+async function revertMemoDate(
+  store: SqliteMemoryStore, record: EntityRegisterRecord, detail: EntityRegisterRecordDetail,
+): Promise<{ cleared: string | null; keptReason: string | null }> {
+  const date = record.detail.date;
+  if (date === null) throw new Error(`${ERROR_PREFIX}: 메모 날짜 기록 ${record.id} 에 날짜(detail.date)가 없음`);
+  const current = readMemoEventAt(store.getRawDb(), record.sourceNodeId);
+  if (!current.found) return { cleared: null, keptReason: null };
+  if (current.eventAt !== null && current.eventAt.slice(0, 10) === date && current.source === "inferred") {
+    if (!(await store.clearEventAt(record.sourceNodeId, "inferred"))) {
+      throw new Error(`${ERROR_PREFIX}: 메모 ${record.sourceNodeId} 의 날짜 ${date} 를 지우지 못함`);
+    }
+    return { cleared: date, keptReason: null };
+  }
+  const keptReason = `메모 날짜가 그 사이 바뀌어 지우지 않음(출처 ${current.source ?? "기록 없음"}, 값 ${current.eventAt ?? "없음"})`;
+  detail.keptRowReason = keptReason;
+  return { cleared: null, keptReason };
 }
 
 type IdentityEdge = Extract<RecordedEdge, { table: "entity_concept_edges" }>;
@@ -221,6 +249,17 @@ export async function revertEntityRegisterRecord(
     };
 
     return runImmediateTransactionAsync(db, async (): Promise<RevertResult> => {
+      if (record.itemKind === "memo_date_filled") {
+        const detail: EntityRegisterRecordDetail = { ...record.detail };
+        const memoDate = await revertMemoDate(store, record, detail);
+        if (!records.markReverted(recordId, detail)) throw new EntityRegisterRevertError(`자동 등록 기록 ${recordId} 은(는) 이미 되돌림`, 409);
+        // 다음에 단계 버전이 올라 다시 처리돼도 같은 날짜를 다시 채우지 않게 한다.
+        records.addIgnore(record.sourceNodeId, "memo_date", MEMO_DATE_IGNORE_NAME_KEY, "reverted");
+        return {
+          recordId, removedEdges: 0, deletedRow: null, keptRowReason: memoDate.keptReason, removedAlias: null,
+          trashedScheduleNodeId: null, clearedMemoDate: memoDate.cleared,
+        };
+      }
       const identityEdges = record.detail.edges.filter((e): e is IdentityEdge => e.table === "entity_concept_edges");
       let removed = 0;
       let trashedScheduleNodeId: number | null = null;
@@ -262,7 +301,7 @@ export async function revertEntityRegisterRecord(
       if (!records.markReverted(recordId, detail)) throw new EntityRegisterRevertError(`자동 등록 기록 ${recordId} 은(는) 이미 되돌림`, 409);
       if (record.itemKind === "schedule_created") records.addIgnore(record.sourceNodeId, "schedule", SCHEDULE_IGNORE_NAME_KEY, "reverted");
       else records.addIgnore(record.sourceNodeId, "entity", nameKey(record.name), "reverted");
-      return { recordId, removedEdges: removed, deletedRow, keptRowReason: detail.keptRowReason, removedAlias, trashedScheduleNodeId };
+      return { recordId, removedEdges: removed, deletedRow, keptRowReason: detail.keptRowReason, removedAlias, trashedScheduleNodeId, clearedMemoDate: null };
     });
   });
 }

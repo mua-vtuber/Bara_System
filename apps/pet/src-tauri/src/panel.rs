@@ -151,6 +151,14 @@ fn outer_rect(window: &WebviewWindow) -> Result<PhysicalRect<i32, u32>, HostErro
     })
 }
 
+fn guide_size(size: PhysicalSize<u32>, work: PhysicalSize<u32>, margin: u32) -> PhysicalSize<u32> {
+    PhysicalSize::new(
+        size.width.min(work.width.saturating_sub(2 * margin).max(1)),
+        size.height
+            .min(work.height.saturating_sub(2 * margin).max(1)),
+    )
+}
+
 /// Moves the hidden panel next to the pet (when it is on screen) or the tray icon, on the monitor
 /// under that anchor; with neither, to the middle of the primary monitor.
 fn place(app: &AppHandle, panel: &WebviewWindow) -> Result<(), HostError> {
@@ -191,7 +199,16 @@ fn place(app: &AppHandle, panel: &WebviewWindow) -> Result<(), HostError> {
         .map_err(window_failed)?;
     // If the move resized the panel to something other than the estimate (rounding, a title bar
     // that does not scale exactly), place it again with the size it really has now.
-    if let Ok(actual) = panel.outer_size() {
+    if let Ok(mut actual) = panel.outer_size() {
+        if panel.label() == "guide" {
+            let fitted = guide_size(actual, work.size, margin);
+            if fitted != actual {
+                // Fit after moving, on the target monitor's scale. Tauri keeps the configured
+                // minimum; if even that is too large, the clamp leaves the title bar reachable.
+                panel.set_size(fitted).map_err(window_failed)?;
+                actual = panel.outer_size().map_err(window_failed)?;
+            }
+        }
         if actual != current && actual != size {
             panel
                 .set_position(panel_position(anchor, actual, work, margin, gap))
@@ -206,8 +223,17 @@ fn place(app: &AppHandle, panel: &WebviewWindow) -> Result<(), HostError> {
 /// `open_panel`, the tray's "설정"), the first-run setup at startup (`tray::show_panel`) and a
 /// click on a feedback bubble (`feedback::open_feedback`).
 pub fn show(app: &AppHandle) -> Result<WebviewWindow, HostError> {
+    show_window(app, "main")
+}
+
+/// The guide has its own window and page state; opening it never changes the settings view.
+pub fn show_guide(app: &AppHandle) -> Result<(), HostError> {
+    show_window(app, "guide").map(|_| ())
+}
+
+fn show_window(app: &AppHandle, label: &str) -> Result<WebviewWindow, HostError> {
     let panel = app
-        .get_webview_window("main")
+        .get_webview_window(label)
         .ok_or(HostError::new(code::HOST_WINDOW_MISSING))?;
     if !panel.is_visible().map_err(window_failed)? {
         // Placing is a convenience: if it fails, the panel still opens, where it was.
@@ -225,6 +251,60 @@ pub fn show(app: &AppHandle) -> Result<WebviewWindow, HostError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn guide_is_a_separate_hidden_notebook_window() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let windows = config["app"]["windows"].as_array().unwrap();
+        let guides: Vec<_> = windows
+            .iter()
+            .filter(|window| window["label"] == "guide")
+            .collect();
+        assert_eq!(guides.len(), 1, "one reusable guide window");
+        let guide = guides[0];
+        assert_eq!(guide["url"], "index.html?view=guide");
+        assert_eq!(guide["visible"], false);
+        assert_eq!(guide["transparent"], true);
+        assert_eq!(guide["decorations"], false);
+        assert_eq!(guide["resizable"], true);
+        assert!(guide["minWidth"].as_u64().unwrap() >= 540);
+        assert!(guide["minHeight"].as_u64().unwrap() >= 560);
+    }
+
+    #[test]
+    fn guide_permissions_are_limited_to_its_window_controls() {
+        let capability: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/guide-window.json")).unwrap();
+        assert_eq!(capability["windows"], serde_json::json!(["guide"]));
+        let permissions = capability["permissions"].as_array().unwrap();
+        assert_eq!(permissions.len(), 3);
+        for permission in [
+            "core:window:allow-start-dragging",
+            "core:window:allow-minimize",
+            "core:window:allow-hide",
+        ] {
+            assert!(permissions.contains(&serde_json::json!(permission)));
+        }
+        let events: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/app-events.json")).unwrap();
+        assert!(!events["windows"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("guide")));
+    }
+
+    #[test]
+    fn guide_fits_a_shorter_work_area_without_enlarging_a_small_window() {
+        let size = PhysicalSize::new(760, 760);
+        assert_eq!(
+            guide_size(size, PhysicalSize::new(1024, 640), 12),
+            PhysicalSize::new(760, 616)
+        );
+        assert_eq!(guide_size(size, PhysicalSize::new(1920, 1040), 12), size);
+        let small = PhysicalSize::new(540, 560);
+        assert_eq!(guide_size(small, PhysicalSize::new(1920, 1040), 12), small);
+    }
 
     fn rect(x: i32, y: i32, width: u32, height: u32) -> PhysicalRect<i32, u32> {
         PhysicalRect {

@@ -25,8 +25,21 @@ test("a memo the model left unanswered is an error, never a correct-looking empt
 });
 
 test("summary counts judge decisions", () => {
-  const sum = summarize([], [{ nodeId: 1, entities: [{ action: "auto_create", type: "person", name: "a" }, { action: "discard", type: "person", name: "b", reason: "not_in_text" }], schedule: { action: "auto", title: "t", date: "2026-01-01", dateText: "1월 1일" } }]);
+  const sum = summarize([], [{ nodeId: 1, entities: [{ action: "auto_create", type: "person", name: "a" }, { action: "discard", type: "person", name: "b", reason: "not_in_text" }], schedule: { action: "auto", title: "t", date: "2026-01-01", dateText: "1월 1일" }, memoDate: { action: "none", reason: "already_set" } }]);
   expect(sum.decisions).toEqual({ auto: 2, propose: 0, discard: 1 });
+  expect(sum.memoDate).toEqual({ auto: 0, propose: 0, none: 1, autoNodeIds: [] });
+});
+
+test("summary counts memo-date judgements separately, with the memos that would be filled", () => {
+  const base = { entities: [], schedule: { action: "none" as const, reason: "no_date" as const } };
+  const sum = summarize([], [
+    // 과거형 메모(평가 자료 3번 같은 "…에 다녀옴")의 지난 날짜 채움.
+    { nodeId: 3, ...base, memoDate: { action: "auto", date: "2026-01-05", dateText: "1월 5일" } },
+    { nodeId: 4, ...base, memoDate: { action: "propose", reason: "relative", date: "2006-09-28", dateText: "06년 9월 28일" } },
+    { nodeId: 5, ...base, memoDate: { action: "none", reason: "not_yearless" } },
+  ]);
+  expect(sum.memoDate).toEqual({ auto: 1, propose: 1, none: 1, autoNodeIds: [3] });
+  expect(sum.decisions).toEqual({ auto: 0, propose: 0, discard: 0 });
 });
 
 test("answers for memos outside the batch and repeated answers for one memo are dropped and counted", () => {

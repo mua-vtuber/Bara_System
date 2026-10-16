@@ -138,7 +138,7 @@ test("reverting a link to an existing person removes only this run's edge and ke
     schedule: null,
   });
   const result = await revertEntityRegisterRecord(store, records, out.entities[0]!.recordId!);
-  expect(result).toEqual({ recordId: out.entities[0]!.recordId!, removedEdges: 1, deletedRow: null, keptRowReason: null, removedAlias: null, trashedScheduleNodeId: null });
+  expect(result).toEqual({ recordId: out.entities[0]!.recordId!, removedEdges: 1, deletedRow: null, keptRowReason: null, removedAlias: null, trashedScheduleNodeId: null, clearedMemoDate: null });
   expect(await store.getPerson(minsu.personId)).not.toBeNull();
   expect(await store.listNodePersonEdges({ nodeId: ctx.memo.nodeId })).toEqual([]);
 }, 120_000);

@@ -10,6 +10,7 @@ import { createEmbedder, embeddingDimensionOf } from "../../../embedding/factory
 import type { Embedder } from "../../../embedding/types.ts";
 import { entityRegisterFingerprint } from "../stage-fingerprint.ts";
 import { applyMemoChanges } from "./apply.ts";
+import { readMemoEventAt } from "./candidate-query.ts";
 import { judgeMemo, judgeProfileFromLanguage } from "./judge.ts";
 import {
   approveEntityRegisterProposal, buildEntityRegisterProposal, insertEntityRegisterProposal, listEntityRegisterItems,
@@ -37,6 +38,7 @@ async function proposalFor(content: string, entities: Array<{ type: string; name
     memo: { nodeId, content, createdAt: node.createdAt, alreadyLinked: [] },
     result: { nodeId, entities, eventDateText: schedule?.dateText ?? null, eventDate: schedule?.date ?? null, scheduleTitle: schedule?.title ?? null },
     index, allowedTypes: new Set(["person", "place"]), ignoredNames: new Set(), scheduleIgnored: false, activeSchedule: null,
+    memoEventAt: readMemoEventAt(db, nodeId), memoDateIgnored: false,
     autoApply: true, profile: judgeProfileFromLanguage(),
   });
   const payload = buildEntityRegisterProposal(j, {

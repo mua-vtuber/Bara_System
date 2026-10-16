@@ -1,14 +1,15 @@
 import type { RequestContext, SshConnection } from "../../shared/contracts.ts";
 import { messages } from "../../ui/messages.ts";
 import { serviceError } from "../errors.ts";
-import { runCaptured } from "./process.ts";
+import { runCaptured, type SensitiveFailure } from "./process.ts";
 import { findSshTools, safeRemotePath, scanHost, scpBase, sshBase, trustHost, type SshTools } from "./ssh.ts";
 import { SSH_COMMAND_TIMEOUT_MS, SSH_TRANSFER_TIMEOUT_MS } from "./limits.ts";
 
 /** The SSH route one run uses for every remote command: tools, verified connection and trusted host file. */
 export interface RemoteSession { tools: SshTools; ssh: SshConnection; knownHosts: string; ctx: RequestContext }
 
-export async function sshRun(s: RemoteSession, script: string, stepName: string, timeoutMs: number = SSH_COMMAND_TIMEOUT_MS, sensitive = false): Promise<string> {
+export async function sshRun(s: RemoteSession, script: string, stepName: string, timeoutMs: number = SSH_COMMAND_TIMEOUT_MS,
+  sensitive: boolean | SensitiveFailure = false): Promise<string> {
   const output = await runCaptured([...sshBase(s.tools, s.ssh, s.knownHosts), script], s.ctx, { timeoutMs, sensitive, stepName });
   return output.stdout.trim();
 }

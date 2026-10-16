@@ -18,7 +18,10 @@ import { CleanupConfigError } from "../stage-execution.ts";
 import { recordStageDeterministicFailure, recordStageRetryable, recordStageTerminal } from "../stage-results-ledger.ts";
 import { DEFAULT_RETRY_REAPPEAR_DELAY_MS, nextRetryAt } from "../stage-retry.ts";
 import { collectEntityRegisterCandidates, type EntityRegisterCandidateRow } from "./candidate-query.ts";
-import { ENTITY_REGISTER_CYCLE_STAGE, ENTITY_REGISTER_KIND, ENTITY_REGISTER_LEDGER_STAGE, ENTITY_REGISTER_LIMITS, entityRegisterTypeNames } from "./constants.ts";
+import {
+  ENTITY_REGISTER_CYCLE_STAGE, ENTITY_REGISTER_KIND, ENTITY_REGISTER_LEDGER_STAGE, ENTITY_REGISTER_LIMITS, MEMO_DATE_SKIPPED_TYPE,
+  entityRegisterTypeNames,
+} from "./constants.ts";
 import { judgeProfileFromLanguage } from "./judge.ts";
 import { loadEntityNameIndex } from "./name-index.ts";
 import { isEntityRegisterMemoCompleted, processEntityRegisterMemo, type ProcessDeps } from "./process.ts";
@@ -47,6 +50,11 @@ export interface EntityRegisterCycleSummary {
   strayAnswers: number;
   /** 행 생성 기준에 걸려 등록하지 않은 이름 수(사유는 failureReasons 의 실패 사유 뒤 남는 자리에 남긴다). */
   skippedByGate: number;
+  /**
+   * 판정 뒤 쓰기 전에 메모 날짜가 그 사이 채워져 메모 날짜를 쓰지 않은 수(실패 아님 — 채울 것이 없어진 것).
+   * 사유("메모 날짜 채우지 않음 — …")는 skippedByGate 사유와 같은 자리에 남긴다.
+   */
+  memoDateSkipped: number;
   /** 이 사이클이 닿기 전에 다른 처리(펫 제출 등)가 같은 내용으로 먼저 끝낸 메모 수(건너뜀 — 원장은 그대로). */
   alreadyProcessed: number;
   /** 답을 쓸 수 없어(형식 오류·잘림·같은 메모 답 중복) 메모 하나씩 다시 보낸 묶음 수. */
@@ -58,7 +66,7 @@ export interface EntityRegisterCycleSummary {
 function emptySummary(): EntityRegisterCycleSummary {
   return {
     candidatesFound: 0, completed: 0, completedNoop: 0, failures: 0, terminal: 0, autoApplied: 0, proposalsInserted: 0,
-    coverageMisses: 0, failureReasons: [], strayAnswers: 0, skippedByGate: 0, alreadyProcessed: 0,
+    coverageMisses: 0, failureReasons: [], strayAnswers: 0, skippedByGate: 0, memoDateSkipped: 0, alreadyProcessed: 0,
     batchesSplit: 0, memosResentAlone: 0,
   };
 }
@@ -267,9 +275,15 @@ export async function runEntityRegisterCycle(deps: EntityRegisterCycleDeps): Pro
         summary.alreadyProcessed += 1;
         continue;
       }
-      summary.skippedByGate += out.skipped.length;
       for (const sk of out.skipped) {
-        if (skipReasons.length < ENTITY_REGISTER_LIMITS.failureReasonsKept) skipReasons.push(`메모 ${m.nodeId}: '${sk.memoName}'(${sk.type}) 등록 안 함 — ${sk.reason}`);
+        const isMemoDate = sk.type === MEMO_DATE_SKIPPED_TYPE;
+        if (isMemoDate) summary.memoDateSkipped += 1;
+        else summary.skippedByGate += 1;
+        if (skipReasons.length < ENTITY_REGISTER_LIMITS.failureReasonsKept) {
+          skipReasons.push(isMemoDate
+            ? `메모 ${m.nodeId}: 메모 날짜 '${sk.memoName}' 채우지 않음 — ${sk.reason}`
+            : `메모 ${m.nodeId}: '${sk.memoName}'(${sk.type}) 등록 안 함 — ${sk.reason}`);
+        }
       }
       if (out.ledger === "completed" || out.ledger === "completed_noop") {
         if (out.ledger === "completed") summary.completed += 1;

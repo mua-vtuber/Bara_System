@@ -1,3 +1,10 @@
+import type { ClientTokenErrorCode } from "../../../setup/src/client-token-errors.ts";
+import { EXISTING_CHOICE_LABEL } from "./messages-labels.ts";
+import { withCause } from "./messages-service-core.ts";
+
+/** The credentials step refused a value the Pet itself passed (a path, the server address or the command shape). */
+const TOKEN_TOOL_MISUSE = "펫이 인증 정보 준비 프로그램에 잘못된 값을 넘겨서 멈췄습니다. 펫 자체의 문제이니 펫을 최신 버전으로 업데이트한 뒤 다시 시도해 주세요.";
+
 /** Public texts of the local and remote install runs (`src/service/install/*`). `messages.ts` re-exports every
  * section here, so callers read `messages.<section>.<key>`. The causes that also reach the screen by code
  * (server blocks, timeouts, unverified routes) stay in `messages.connectionErrors` in `messages.ts`. */
@@ -28,6 +35,26 @@ export const serviceInstallMessages = {
     installCompleteMark: "설치 완료 표시",
     remoteProbe: "원격 상태 조사",
   },
+  /** Why the credentials step (`apps/setup/src/client-token.ts`) refused, keyed by the code its one known
+   * failure line maps to (`apps/setup/src/client-token-errors.ts`); the same code is the service error code.
+   * Any other output of that step stays `installService.sensitiveStepFailed`. The step runs on this PC or,
+   * for a remote install, on the server, so the texts name neither. */
+  clientTokenErrors: {
+    CLIENT_TOKEN_FILE_EXISTS: "인증 정보를 새로 만들려는 사이에 인증 정보 파일이 먼저 생겨 있어서, 덮어쓰지 않고 멈췄습니다. 다시 시도해 주세요.",
+    CLIENT_TOKEN_FILE_MISSING: "기존 인증 정보 파일을 읽으려는 사이에 파일이 없어져서 멈췄습니다. " +
+      "백신이나 정리 프로그램 같은 다른 프로그램이 바라의 데이터 폴더에 있는 그 파일을 옮기거나 지우지 않았는지 확인한 뒤 다시 시도해 주세요.",
+    CLIENT_TOKEN_FILE_INVALID: "기존 인증 정보 파일의 내용이 올바르지 않아 읽지 않았습니다. 파일을 고치거나 새로 만들지 않고 멈췄습니다. " +
+      "다른 프로그램이 이 파일을 바꾸지 않았는지 확인해 주세요.",
+    CLIENT_TOKEN_SCOPES_MISSING: "기존 인증 정보 파일에 펫용과 관리 화면용 인증 정보가 함께 들어 있지 않아 쓰지 않았습니다. " +
+      "파일을 고치거나 새 인증 정보를 만들지 않고 멈췄습니다. 다른 설치에서 가져온 파일이 아닌지 확인해 주세요.",
+    CLIENT_TOKEN_SERVER_RESPONDING: "메모리 서버가 쓸 포트에서 이미 다른 서버가 응답하고 있어서 새 인증 정보를 만들지 않았습니다. " +
+      `그 서버를 끈 뒤 다시 시도하거나, 그 서버가 바라라면 '${EXISTING_CHOICE_LABEL}'로 연결해 주세요.`,
+    CLIENT_TOKEN_STOP_UNCONFIRMED: "메모리 서버가 쓸 포트가 비어 있는지 정해진 시간 안에 확인하지 못해서, 새 인증 정보를 만들지 않고 멈췄습니다. " +
+      "잠시 뒤 다시 시도해 주세요. 계속 반복되면 VPN이나 보안 프로그램이 메모리 서버를 설치하는 컴퓨터 안의 연결을 막거나 늦추고 있지 않은지 확인해 주세요.",
+    CLIENT_TOKEN_PATH_NOT_ABSOLUTE: TOKEN_TOOL_MISUSE,
+    CLIENT_TOKEN_URL_INVALID: TOKEN_TOOL_MISUSE,
+    CLIENT_TOKEN_USAGE: TOKEN_TOOL_MISUSE,
+  } satisfies Record<ClientTokenErrorCode, string>,
   /** What a finished local install run did (the remote run's are in `remoteInstall`). */
   localInstall: {
     reused: "기존 로컬 메모리 서버에 연결했습니다.",
@@ -78,6 +105,10 @@ export const serviceInstallMessages = {
     /** The tunnel came up on another local port than the saved one, and this connection cannot take the new address. */
     tunnelAddressKeepFailed: "기존 SSH 연결 주소를 유지할 수 없습니다.",
     tunnelExited: "SSH 터널이 시작 중 종료되었습니다.",
+    /** The saved tunnel closed or did not open, and the service's own attempt to open it again failed
+     * (`tunnel-keeper.ts`); it tries again on its own. Shown on the status line while the tunnel stays closed. */
+    tunnelReopenFailed: (cause: string) =>
+      withCause("SSH 터널이 닫혀 펫이 스스로 다시 열려고 했지만 실패했습니다. 잠시 뒤 다시 시도합니다.", cause),
     tunnelPortTaken: (port: number, others: readonly number[]) =>
       `다른 프로그램(PID ${others.join(", ")})이 SSH 터널의 로컬 포트 ${port}를 사용하고 있습니다. 그 프로그램을 종료한 뒤 다시 시도해 주세요.`,
     tunnelBindFailed: "SSH 터널이 로컬 포트를 열지 못했습니다.",

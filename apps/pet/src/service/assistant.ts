@@ -41,6 +41,9 @@ export class Assistant {
     const saved = await this.client.save(input, ctx);
     // The server's write guard must accept the note before any model can see it.
     if (saved.state !== "saved" || !saved.memory || !saved.audience || input.kind !== undefined || !input.autoClassify || ctx.signal.aborted) return saved;
+    // No answer AI chosen is the user's setting, not a failure: the note is saved and nothing is classified,
+    // the same way `ask` answers from the search alone. A provider without a model still reports why below.
+    if ((await this.config.load()).ai.provider === "none") return saved;
     let kindApplied: Capture | undefined;
     try {
       const allowed = await this.client.allowedCaptureKinds(ctx, saved.audience);

@@ -25,6 +25,10 @@ import {
   extractorMaxOutputTokensError,
   extractorOutputExceedsOllamaContextError,
 } from "../memory/extractor-output-limit";
+import {
+  metadataInferMaxOutputTokensError,
+  metadataInferOutputExceedsOllamaContextError,
+} from "../memory/metadata-infer-output-limit";
 import { resolveOllamaNumCtx } from "../llm/ollama-num-ctx";
 import { validateStageAllocation } from "../memory/cleanup-deep-pass/cycle-budget";
 import { migrateLegacyKeys } from "./migrate-legacy-keys";
@@ -260,7 +264,7 @@ export function getMemorySettings(path: string, secretsPath: string): MemorySett
     throw new Error(`memory-settings 검증 실패: ${path} — ${pairTokensError}`);
   }
   // 2026-10-15 extractor-output-limit spec 3.2 — 손으로 고친 파일의 추출 출력 한도도 읽기에서 멈춘다(조용히 고쳐 쓰지 않음).
-  const outputLimitErrors = extractorOutputLimitErrors(merged);
+  const outputLimitErrors = llmOutputLimitErrors(merged);
   if (outputLimitErrors.length > 0) {
     throw new Error(`memory-settings 검증 실패: ${path} — ${outputLimitErrors.join("; ")}`);
   }
@@ -272,14 +276,20 @@ export function getMemorySettings(path: string, secretsPath: string): MemorySett
 }
 
 /**
- * 추출 출력 한도(llm.extractor.maxOutputTokens)의 범위와 Ollama 컨텍스트 창 관계를 본다 (spec 3.2·3.3).
+ * 추출 출력 한도(llm.extractor.maxOutputTokens)와 장소·시각 채우기 출력 한도(metadataInfer.maxOutputTokens)의
+ * 범위와 Ollama 컨텍스트 창 관계를 본다 (extractor-output-limit spec 3.2·3.3 과 같은 규칙).
  * 환경 변수 OLLAMA_NUM_CTX 를 읽으므로 환경을 읽지 않는 validateMemorySettings 가 아닌 이 입출력 계층에 둔다.
  * 공급자가 ollama 가 아니면 환경 변수를 읽지 않는다. 잘못된 환경 변수는 던지지 않고 같은 검증 실패 문장에 담는다.
  */
-function extractorOutputLimitErrors(settings: MemorySettings): string[] {
+function llmOutputLimitErrors(settings: MemorySettings): string[] {
   const slot = settings.llm.extractor;
-  const rangeError = extractorMaxOutputTokensError(slot.maxOutputTokens);
-  if (rangeError !== null) return [rangeError];
+  // 장소·시각 채우기(metadataInfer)는 추출과 같은 llm.extractor 클라이언트를 타므로 같은 공급자·같은 창으로 함께 본다.
+  const inferLimit = settings.metadataInfer.maxOutputTokens;
+  const rangeErrors = [
+    extractorMaxOutputTokensError(slot.maxOutputTokens),
+    metadataInferMaxOutputTokensError(inferLimit),
+  ].filter((e): e is string => e !== null);
+  if (rangeErrors.length > 0) return rangeErrors;
   if (slot.provider !== "ollama") return [];
   let numCtx: number;
   try {
@@ -287,8 +297,10 @@ function extractorOutputLimitErrors(settings: MemorySettings): string[] {
   } catch (err) {
     return [(err as Error).message];
   }
-  const relationError = extractorOutputExceedsOllamaContextError(slot.maxOutputTokens, numCtx);
-  return relationError === null ? [] : [relationError];
+  return [
+    extractorOutputExceedsOllamaContextError(slot.maxOutputTokens, numCtx),
+    metadataInferOutputExceedsOllamaContextError(inferLimit, numCtx),
+  ].filter((e): e is string => e !== null);
 }
 
 /**
@@ -339,7 +351,7 @@ export function putMemorySettings(
   }
 
   // 2026-10-15 extractor-output-limit spec 3.2 — 추출 출력 한도가 Ollama 컨텍스트 창을 넘는 설정이 디스크에 안 써지게 쓰기 전에도 본다.
-  const outputLimitErrors = extractorOutputLimitErrors(shielded);
+  const outputLimitErrors = llmOutputLimitErrors(shielded);
   if (outputLimitErrors.length > 0) {
     throw new MemorySettingsValidationError(outputLimitErrors);
   }

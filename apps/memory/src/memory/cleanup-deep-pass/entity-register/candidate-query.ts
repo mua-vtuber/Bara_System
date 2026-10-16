@@ -5,11 +5,12 @@
  * 원장 거름이 SQL 밖(지문 계산)이라, 앞쪽이 모두 처리된 경우에도 상한을 채우도록 id 순으로 쪽 단위로 훑는다.
  */
 import type { Database } from "bun:sqlite";
+import { readFieldSource } from "../../field-provenance.ts";
 import { entityRegisterFingerprint } from "../stage-fingerprint.ts";
 import { filterCandidatesByLedger } from "../stage-results-ledger.ts";
 import { AUTO_CAPTURE_SOURCE_TYPE, isCurrentMemory, isDerivedShaped } from "../../shared-memory-contract.ts";
 import { ENTITY_REGISTER_LEDGER_STAGE, ENTITY_REGISTER_LIMITS, SCHEDULE_OCCURRENCE_KEY } from "./constants.ts";
-import type { EntityRegisterMemo } from "./types.ts";
+import type { EntityRegisterMemo, MemoEventAtState } from "./types.ts";
 
 export interface EntityRegisterCandidateRow extends EntityRegisterMemo {
   targetKey: string;
@@ -46,6 +47,19 @@ export function readOriginalMemo(db: Database, nodeId: number): { nodeId: number
     .get(nodeId, AUTO_CAPTURE_SOURCE_TYPE) as RawMemo | null;
   if (!row || !isOriginalMemo(row)) return null;
   return { nodeId: row.id, content: row.content, createdAt: row.created_at };
+}
+
+/**
+ * 메모의 현재 event_at 칸 — 메모 날짜 판정(spec 3.3 1·2번)과 반영 직전 재확인이 읽는다. 출처 기록(fieldSources)이
+ * 아니라 칸 자체를 본다: 출처 기록 없이 값만 있는 옛 메모도 "이미 있음"으로 보아 덮어쓰지 않는다.
+ * 행이 없으면(판정 직전에 지워짐) found:false.
+ */
+export function readMemoEventAt(db: Database, nodeId: number): MemoEventAtState {
+  const row = db.query("SELECT event_at, metadata_json FROM knowledge_nodes WHERE id = ?").get(nodeId) as
+    | { event_at: string | null; metadata_json: string | null }
+    | null;
+  if (row === null) return { found: false };
+  return { found: true, eventAt: row.event_at, source: readFieldSource(row.metadata_json, "event_at") ?? null };
 }
 
 export function listAlreadyLinkedNames(db: Database, nodeId: number): string[] {

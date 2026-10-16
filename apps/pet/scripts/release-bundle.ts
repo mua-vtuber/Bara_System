@@ -28,7 +28,7 @@ export const GENERATED_DASHBOARD = [
 ];
 export const SETUP_FILES = new Set([
   "apps/setup/package.json", "apps/setup/PET-INTEGRATION.md",
-  "apps/setup/src/managed-prepare.ts", "apps/setup/src/client-token.ts",
+  "apps/setup/src/managed-prepare.ts", "apps/setup/src/client-token.ts", "apps/setup/src/client-token-errors.ts",
   "apps/setup/src/managed-models.ts", "apps/setup/src/managed-restore.ts",
 ]);
 

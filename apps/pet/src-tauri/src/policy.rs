@@ -186,6 +186,17 @@ mod tests {
     }
 
     #[test]
+    fn guide_cannot_read_or_write_service_data() {
+        for method in METHODS {
+            assert_eq!(
+                rejection("guide", json!({"id":"g","method":method,"params":{}})),
+                code::HOST_WINDOW_NOT_ALLOWED,
+                "{method}"
+            );
+        }
+    }
+
+    #[test]
     fn pet_cannot_call_write_methods() {
         assert!(validate_request("pet", &json!({"id":"a","method":"status","params":{}})).is_ok());
         assert_eq!(

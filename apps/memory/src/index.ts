@@ -384,12 +384,15 @@ const extractorSlot = settings.llm.extractor;
 //   no-op + 사유 로그(graceful — 잘못된 자동 데이터 0). extractor 자체가 꺼지면
 //   onCycleComplete 가 안 불려 갈래 2 도 자연히 안 돈다(얹힌 구조).
 //
-//   infer 함수 = createOllamaInferFn(llm). llm 미가용(null)이면 infer=null 로 둬
+//   infer 함수 = createOllamaInferFn(llm, { maxOutputTokens }) — 출력 한도는 settings.metadataInfer.maxOutputTokens
+//   하나에서 와서 infer 함수와 사이클(잘린 세션 후보 제외)에 같은 값으로 들어간다. llm 미가용(null)이면 infer=null 로 둬
 //   runMetadataInferCycle 이 no-op 분기를 탄다. enabled=false 면 호출 자체를 건너뛴다.
 const metadataInferSlot = settings.metadataInfer;
 const metadataInferFn =
   metadataInferSlot.enabled && llm !== null
-    ? createOllamaInferFn(llm)
+    ? createOllamaInferFn(asObservableLlmClient(llm, "llm.extractor"), {
+        maxOutputTokens: metadataInferSlot.maxOutputTokens,
+      })
     : null;
 // Phase 7 2차 Task 6 — 중복 진입 차단 플래그(원인 2). onExtractorCycleComplete 은
 // fire-and-forget(void)이라 이전 갈래 2 사이클이 아직 ollama 로 도는 중에 다음
@@ -416,6 +419,7 @@ const onExtractorCycleComplete = (): void => {
     eventBus,
     gapMinutes: metadataInferSlot.sessionGapMinutes,
     batchSize: metadataInferSlot.batchSize,
+    maxOutputTokens: metadataInferSlot.maxOutputTokens,
   })
     .catch((e) => {
       console.error(
@@ -453,7 +457,7 @@ if (intervalMin > 0) {
     console.log(
       `[memory-api] 맥락 추론 메타 전파(갈래 2): ${
         metadataInferFn !== null
-          ? `의미 추출 사이클 끝마다 가동 (G=${metadataInferSlot.sessionGapMinutes}분, batch=${metadataInferSlot.batchSize})`
+          ? `의미 추출 사이클 끝마다 가동 (G=${metadataInferSlot.sessionGapMinutes}분, batch=${metadataInferSlot.batchSize}, 출력 한도=${metadataInferSlot.maxOutputTokens})`
           : metadataInferSlot.enabled
             ? "enabled=true 이나 LLM 미가용 — 미가동(graceful)"
             : "enabled=false — 미가동"

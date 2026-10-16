@@ -1,4 +1,4 @@
-import type { HostErrorPayload } from "../shared/contracts.ts";
+import { INSTALL_RUNNING_CODE, type HostErrorPayload } from "../shared/contracts.ts";
 import { messages } from "./messages.ts";
 
 /** Whether a rejection is the native host's `{ code, message?, status? }` object (`src-tauri/src/host_error.rs`). */
@@ -13,6 +13,12 @@ export function isHostErrorPayload(error: unknown): error is HostErrorPayload {
 /** The code of a native rejection, or undefined when the rejection is not a host error object. */
 export function hostErrorCode(error: unknown): string | undefined {
   return isHostErrorPayload(error) ? error.code : undefined;
+}
+
+/** Whether the request was refused only because an install still runs (`INSTALL_RUNNING`): told as information, not
+ * as a failure, because it works once the install is done. */
+export function isInstallRunning(error: unknown): boolean {
+  return hostErrorCode(error) === INSTALL_RUNNING_CODE;
 }
 
 function hostErrorText(code: string): string | undefined {

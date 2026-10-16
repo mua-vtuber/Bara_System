@@ -357,3 +357,51 @@ describe("extractEventDate — 회귀 가드(시각 추가가 날짜-only 거동
     expect(extractEventDate("14시 약속", NOW)).toBeNull();
   });
 });
+
+// 회귀 가드(2026-10-10 실측): "다음 달 15일" 이 달 토큰만 보고 11월 1일로 풀리던 결함.
+// 상대 달 토큰 바로 뒤에 붙은 "N일" 은 그 달의 N일로 푼다.
+describe("상대 달 + 일('다음 달 15일' 류, now=2026-10-10)", () => {
+  const OCT = new Date(2026, 9, 10, 12, 0, 0);
+  const cases: Array<[string, string]> = [
+    ["다음 달 15일 마감", "2026-11-15"],
+    ["다음달 15일", "2026-11-15"],
+    ["담달 3일", "2026-11-03"],
+    ["내달 30일", "2026-11-30"],
+    ["이번 달 15일", "2026-10-15"],
+    ["이번달 5일 회의", "2026-10-05"],
+    ["지난 달 15일", "2026-09-15"],
+    ["지난달 15일에 갔다", "2026-09-15"],
+    ["저번 달 30일", "2026-09-30"],
+  ];
+  test.each(cases)("extractEventDate: %s → %s", (text, expected) => {
+    expect(extractEventDate(text, OCT)).toBe(expected);
+  });
+
+  test("12월 등록 시 '다음 달 15일' 은 내년 1월 15일", () => {
+    expect(extractEventDate("다음 달 15일", new Date(2026, 11, 10))).toBe("2027-01-15");
+  });
+
+  test("1월 등록 시 '지난달 20일' 은 작년 12월 20일", () => {
+    expect(extractEventDate("지난달 20일", new Date(2027, 0, 10))).toBe("2026-12-20");
+  });
+
+  test("그 달에 없는 날('다음 달 31일' — 11월은 30일까지)은 지어내지 않고 null", () => {
+    expect(extractEventDate("다음 달 31일", OCT)).toBeNull();
+    expect(eventDateRange("다음 달 31일", OCT)).toBeNull();
+  });
+
+  test("일 없는 '다음 달' 은 기존대로 그 달 1일", () => {
+    expect(extractEventDate("다음 달 계획", OCT)).toBe("2026-11-01");
+  });
+
+  test("eventDateRange: '다음 달 15일' 은 달 span 이 아니라 그 하루 점", () => {
+    expect(eventDateRange("다음 달 15일", OCT)).toEqual({
+      since: "2026-11-15",
+      until: "2026-11-15",
+    });
+  });
+
+  test("extractEventDateTime: '담달 3일 오후 2시' → 2026-11-03T14:00", () => {
+    expect(extractEventDateTime("담달 3일 오후 2시", OCT)).toBe("2026-11-03T14:00");
+  });
+});

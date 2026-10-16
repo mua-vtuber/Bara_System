@@ -163,6 +163,9 @@ describe("ko 프로파일 값 = 옛 코드 상수 동일 실증(패턴 문자열
     expect(p.eventDate.absYmd.source).toBe(
       "(\\d{4})\\s*년\\s*(\\d{1,2})\\s*월\\s*(\\d{1,2})\\s*일",
     );
+    expect(p.eventDate.absYmdNumeric.source).toBe(
+      "(?<![\\dA-Za-z.])(?!\\d{4}\\s*\\/\\s*\\d{1,2}\\s*\\.|\\d{4}\\s*\\.\\s*\\d{1,2}\\s*\\/)(\\d{4})\\s*[\\/.]\\s*(\\d{1,2})\\s*[\\/.]\\s*(\\d{1,2})(?!\\d|\\.\\d)",
+    );
     expect(p.eventDate.absMd.source).toBe("(\\d{1,2})\\s*월\\s*(\\d{1,2})\\s*일");
     expect(p.eventDate.absMdSlash.source).toBe(
       "(?<!\\d)(\\d{1,2})\\s*\\/\\s*(\\d{1,2})(?!\\d)",
@@ -203,6 +206,7 @@ describe("ko 프로파일 값 = 옛 코드 상수 동일 실증(패턴 문자열
       ["이번\\s*달|금월|이번\\s*개?월", 0],
       ["다음\\s*달|담달|내달", 1],
     ]);
+    expect(p.eventDate.monthDay.source).toBe("^\\s*(\\d{1,2})\\s*일");
     // 옛 resolver("매치가 재작년이면 -2, 아니면 -1")와 같은 매핑인지 실증.
     expect(p.eventDate.yearOffsets.map((e) => [e.regex.source, e.offsetByMatch])).toEqual([
       ["작년|재작년", { 작년: -1, 재작년: -2 }],

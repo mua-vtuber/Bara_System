@@ -104,6 +104,14 @@ fn hide_panel(window: WebviewWindow, app: AppHandle) -> Result<(), HostError> {
     main_panel(&app)?.hide().map_err(window_failed)
 }
 
+#[tauri::command]
+fn open_guide(window: WebviewWindow, app: AppHandle) -> Result<(), HostError> {
+    if !matches!(window.label(), "main" | "pet") {
+        return Err(HostError::new(code::HOST_WINDOW_NOT_ALLOWED));
+    }
+    panel::show_guide(&app)
+}
+
 /// The first-run setup's last step: keep the pet on screen (`"pet"`) or only the tray icon
 /// (`"tray"`). Same effect as the tray toggle, including saving it for the next run.
 #[tauri::command]
@@ -543,7 +551,10 @@ fn main() {
                 }
             }
             if let WindowEvent::CloseRequested { api, .. } = event {
-                if matches!(window.label(), "main" | "pet" | "quick" | "bubble") {
+                if matches!(
+                    window.label(),
+                    "main" | "pet" | "quick" | "bubble" | "guide"
+                ) {
                     api.prevent_close();
                     if window.label() == "quick" {
                         let _ = overlay::dismiss_quick(window.app_handle());
@@ -559,6 +570,7 @@ fn main() {
             request,
             open_panel,
             hide_panel,
+            open_guide,
             set_autostart,
             get_autostart,
             has_autostart_entry,

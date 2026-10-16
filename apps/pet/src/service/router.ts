@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import type { AiProbeResult, AppStatus, ConnectionSettings, ConnectionStatus, RequestContext, RuntimePaths, HostVault, RpcMethod, SaveInput, SettingsUpdate, RemoteInstallInput, SshConnection,
-  StartupCheckResult } from "../shared/contracts.ts";
+import { INSTALL_RUNNING_CODE, type AiProbeResult, type AppStatus, type ConnectionSettings, type ConnectionStatus, type RequestContext, type RuntimePaths, type HostVault, type RpcMethod,
+  type SaveInput, type SettingsUpdate, type RemoteInstallInput, type SshConnection, type StartupCheckResult } from "../shared/contracts.ts";
 import { ConfigStore } from "./config.ts";
 import { MemoryClient } from "./client.ts";
 import { Assistant } from "./assistant.ts";
@@ -11,6 +11,7 @@ import { CleanupOnSave, cleanupOnSaveTarget } from "./cleanup-on-save.ts";
 import { messages } from "../ui/messages.ts";
 import { serviceError } from "./errors.ts";
 import { InstallManager } from "./install/index.ts";
+import { keepsTunnel, TunnelKeeper, type KeepOutcome } from "./install/tunnel-keeper.ts";
 import { BackupService } from "./backup.ts";
 import { RestoreService } from "./restore.ts";
 import type { StartGate } from "./install/index.ts";
@@ -25,6 +26,7 @@ import { startupFailureFeedback } from "../ui/startup-failure.ts";
 import { PRODUCT_RELEASE_SOURCE } from "../shared/self-update.ts";
 import { PET_VERSION } from "../shared/version.ts";
 import { SelfUpdateService } from "./self-update/service.ts";
+import { RunCount } from "../shared/run-count.ts";
 
 function text(value: unknown, label: string): string {
   if (typeof value !== "string") throw serviceError("INVALID_INPUT", messages.rpc.checkField(label));
@@ -47,6 +49,20 @@ const connectionOperations = new Set<RpcMethod | "dashboard.link">([
   "memory.search", "memory.get", "memory.update", "assistant.ask", "cleanup.run", "cleanup.list",
   "install.local", "install.remote", "dashboard.link",
 ]);
+/** Requests refused at once while an install runs (`INSTALL_RUNNING`), each with its own sentence: they need the
+ * finished install (the dashboard needs the owner token an install saves only at its end), and queued behind it they
+ * would wait for minutes or fail with a connection error that does not say why. `memory.save` is refused too, as a
+ * rejected save (`installLock.saveRefused`) that keeps the input in the box. */
+type RefusedWhileInstalling = keyof typeof messages.installLock.refused;
+const REFUSED_WHILE_INSTALLING: readonly RefusedWhileInstalling[] = ["dashboard.link", "assistant.ask"];
+function refusedWhileInstalling(method: RpcMethod | "dashboard.link"): method is RefusedWhileInstalling {
+  return (REFUSED_WHILE_INSTALLING as readonly string[]).includes(method);
+}
+
+/** A save the service turned down before sending it, with the sentence that says why; the input stays in the box. */
+function saveRejected(params: Record<string, unknown>, message: string) {
+  return { state: "rejected", requestId: params.requestId, ...(typeof params.audience === "string" ? { audience: params.audience } : {}), message };
+}
 
 export class PetService {
   readonly config: ConfigStore;
@@ -62,8 +78,13 @@ export class PetService {
   private readonly selfUpdate: SelfUpdateService;
   private connectionTail: Promise<void> = Promise.resolve();
   private connectionJobs = 0;
+  /** `install.local` and `install.remote` from acceptance to their end (`AppStatus.installing`). */
+  private readonly installs = new RunCount();
   /** The startup check, run once per service start (`startup.check`); see `startupCheck`. */
   private readonly startup = new SharedRun<StartupCheckResult>((ctx) => this.startupCheck(ctx));
+  /** Opens the saved SSH tunnel again on its own after it closed or the startup check could not open it, so external
+   * AI apps that use its local port (Claude Code's bara MCP) do not wait for a Pet request; see `reopenTunnel`. */
+  private readonly tunnelKeeper = new TunnelKeeper((signal) => this.reopenTunnel(signal));
 
   constructor(paths: RuntimePaths, vault: HostVault, private readonly maintenance: Maintenance) {
     this.config = new ConfigStore(paths, vault);
@@ -86,6 +107,7 @@ export class PetService {
       cancelled: () => this.gate.cancelled(),
     };
     this.installer = new InstallManager(this.config, paths, (version) => maintenance.recordDbSchema(version), freeBytesAt, startGate);
+    this.installer.watchTunnel({ opened: () => this.tunnelKeeper.opened(), lost: () => this.tunnelKeeper.lost() });
     this.client = new MemoryClient(this.config, this.installer.routes);
     this.assistant = new Assistant(this.config, this.client);
     this.ai = new AiClient(this.config);
@@ -125,9 +147,32 @@ export class PetService {
         ? { ...check, feedback: startupFailureFeedback(randomUUID(), check.stage, check.reason) } : check);
   }
 
+  /** One `TunnelKeeper` attempt, the way a `connection.test` connects: in the connection queue, refused while a restore
+   * holds the server (the restore connects again itself when it ends), and under `connection.test`'s ceiling. Nothing
+   * shows its progress; a failure is kept by the keeper and shown on the status line (`withKeeperFailure`). */
+  private async reopenTunnel(signal: AbortSignal): Promise<KeepOutcome> {
+    if (!keepsTunnel(await this.config.snapshot())) return "unwanted";
+    await runWithCeiling((inner) => {
+      const ctx: RequestContext = { signal: inner, progress: () => {} };
+      return this.withConnection(ctx, async () => {
+        if (this.restore.holdingServer) throw serviceError("RESTORE_RUNNING", messages.restoreErrors.RESTORE_RUNNING);
+        await this.installer.ensureConnection(ctx);
+      });
+    }, ceilingFor("connection.test"), signal);
+    return "kept";
+  }
+
+  /** While the tunnel stays closed after the keeper's own attempt failed, the status line says so and why, instead of
+   * only that the tunnel is not verified. */
+  private withKeeperFailure(connection: ConnectionStatus): ConnectionStatus {
+    const failure = this.tunnelKeeper.lastFailure();
+    if (connection.connected || failure === null) return connection;
+    return { ...connection, message: messages.installService.tunnelReopenFailed(publicError(failure).message) };
+  }
+
   /** The `status` answer: every place that builds it reads the same parts, the remote server's update included. */
   private async appStatus(connection: ConnectionStatus, activeOperations: string[]): Promise<AppStatus> {
-    return { connection, activeOperations, installed: await this.installer.status(), maintenance: this.maintenance.status,
+    return { connection, activeOperations, installing: this.installs.running, installed: await this.installer.status(), maintenance: this.maintenance.status,
       update: await this.gate.status(), serverUpdate: this.installer.serverUpdater.status(),
       tunnelPort: this.installer.tunnelPortStatus() };
   }
@@ -146,6 +191,14 @@ export class PetService {
     const changesConnection = method === "install.local" || method === "install.remote" || (method === "settings.save" &&
       (params.connection !== undefined || params.token !== undefined || params.ownerToken !== undefined));
     if (changesConnection && this.restore.active) throw serviceError("RESTORE_CONNECTION_LOCKED", messages.restoreErrors.RESTORE_CONNECTION_LOCKED);
+    if (this.installs.running) {
+      if (method === "memory.save") return saveRejected(params, messages.installLock.saveRefused);
+      if (refusedWhileInstalling(method)) throw serviceError(INSTALL_RUNNING_CODE, messages.installLock.refused[method]);
+    }
+    // The install is counted from here, before it waits its turn, so `status` and the refusals above see it at once.
+    if (method === "install.local" || method === "install.remote") {
+      return this.installs.track(() => this.withConnection(ctx, () => this.dispatchInside(method, params, ctx, activeOperations)));
+    }
     if (method === "settings.save") {
       if (this.connectionJobs > 0) throw serviceError("CONNECTION_BUSY", messages.rpc.settingsSaveBusy);
       return this.withConnection(ctx, () => this.dispatchInside(method, params, ctx, activeOperations));
@@ -165,15 +218,14 @@ export class PetService {
       // `status` opens no tunnel and starts no server. `client.info` reaches the server only through a
       // listener this service already verified (`CredentialRoutes`); otherwise it reports, without
       // sending anything, that the connection is not verified yet.
-      case "status": return this.appStatus(await this.client.info(ctx.signal), activeOperations);
+      case "status": return this.appStatus(this.withKeeperFailure(await this.client.info(ctx.signal)), activeOperations);
       case "settings.get": return this.config.load();
       case "settings.save": return this.config.save(params as SettingsUpdate);
       case "connection.test": return this.client.info(ctx.signal);
       case "enrollment.start": return this.client.enrollmentStart(ctx);
       case "enrollment.poll": return this.client.enrollmentPoll(ctx);
       case "memory.save": {
-        const rejected = (message: string) =>
-          ({ state: "rejected", requestId: params.requestId, ...(typeof params.audience === "string" ? { audience: params.audience } : {}), message });
+        const rejected = (message: string) => saveRejected(params, message);
         // From a restore's start, before its server stop too: a memory saved now would stay behind in the store the
         // restore moves aside. The text says what happened to this input: it stays in the box.
         if (this.restore.holdingServer) return rejected(messages.restore.saveRefused);
@@ -256,17 +308,20 @@ export class PetService {
   }
 
   /** The host's quit began (`service.drain`): running work may still finish, but nothing is started any more for a
-   * restore that ends meanwhile (the quit then closes what runs). */
-  beginDrain(): void { this.restore.drain(); }
+   * restore that ends meanwhile, nor for a tunnel that closes (the quit then closes what runs). */
+  beginDrain(): void { this.restore.drain(); void this.tunnelKeeper.stop(); }
 
   /** The update gate closes too: a pre-update backup still running is stopped and its partial folder removed. A
    * startup check, a settings backup or a restore still running is stopped as well; a stopped restore does not start
    * the server again. The local server and tunnel close after those, so nothing they started is left behind. */
   async close(): Promise<void> {
     this.selfUpdate.close();
+    // Stopped first so no attempt starts, but waited for only beside the rest: a cancelled attempt may still be
+    // queued behind a restore that closes below.
+    const keeper = this.tunnelKeeper.stop();
     this.startup.close();
     this.cleanupOnSave.close();
     await Promise.all([this.restore.close(), this.backup.close()]);
-    await Promise.all([this.installer.close(), this.gate.close()]);
+    await Promise.all([this.installer.close(), this.gate.close(), keeper]);
   }
 }

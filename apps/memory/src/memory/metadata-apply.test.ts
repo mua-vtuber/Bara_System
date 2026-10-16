@@ -422,7 +422,9 @@ describe("applyExtractedMetadata", () => {
     expect(result.eventAtApplied).toBeNull();
   });
 
-  test("본문 포함 가드 — 노드 51형: content 에 든 진짜 토막 '5월 12일' 신뢰", async () => {
+  test("본문 포함 가드 — 노드 51형: content 에 든 토막 '5월 12일' 은 연도가 없어 비워 둔다", async () => {
+    // 토막은 본문에 그대로 있어 신뢰하지만, 연도 없는 절대 날짜라 저장한 해를 지어내지 않는다
+    // (yearless-date-cleanup spec 3.1 — 연도는 정리 AI 가 문맥으로 정해 채운다).
     const nodeId = await store.addNode({
       content: "5월 12일 무지개의원(피부과)에서 보습 관리 받음.",
     });
@@ -434,13 +436,13 @@ describe("applyExtractedMetadata", () => {
     const result = await applyExtractedMetadata(store, { nodeId, item, now });
 
     const node = await store.getNode(nodeId);
-    expect(node!.eventAt).toBe("2026-05-12");
-    expect(result.eventAtApplied).toBe("2026-05-12");
+    expect(node!.eventAt).toBeNull();
+    expect(result.eventAtApplied).toBeNull();
   });
 
-  test("본문 포함 가드 — 환산 ISO 토막은 버리고 content 의 '5월 12일' 을 스캔해 잡음", async () => {
+  test("본문 포함 가드 — 환산 ISO 토막은 버리고 content 를 훑어도 연도 없는 '5월 12일' 뿐이면 비운다", async () => {
     // 모델이 "5월 12일" 을 이미 ISO("2026-05-12")로 환산해 넣음 → content 에 없는
-    // 형식이라 가드가 버린다. 그래도 content 본문에 "5월 12일" 이 있어 그걸 잡는다.
+    // 형식이라 가드가 버린다. content 본문의 "5월 12일" 은 연도가 없어 쓰지 않는다.
     const nodeId = await store.addNode({
       content: "5월 12일에 시술을 받았다.",
     });
@@ -452,8 +454,50 @@ describe("applyExtractedMetadata", () => {
     const result = await applyExtractedMetadata(store, { nodeId, item, now });
 
     const node = await store.getNode(nodeId);
-    expect(node!.eventAt).toBe("2026-05-12");
-    expect(result.eventAtApplied).toBe("2026-05-12");
+    expect(node!.eventAt).toBeNull();
+    expect(result.eventAtApplied).toBeNull();
+  });
+
+  test("연도 없는 '1월 5일' 토막 → event_at 비움, 출처 기록도 없음", async () => {
+    const nodeId = await store.addNode({ content: "1월 5일까지 제출" });
+    const result = await applyExtractedMetadata(store, {
+      nodeId,
+      item: baseItem({ content: "1월 5일까지 제출", eventDateText: "1월 5일" }),
+      now,
+    });
+    expect(result.eventAtApplied).toBeNull();
+    const node = await store.getNode(nodeId);
+    expect(node!.eventAt).toBeNull();
+    const row = db
+      .query("SELECT metadata_json FROM knowledge_nodes WHERE id = ?")
+      .get(nodeId) as { metadata_json: string | null };
+    const meta = row.metadata_json ? JSON.parse(row.metadata_json) : {};
+    expect(meta.fieldSources?.event_at).toBeUndefined();
+  });
+
+  test("본문에 없는 토막 '2027-01-05' 는 버리고, 본문 '1월 5일 마감' 도 연도가 없어 비운다", async () => {
+    const nodeId = await store.addNode({ content: "1월 5일 마감" });
+    const result = await applyExtractedMetadata(store, {
+      nodeId,
+      item: baseItem({ content: "1월 5일 마감", eventDateText: "2027-01-05" }),
+      now,
+    });
+    expect(result.eventAtApplied).toBeNull();
+    expect((await store.getNode(nodeId))!.eventAt).toBeNull();
+  });
+
+  test("'내일 회의' → 작성일 다음 날, system 출처", async () => {
+    const nodeId = await store.addNode({ content: "내일 회의" });
+    const result = await applyExtractedMetadata(store, {
+      nodeId,
+      item: baseItem({ content: "내일 회의", eventDateText: "내일" }),
+      now,
+    });
+    expect(result.eventAtApplied).toBe("2026-06-04");
+    const row = db
+      .query("SELECT metadata_json FROM knowledge_nodes WHERE id = ?")
+      .get(nodeId) as { metadata_json: string };
+    expect(JSON.parse(row.metadata_json).fieldSources.event_at).toBe("system");
   });
 
   test("본문 포함 가드 — 요일 토막 '금요일'(content 포함) → 과거 금요일 환산", async () => {
@@ -499,11 +543,25 @@ describe("applyExtractedMetadata", () => {
     expect(db.query("SELECT name FROM entities WHERE type_name='place'").all().length).toBe(0);
   });
 
-  test("applyExtractedMetadata: event_at 을 system 출처로 기록", async () => {
+  test("applyExtractedMetadata: 연도 없는 '5월 12일 약속' 은 event_at 출처를 남기지 않는다", async () => {
     const id = await store.addNode({ content: "5월 12일 약속" });
     await applyExtractedMetadata(store, {
       nodeId: id,
       item: baseItem({ content: "5월 12일 약속", eventDateText: "5월 12일" }),
+      now: new Date("2026-06-21T00:00:00+09:00"),
+    });
+    const row = db
+      .query("SELECT metadata_json FROM knowledge_nodes WHERE id = ?")
+      .get(id) as { metadata_json: string | null };
+    const meta = row.metadata_json ? JSON.parse(row.metadata_json) : {};
+    expect(meta.fieldSources?.event_at).toBeUndefined();
+  });
+
+  test("applyExtractedMetadata: 연도 있는 날짜는 event_at 을 system 출처로 기록", async () => {
+    const id = await store.addNode({ content: "2026년 3월 5일 회의는 잘 끝났다." });
+    await applyExtractedMetadata(store, {
+      nodeId: id,
+      item: baseItem({ content: "2026년 3월 5일 회의는 잘 끝났다.", eventDateText: "2026년 3월 5일" }),
       now: new Date("2026-06-21T00:00:00+09:00"),
     });
     const row = db

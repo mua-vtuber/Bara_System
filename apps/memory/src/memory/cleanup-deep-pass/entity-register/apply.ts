@@ -7,6 +7,7 @@
  *   사람      메모·일정 노드 --node_person_edges(mentions)--> 사람
  *   다른 항목 메모·일정 노드 --node_concept_edges(mention)--> identity 개념 <--entity_concept_edges(identity)-- 항목 행
  *   일정 노드 메모에서 파생(merged_into 계보, source_type=llm_extract, event_at=inferred). schedule 항목 행은 만들지 않는다.
+ *   메모 날짜 원본 메모의 비어 있는 event_at 만 inferred 로 채운다(덮어쓰지 않음 — fillMemoDate, 2026-10-16 spec 3.5).
  *
  * identity 개념은 해시태그 항목 경로(place-entity-type.ts·place-provenance-flow.ts·place-user-entity-type.ts)와
  * 같은 종류(분류 값 개념, findOrCreateConcept + isClassificationValue)로 만든다. 사용자가 쓴 #태그 개념
@@ -25,8 +26,10 @@ import { createEntityRow, ENTITY_REGISTER_GATE_SOURCE, shouldCreateEntityRow } f
 import { toNfc } from "../../nfc.ts";
 import { withMemoryMutationLock } from "../../shared-memory-mutation-lock.ts";
 import { runImmediateTransactionAsync } from "./apply-transaction.ts";
+import { readMemoEventAt } from "./candidate-query.ts";
 import {
-  ENTITY_REGISTER_EDGE_PROVENANCE, ENTITY_REGISTER_EXCLUDED_TYPES, ENTITY_REGISTER_METADATA_KEY, SCHEDULE_OCCURRENCE_KEY, SCHEDULE_SOURCE_NODE_KEY,
+  ENTITY_REGISTER_EDGE_PROVENANCE, ENTITY_REGISTER_EXCLUDED_TYPES, ENTITY_REGISTER_METADATA_KEY, MEMO_DATE_RECORD_TARGET_TYPE,
+  MEMO_DATE_SKIPPED_TYPE, SCHEDULE_OCCURRENCE_KEY, SCHEDULE_SOURCE_NODE_KEY,
 } from "./constants.ts";
 import { emptyRecordDetail, type EntityRegisterRecordsRepository, type RecordedEdge } from "./records-repository.ts";
 import type { RecordDecidedBy } from "./types.ts";
@@ -40,6 +43,9 @@ export interface EntityApplication {
 }
 
 export interface ScheduleApplication { title: string; date: string; dateText: string; replaceNodeId: number | null }
+
+/** 원본 메모의 비어 있는 event_at 을 채운다(yearless-date-cleanup spec 3.5). date = "YYYY-MM-DD". */
+export interface MemoDateApplication { date: string; dateText: string }
 
 export interface ApplyContext {
   store: SqliteMemoryStore;
@@ -65,6 +71,8 @@ export interface ApplyOutcome {
   skipped: Array<{ memoName: string; type: string; reason: string }>;
   scheduleNodeId: number | null;
   scheduleRecordId: number | null;
+  /** 메모 날짜를 채운 기록 id. 채우라는 요청이 없었거나 그 사이 채워져 건너뛰었으면 null(건너뛴 사유는 skipped). */
+  memoDateRecordId: number | null;
 }
 
 const PERSON_TYPE = "person";
@@ -191,10 +199,13 @@ async function prepareEntities(ctx: ApplyContext, entities: EntityApplication[],
   return prepared;
 }
 
-/** 이 메모에서 앞서 이어 둔 항목 — 새 일정 노드도 그 항목에 잇는다(spec 4.5 끝 줄). */
+/**
+ * 이 메모에서 앞서 이어 둔 항목 — 새 일정 노드도 그 항목에 잇는다(spec 4.5 끝 줄). 항목 기록만 고른다 —
+ * 일정 기록·메모 날짜 기록(target_type 'memo')은 이을 항목이 아니다.
+ */
 function earlierLinkTargets(ctx: ApplyContext): LinkTarget[] {
   return ctx.records.listActiveForMemo(ctx.memo.nodeId)
-    .filter((r) => r.itemKind !== "schedule_created")
+    .filter((r) => r.itemKind === "entity_created" || r.itemKind === "entity_linked")
     .map((r) => ({
       type: r.targetType,
       id: r.targetId,
@@ -202,9 +213,35 @@ function earlierLinkTargets(ctx: ApplyContext): LinkTarget[] {
     }));
 }
 
+/**
+ * 트랜잭션 안에서 메모 event_at 을 다시 읽어 비어 있을 때만 inferred 로 채우고 기록을 남긴다. 의미 추출의 setEventAt 은
+ * 기억 쓰기 잠금을 잡지 않아 판정과 쓰기 사이에 값이 들어올 수 있다 — 그러면 쓰지 않고 skipped 에 사유를 남긴다
+ * (판정이 낡은 것이 아니라 채울 것이 없어진 것이라 메모의 다른 반영은 그대로 간다). 출처 검사(canWriteField)는
+ * 출처 기록 없는 칸을 빈 칸으로 보므로 믿지 않고 칸 자체를 본다. setEventAt 이 false 면 이름 붙은 오류로 멈춘다.
+ */
+async function fillMemoDate(ctx: ApplyContext, app: MemoDateApplication, skipped: ApplyOutcome["skipped"]): Promise<number | null> {
+  const { store, memo } = ctx;
+  const current = readMemoEventAt(store.getRawDb(), memo.nodeId);
+  if (current.found && current.eventAt !== null) {
+    skipped.push({
+      memoName: app.dateText, type: MEMO_DATE_SKIPPED_TYPE,
+      reason: `메모 날짜가 그 사이 채워짐(출처 ${current.source ?? "기록 없음"})`,
+    });
+    return null;
+  }
+  if (!(await store.setEventAt(memo.nodeId, app.date, "inferred"))) {
+    throw new Error(`${ERROR_PREFIX}: 메모 ${memo.nodeId} 에 날짜 ${app.date} 를 쓰지 못함(메모가 없거나 출처 검사 거부)`);
+  }
+  return ctx.records.insert({
+    runId: ctx.runId, proposalId: ctx.proposalId, sourceNodeId: memo.nodeId, itemKind: "memo_date_filled",
+    targetType: MEMO_DATE_RECORD_TARGET_TYPE, targetId: String(memo.nodeId), name: app.dateText, decidedBy: ctx.decidedBy,
+    detail: { ...emptyRecordDetail(), date: app.date },
+  });
+}
+
 export async function applyMemoChanges(
   ctx: ApplyContext,
-  changes: { entities: EntityApplication[]; schedule: ScheduleApplication | null },
+  changes: { entities: EntityApplication[]; schedule: ScheduleApplication | null; memoDate?: MemoDateApplication | null },
 ): Promise<ApplyOutcome> {
   const { store, records, memo } = ctx;
   const db = store.getRawDb();
@@ -324,7 +361,8 @@ export async function applyMemoChanges(
           }
         }
       }
-      return { entities: applied, skipped, scheduleNodeId, scheduleRecordId };
+      const memoDateRecordId = changes.memoDate ? await fillMemoDate(ctx, changes.memoDate, skipped) : null;
+      return { entities: applied, skipped, scheduleNodeId, scheduleRecordId, memoDateRecordId };
     });
 
     if (outcome.scheduleNodeId !== null) store.nodeRepo.emitRawMemoryAdded();

@@ -1,8 +1,8 @@
 import { afterAll, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { REPO_ROOT, assertClosureWithinRoots, buildComponentBundle, dirtyPaths, importClosure, isAdapterSource, isRuntimeSource, tarExecutable } from "./release-bundle.ts";
+import { dirname, join, relative, resolve } from "node:path";
+import { REPO_ROOT, SETUP_FILES, assertClosureWithinRoots, buildComponentBundle, dirtyPaths, importClosure, isAdapterSource, isRuntimeSource, tarExecutable } from "./release-bundle.ts";
 
 const scratch: string[] = [];
 afterAll(async () => { for (const dir of scratch) await rm(dir, { recursive: true, force: true }); });
@@ -27,6 +27,30 @@ test("the import closure follows relative imports and re-exports and names the p
   expect(await importClosure(root, "a/src/index.ts")).toEqual({ files: ["a/src/b.ts", "a/src/index.ts", "shared/c.ts"], packages: ["node:fs", "zod"] });
   await writeFile(join(root, "a", "src", "b.ts"), `export { c as b } from "./missing.ts";\n`);
   await expect(importClosure(root, "a/src/index.ts")).rejects.toThrow("./missing.ts");
+});
+
+test("every setup file a shipped setup script imports is shipped with it", async () => {
+  // A setup script is run from the installed payload, which carries only `SETUP_FILES` of apps/setup; a module
+  // it imports but the list leaves out would make the script fail to start on the user's machine.
+  // The walk stays inside apps/setup: apps/memory ships whole (`isRuntimeSource`).
+  const transpiler = new Bun.Transpiler({ loader: "ts" });
+  const scripts = [...SETUP_FILES].filter((path) => path.endsWith(".ts"));
+  expect(scripts).toContain("apps/setup/src/client-token.ts");
+  const imported = new Set<string>();
+  const queue = [...scripts];
+  while (queue.length > 0) {
+    const file = queue.pop()!;
+    const source = await Bun.file(join(REPO_ROOT, file)).text();
+    for (const item of transpiler.scanImports(source)) {
+      if (!item.path.startsWith(".")) continue;
+      const target = relative(REPO_ROOT, resolve(REPO_ROOT, dirname(file), item.path)).replaceAll("\\", "/");
+      if (!target.startsWith("apps/setup/") || imported.has(target)) continue;
+      imported.add(target);
+      queue.push(target);
+    }
+  }
+  expect(imported).toContain("apps/setup/src/client-token-errors.ts");
+  expect([...imported].filter((path) => !SETUP_FILES.has(path))).toEqual([]);
 });
 
 test("changes to tracked bundle files are reported, untracked ones are not", async () => {

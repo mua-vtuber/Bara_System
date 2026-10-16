@@ -25,6 +25,8 @@
  *   5. LLM — 섞인 세션 하나씩 "한 사건? 빈 노드에 어느 장소/시각 전파?" 물어 제안 회수.
  *      LLM 이 정상 회신하면(빈 배열 포함) 그 세션 전체 노드에 metaInferred=1 마킹
  *      (제안 0건도 평가 완료 — 재시도 대상 아님). LLM throw 한 세션은 마킹 안 함(재시도).
+ *      단 응답이 출력 한도에 잘린 세션은 metaInferTruncatedAt=<한도> 를 달아 같은 한도로는
+ *      다시 보내지 않는다(같은 입력·같은 한도는 결정적으로 또 잘림 — 매 주기 CPU 낭비 차단).
  *   6. ID 검증 — LLM 이 낸 nodeId 가 그 세션 안 노드인지 확인(환각 차단), 아니면 그
  *      제안 버림(loud console.warn). 이어서 값 출처 검증 — 대상 칸이 비어 있고, 값이
  *      같은 세션 다른 노드의 실제 장소·시각 값과 같을 때만 남긴다(본문 짐작 값 차단).
@@ -39,8 +41,6 @@
  */
 
 import type { Database } from "bun:sqlite";
-import type { LlmClient } from "../llm/types.ts";
-import { LLM_CALL_LABELS } from "../llm/call-labels.ts";
 import type { EventPublisher } from "./events/event-contract.ts";
 import {
   groupSessions,
@@ -49,6 +49,11 @@ import {
   type Session,
   type SessionNode,
 } from "./session-grouping.ts";
+import { MetadataInferOutputTruncatedError } from "./metadata-infer-llm.ts";
+import {
+  METADATA_INFER_MAX_OUTPUT_TOKENS_KEY,
+  metadataInferMaxOutputTokensError,
+} from "./metadata-infer-output-limit.ts";
 
 // ── 모듈 상수 (하드코딩 금지 — 한곳에 격리) ──────────────────────────────────
 
@@ -123,8 +128,13 @@ export interface MetadataInferCycleSummary {
   proposalsInserted: number;
   /** ID·칸·값 검증에서 버린 환각 제안 수(loud warn 동반). */
   rejectedHallucinations: number;
-  /** LLM 호출이 throw 해 건너뛴 세션 수. */
+  /** LLM 호출이 throw 해 건너뛴 세션 수(출력 한도 잘림 제외 — 다음 사이클 재시도). */
   inferFailures: number;
+  /**
+   * 응답이 출력 한도에 잘린 세션 수. 그 세션 메모에 잘린 한도를 적어(metaInferTruncatedAt)
+   * 같은 한도로는 다시 보내지 않는다 — inferFailures 와 따로 센다.
+   */
+  truncatedSessions: number;
 }
 
 // ── 후보 조회 한 행 ──────────────────────────────────────────────────────────
@@ -154,6 +164,11 @@ export interface MetadataInferCycleDeps {
   gapMinutes: number;
   /** 한 사이클 후보 노드 최대 수. 설정값(하드코딩 0). */
   batchSize: number;
+  /**
+   * 지금 쓰는 출력 한도(settings.metadataInfer.maxOutputTokens) — infer 함수를 만든 값과 같아야 한다.
+   * 이 한도에 잘렸다고 적힌 메모는 후보에서 뺀다. 한도를 바꾸면 적힌 값과 달라져 다시 후보가 된다.
+   */
+  maxOutputTokens: number;
   /** 현재 시각 주입(밀리초 epoch). 미주입 시 Date.now — 테스트는 고정값 주입. */
   now?: () => number;
   /** 로그 prefix. 기본 "[metadata-infer]". */
@@ -181,7 +196,11 @@ export async function runMetadataInferCycle(
     proposalsInserted: 0,
     rejectedHallucinations: 0,
     inferFailures: 0,
+    truncatedSessions: 0,
   };
+
+  const limitError = metadataInferMaxOutputTokensError(deps.maxOutputTokens);
+  if (limitError !== null) throw new Error(limitError);
 
   // graceful — LLM 미가용(infer=null). 잘못된 자동 데이터 0, 정직한 비활성 로그.
   if (deps.infer === null) {
@@ -192,7 +211,7 @@ export async function runMetadataInferCycle(
   }
 
   // ── 1. 후보 조회(멱등 제외) ────────────────────────────────────────────────
-  const candidates = queryCandidates(deps.db, deps.batchSize);
+  const candidates = queryCandidates(deps.db, deps.batchSize, deps.maxOutputTokens);
   if (candidates.length === 0) {
     return empty;
   }
@@ -220,6 +239,7 @@ export async function runMetadataInferCycle(
   let proposalsInserted = 0;
   let rejectedHallucinations = 0;
   let inferFailures = 0;
+  let truncatedSessions = 0;
 
   // ── 5~7. 세션별 LLM 판단 → ID 검증 → insert ──────────────────────────────
   for (const session of mixed) {
@@ -230,8 +250,26 @@ export async function runMetadataInferCycle(
     try {
       proposals = await deps.infer(inferInput);
     } catch (e) {
-      // LLM 호출이 throw 한 세션은 *평가가 안 된* 것 — 마킹하지 않는다(다음
-      // 사이클 재시도 정당). 마킹은 LLM 이 정상 회신한(빈 배열 포함) 세션만.
+      // 출력 한도 잘림 — 같은 한도로 다시 보내도 똑같이 잘린다(결정적). 평가 완료(metaInferred)로
+      // 마킹하지 않고, 잘린 한도를 세션 메모에 적어 같은 한도에서는 후보에서 뺀다.
+      if (e instanceof MetadataInferOutputTruncatedError) {
+        if (e.maxOutputTokens !== deps.maxOutputTokens) {
+          // infer 함수와 사이클이 다른 한도를 들고 있다 — 적은 값이 후보 제외와 안 맞아 같은 세션이
+          // 계속 다시 보내진다. 배선 결함이므로 조용히 넘기지 않고 사이클을 멈춘다.
+          throw new Error(
+            `${METADATA_INFER_MAX_OUTPUT_TOKENS_KEY} 불일치 — infer 함수 한도 ${e.maxOutputTokens}, 사이클 한도 ${deps.maxOutputTokens}. 같은 설정값으로 둘 다 만들어야 한다`,
+          );
+        }
+        truncatedSessions += 1;
+        markSessionTruncated(deps.db, [...allowedIds], e.maxOutputTokens);
+        console.warn(
+          `${logPrefix} 출력 한도 잘림 — 세션 멈춤(nodeIds=${[...allowedIds].join(",")}, 한도 ${e.maxOutputTokens}). ` +
+            `같은 한도로는 다시 보내지 않음 — 설정 ${METADATA_INFER_MAX_OUTPUT_TOKENS_KEY} 를 올리면 다음 주기에 다시 시도: ${e.message}`,
+        );
+        continue;
+      }
+      // 그 밖의 실패(네트워크·잘리지 않은 파싱 실패 등)는 *평가가 안 된* 것 — 마킹하지
+      // 않는다(다음 사이클 재시도 정당). 마킹은 LLM 이 정상 회신한(빈 배열 포함) 세션만.
       inferFailures += 1;
       console.warn(
         `${logPrefix} LLM 판단 실패 — 세션 건너뜀(nodeIds=${[...allowedIds].join(",")}): ${
@@ -315,11 +353,17 @@ export async function runMetadataInferCycle(
     proposalsInserted,
     rejectedHallucinations,
     inferFailures,
+    truncatedSessions,
   };
 
-  if (proposalsInserted > 0 || rejectedHallucinations > 0 || inferFailures > 0) {
+  if (
+    proposalsInserted > 0 ||
+    rejectedHallucinations > 0 ||
+    inferFailures > 0 ||
+    truncatedSessions > 0
+  ) {
     console.log(
-      `${logPrefix} cycle: 후보 ${summary.candidatesFound} / 세션 ${summary.sessionsGrouped} / 익음 ${summary.ripeSessions} / 섞임 ${summary.mixedSessions} → 제안 +${proposalsInserted}, 환각버림 ${rejectedHallucinations}, LLM실패 ${inferFailures}`,
+      `${logPrefix} cycle: 후보 ${summary.candidatesFound} / 세션 ${summary.sessionsGrouped} / 익음 ${summary.ripeSessions} / 섞임 ${summary.mixedSessions} → 제안 +${proposalsInserted}, 환각버림 ${rejectedHallucinations}, LLM실패 ${inferFailures}, 한도잘림 ${truncatedSessions}`,
     );
   }
 
@@ -340,6 +384,15 @@ export async function runMetadataInferCycle(
  *     모든 후보 노드에 markMetaInferred 가 이 플래그를 단다. 제안 0건(빈 배열·파싱
  *     실패·세션 일부만 채움)이면 제안 없음 멱등(제외 1)이 안 걸려, 이 마킹이 없으면
  *     같은 노드가 매 사이클 또 평가돼 같은 LLM 호출이 무한 반복된다(원인 1 차단).
+ *   - 멱등 제외 3 (출력 한도 잘림) — metadata.metaInferTruncatedAt 이 *지금 한도*와 같은 노드는
+ *     뺀다. 그 세션은 이 한도로 보내면 응답이 잘린다는 것이 이미 확인됐다(같은 입력·같은 한도는
+ *     결정적으로 또 잘림). 한도를 바꾸면 적힌 값과 달라져 자동으로 다시 후보가 된다 — 한도가
+ *     실패 지문의 일부(추출 실패 기록 표와 같은 결정).
+ *
+ *     세션 묶기 영향: 잘린 세션은 *익은(닫힌)* 세션이었다 — 앞뒤 이웃 메모와 각각 간격 G 를
+ *     넘게 떨어져 있었다. 그 노드들을 통째로 빼도 앞 이웃 끝 ~ 뒤 이웃 시작 간격은 G 보다 더
+ *     벌어질 뿐이라 남은 노드끼리 새로 합쳐지지 않는다(제외 2 의 마킹과 같은 성질).
+ *     한 세션의 노드는 한 트랜잭션으로 함께 적혀 일부만 빠지는 경우도 없다.
  *   - has_place — 장소가 붙은 노드. 두 경로 OR(후속 M-2): (1) 옛 concept→concept 위계
  *     (추론 addClassificationTag·ckey.name='장소') (2) place-엔티티(직접 입력·콜론 #장소·
  *     잎개념↔place 행 entity_concept_edges role='identity' + entities type_name='place'·
@@ -354,7 +407,11 @@ export async function runMetadataInferCycle(
  *
  * 멱등 판정에서 nodeId 는 정수라 ->> 가 정수로 회신 — '$.nodeId' = kn.id 정수 비교.
  */
-function queryCandidates(db: Database, batchSize: number): CandidateRow[] {
+function queryCandidates(
+  db: Database,
+  batchSize: number,
+  maxOutputTokens: number,
+): CandidateRow[] {
   const placeholders = META_CANDIDATE_SOURCE_TYPES.map(() => "?").join(",");
   const sql = `
     SELECT
@@ -424,11 +481,13 @@ function queryCandidates(db: Database, batchSize: number): CandidateRow[] {
       )
       AND (kn.metadata_json ->> '$.metaInferred' IS NULL
            OR kn.metadata_json ->> '$.metaInferred' != 1)
+      AND (kn.metadata_json ->> '$.metaInferTruncatedAt' IS NULL
+           OR kn.metadata_json ->> '$.metaInferTruncatedAt' != ?)
     ORDER BY kn.author ASC, kn.created_at ASC, kn.id ASC
     LIMIT ?`;
   const rows = db
     .prepare(sql)
-    .all(...META_CANDIDATE_SOURCE_TYPES, batchSize) as CandidateRow[];
+    .all(...META_CANDIDATE_SOURCE_TYPES, maxOutputTokens, batchSize) as CandidateRow[];
   return rows;
 }
 
@@ -466,19 +525,46 @@ function insertProposal(
  * 작동하게 하는 핵심(json('true') 의 TEXT 'true' != 1 항상 참 함정 회피).
  *
  * 한 세션의 여러 노드를 한 트랜잭션으로 묶어 부분 마킹(일부만 마킹된 채 중단)을 막는다.
+ * 예전 주기에 남은 잘림 표시(metaInferTruncatedAt)는 평가가 끝났으니 함께 지운다.
  */
 function markSessionEvaluated(db: Database, nodeIds: readonly number[]): void {
   if (nodeIds.length === 0) return;
   const stmt = db.prepare(
     `UPDATE knowledge_nodes
-       SET metadata_json = json_set(
-             COALESCE(metadata_json, '{}'),
-             '$.metaInferred', 1
+       SET metadata_json = json_remove(
+             json_set(COALESCE(metadata_json, '{}'), '$.metaInferred', 1),
+             '$.metaInferTruncatedAt'
            )
      WHERE id = ?`,
   );
   const tx = db.transaction((ids: readonly number[]) => {
     for (const id of ids) stmt.run(id);
+  });
+  tx(nodeIds);
+}
+
+/**
+ * 응답이 출력 한도에 잘린 세션의 모든 후보 노드 metadata 에 `metaInferTruncatedAt:<한도>`(정수)를 단다.
+ * queryCandidates 의 멱등 제외 3 과 1:1 — 같은 한도로는 그 세션을 다시 보내지 않는다.
+ * metaInferred 는 달지 않는다(평가가 안 됐다 — 한도를 바꾸면 다시 평가해야 한다).
+ * markSessionEvaluated 와 같은 json_set·한 트랜잭션 방식이라 기존 metadata 칸 유실 0, 부분 마킹 0.
+ */
+function markSessionTruncated(
+  db: Database,
+  nodeIds: readonly number[],
+  maxOutputTokens: number,
+): void {
+  if (nodeIds.length === 0) return;
+  const stmt = db.prepare(
+    `UPDATE knowledge_nodes
+       SET metadata_json = json_set(
+             COALESCE(metadata_json, '{}'),
+             '$.metaInferTruncatedAt', ?
+           )
+     WHERE id = ?`,
+  );
+  const tx = db.transaction((ids: readonly number[]) => {
+    for (const id of ids) stmt.run(maxOutputTokens, id);
   });
   tx(nodeIds);
 }
@@ -547,120 +633,10 @@ function parseSqliteLocaltimeMs(createdAt: string): number {
   return Number.isFinite(ms) ? ms : 0;
 }
 
-// ── 실제 ollama 판단 함수(index.ts wiring 이 활용) ───────────────────────────
+// ── 실제 LLM 판단 함수 — metadata-infer-llm.ts 로 분리(호출처·테스트 import 경로 유지용 재수출) ──
 
-/**
- * LLM 출력 온도 — 추출 흐름(extractor 0.1)보다 약간 더 보수적으로 0.1. 같은 세션
- * 입력에 재현성을 높여 환각·과분할(2.4b 이력)을 줄인다. 인라인 리터럴 회피.
- */
-const INFER_TEMPERATURE = 0.1;
-
-/** 한 판단 호출 max 출력 토큰. 제안 몇 줄 JSON 이면 충분 — 하드코딩 격리. */
-const INFER_MAX_OUTPUT_TOKENS = 512;
-
-/**
- * 갈래 2 LLM 판단 프롬프트(한국어 보수형). 사용자가 ollama 에서 직접 시도하는
- * 짧은 한국어 톤([[user-feedback-llm-prompt-style]]) — 영어 장황한 RULE 톤 회피.
- *
- * 핵심 제약(환각 차단):
- *   - 세션 안 노드 id 만 쓴다(새 id 지어내기 금지 — ID 검증이 또 걸러내지만 프롬프트에서 먼저).
- *   - 메타가 비어 있는 노드에만 채운다(이미 있는 칸 덮어쓰기 금지).
- *   - 같은 사건이 확실할 때만 전파, 애매하면 빈 배열.
- */
-const INFER_SYSTEM_PROMPT = [
-  "너는 같은 사람이 비슷한 시간에 적은 메모 묶음을 본다.",
-  "이 메모들이 한 사건(같은 자리·같은 때)인지 판단하고,",
-  "장소나 시각이 비어 있는 메모에 같은 사건의 다른 메모 값을 채울 제안을 만든다.",
-  "",
-  "규칙:",
-  "- nodeId 는 목록 각 줄 맨 앞 [번호] 의 번호만 쓴다. 없는 번호를 지어내지 마라.",
-  "- 이미 장소·시각이 있는 메모는 건드리지 않는다. 비어 있는 칸만 채운다.",
-  "- 한 사건이 확실할 때만 채운다. 애매하면 아무것도 만들지 마라.",
-  "- 채울 값은 다른 메모의 (장소=…, 시각=…) 괄호 안 값을 글자 그대로 복사한다.",
-  "- 본문 내용에서 장소·시각을 새로 짐작해 만들지 마라. 괄호 안에 값이 없으면 채울 수 없다.",
-  '- field 는 "place"(장소) 또는 "event_at"(시각) 둘 중 하나.',
-  "- evidence 는 사람이 읽을 근거 한 줄이다. 메모 번호는 쓰지 말고, 근거가 된 메모의 내용으로 설명한다.",
-  "",
-  '회신은 JSON 배열만. 각 원소는 {"nodeId":숫자,"field":"place"|"event_at","value":"값","evidence":"근거 한 줄"}.',
-  "채울 게 없으면 빈 배열 [] 만 회신한다.",
-].join("\n");
-
-/**
- * LlmClient 를 받아 SessionInferFn 을 만든다. extractor 가 쓰는 *같은* ollama
- * 클라이언트를 재사용한다(새 LLM 통로 0 — index.ts 가 createMemoryApi 의 llm 을 넘김).
- *
- * 응답 파싱은 관대하게 — 모델이 코드펜스(```json)나 앞뒤 잡담을 붙여도 첫 JSON 배열을
- * 추출한다. 파싱 실패는 throw(글루가 그 세션을 loud warn 으로 건너뜀 — silent 0건
- * 위장 금지). 배열 원소 중 형식이 어긋난 것은 거른다(글루 ID·field·value 검증이 또 걸름).
- */
-export function createOllamaInferFn(llm: LlmClient): SessionInferFn {
-  return async (input: SessionInferInput): Promise<InferredProposal[]> => {
-    const userText = renderSessionForPrompt(input);
-    const raw = await llm.chat(
-      [
-        { role: "system", content: INFER_SYSTEM_PROMPT },
-        { role: "user", content: userText },
-      ],
-      {
-        temperature: INFER_TEMPERATURE,
-        maxOutputTokens: INFER_MAX_OUTPUT_TOKENS,
-        callLabel: LLM_CALL_LABELS.metadataInfer,
-      },
-    );
-    return parseInferResponse(raw);
-  };
-}
-
-/** 세션 노드 목록을 프롬프트 본문으로 — id·내용·현재 장소·시각 표시. */
-function renderSessionForPrompt(input: SessionInferInput): string {
-  const lines = input.nodes.map((n) => {
-    const place = n.place ? `장소=${n.place}` : "장소=없음";
-    const eventAt = n.eventAt ? `시각=${n.eventAt}` : "시각=없음";
-    return `[${n.id}] "${n.content}" (${place}, ${eventAt})`;
-  });
-  return `메모 묶음:\n${lines.join("\n")}`;
-}
-
-/**
- * LLM raw 응답에서 첫 JSON 배열을 추출해 InferredProposal[] 로 환산. 코드펜스·앞뒤
- * 잡담을 허용한다. 배열을 못 찾으면 throw(silent 0건 위장 금지 — 호출자가 loud warn).
- * 원소 중 nodeId(number)·field(string)·value(string) 양식이 어긋난 것은 거른다.
- */
-function parseInferResponse(raw: string): InferredProposal[] {
-  const start = raw.indexOf("[");
-  const end = raw.lastIndexOf("]");
-  if (start < 0 || end < start) {
-    throw new Error(
-      `LLM 응답에서 JSON 배열을 못 찾음 (앞 80자: ${JSON.stringify(raw.slice(0, 80))})`,
-    );
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw.slice(start, end + 1));
-  } catch (e) {
-    throw new Error(
-      `LLM 응답 JSON 파싱 실패: ${e instanceof Error ? e.message : String(e)}`,
-    );
-  }
-  if (!Array.isArray(parsed)) {
-    throw new Error("LLM 응답이 배열이 아님");
-  }
-  const out: InferredProposal[] = [];
-  for (const el of parsed) {
-    if (typeof el !== "object" || el === null) continue;
-    const o = el as Record<string, unknown>;
-    const nodeId = o.nodeId;
-    const field = o.field;
-    const value = o.value;
-    if (typeof nodeId !== "number" || !Number.isInteger(nodeId)) continue;
-    if (field !== "place" && field !== "event_at") continue;
-    if (typeof value !== "string" || value.trim().length === 0) continue;
-    out.push({
-      nodeId,
-      field,
-      value: value.trim(),
-      evidence: typeof o.evidence === "string" ? o.evidence : undefined,
-    });
-  }
-  return out;
-}
+export {
+  createOllamaInferFn,
+  MetadataInferOutputTruncatedError,
+  type MetadataInferFnOptions,
+} from "./metadata-infer-llm.ts";

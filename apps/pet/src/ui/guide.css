@@ -1,0 +1,36 @@
+/* The guide shares the settings notebook's paper, rings, typeface and colored index tabs. */
+.guide { font-size: 14px; line-height: 1.85; }
+.guide .notebook-brand strong { font-size: 22px; letter-spacing: -.055em; }
+.guide .notebook-tools { margin-bottom: 18px; }
+.guide-companion { margin: 0; color: var(--muted); font-size: 12px; }
+.guide .notebook-page-title { font-size: 27px; margin-bottom: 13px; }
+.guide-intro { margin: 0 0 25px; color: var(--muted-strong); }
+.guide-section { margin: 0 0 25px; }
+.guide-section:last-child { margin-bottom: 0; }
+.guide-section h2 { margin-bottom: 7px; color: #486443; }
+.guide-section p { margin: 0; }
+.guide-steps { margin: 10px 0; padding-left: 23px; }
+.guide-steps li { padding-left: 3px; margin: 5px 0; }
+.guide-example { margin: 14px 0; padding: 12px 16px; background: #eee8d96b; border-left: 3px solid #b3a885; }
+.guide-example figcaption { margin-bottom: 5px; font-size: 11px; color: var(--muted); }
+.guide-example p { white-space: pre-wrap; font-weight: 600; overflow-wrap: anywhere; }
+.guide-path { display: flex; flex-wrap: wrap; gap: 5px; list-style: none; margin: 12px 0; padding: 0; color: #486443; font-weight: 700; }
+.guide-path li + li::before { content: "›"; margin-right: 5px; color: var(--muted); }
+.guide-section .guide-note { margin-top: 12px; font-size: 12px; line-height: 1.85; color: var(--muted-strong); }
+.guide-comparison { margin: 13px 0; border-top: 1px solid var(--line); }
+.guide-comparison > div { display: grid; grid-template-columns: 125px 1fr; gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.guide-comparison dt { font-weight: 700; color: #486443; }
+.guide-comparison dd { margin: 0; }
+.guide .notebook-footer { align-items: center; justify-content: space-between; }
+.guide .notebook-footer .button { flex: none; min-width: 76px; font-size: 13px; padding: 7px 16px; }
+.guide-page-count { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.guide .notebook-tab[data-page=memo] { --tab-color: #b2c68b; }
+.guide .notebook-tab[data-page=search] { --tab-color: #9bb6d9; }
+.guide .notebook-tab[data-page=schedule] { --tab-color: #efd47c; }
+.guide .notebook-tab[data-page=mcp] { --tab-color: #c4b4d7; }
+.guide .notebook-tab[data-page=faq] { --tab-color: #e3b19a; }
+@media (max-width: 560px) {
+  .guide { font-size: 13px; }
+  .guide .notebook-page-title { font-size: 23px; }
+  .guide-comparison > div { grid-template-columns: 1fr; gap: 4px; }
+}

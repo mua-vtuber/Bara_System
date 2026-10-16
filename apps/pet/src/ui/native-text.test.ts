@@ -25,7 +25,7 @@ test("messages.ts does not repeat the host catalog's error number wording", () =
 // the toggle item switches between the two pet labels, so they must be distinct.
 test("the tray menu has a non-empty label for every item and two distinct pet toggle labels", () => {
   const tray = nativeHost.text.tray;
-  expect(Object.keys(tray).sort()).toEqual(["dashboard", "hidePet", "input", "quit", "recentResult", "search", "settings", "showPet", "status", "statusAttention", "statusQuitting"]);
+  expect(Object.keys(tray).sort()).toEqual(["dashboard", "guide", "hidePet", "input", "quit", "recentResult", "search", "settings", "showPet", "status", "statusAttention", "statusQuitting"]);
   for (const label of Object.values(tray)) expect(label.trim()).not.toBe("");
   expect(tray.hidePet).not.toBe(tray.showPet);
   expect(nativeHost.contract.trayErrorEvent).toBe("pet-tray-error");

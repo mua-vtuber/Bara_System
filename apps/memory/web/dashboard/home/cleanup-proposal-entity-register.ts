@@ -1,6 +1,7 @@
 /**
  * entity_register 제안 카드의 항목별 선택(2026-10-10 spec 6장·7.3). 항목마다 선택지 하나(라디오),
- * 일정은 등록/무시와 날짜·제목 고치기. 고르지 않은 항목은 서버가 "사용자가 고르지 않음"으로 남긴다.
+ * 일정은 등록/무시와 날짜·제목 고치기, 메모 날짜는 채우기/무시와 날짜 고치기(2026-10-16 yearless-date-cleanup spec 3.7).
+ * 고르지 않은 항목은 서버가 "사용자가 고르지 않음"으로 남긴다.
  * 메모 이름·사유는 모두 텍스트 노드로만 그린다.
  */
 import { displayGraphKindLabel } from "../ui/badges.ts";
@@ -15,7 +16,9 @@ type Option =
   | { kind: "ignore" };
 interface Item { itemKey: string; type: string; name: string; reason: string; options: Option[] }
 interface Schedule { itemKey: string; reason: string; title: string; date: string | null; dateText: string }
-interface Payload { items: Item[]; schedule: Schedule | null; autoApplied: Array<{ type: string; name: string; action: string }> }
+interface MemoDate { itemKey: string; reason: string; date: string | null; dateText: string }
+/** memoDate 칸이 없는 옛 제안(이 기능 이전)은 메모 날짜 항목이 없다. */
+interface Payload { items: Item[]; schedule: Schedule | null; memoDate?: MemoDate | null; autoApplied: Array<{ type: string; name: string; action: string }> }
 
 export interface EntityRegisterReview {
   root: HTMLElement;
@@ -102,6 +105,27 @@ export function createEntityRegisterReview(proposal: CleanupProposalDetail, onCh
       el("label", {}, S.scheduleTitleLabel, title)));
   }
 
+  const memoDate = payload.memoDate ?? null;
+  let memoDateInput: HTMLInputElement | null = null;
+  if (memoDate) {
+    const done = applied.has(memoDate.itemKey);
+    const accept = el("input", { type: "radio", name: group(memoDate.itemKey), value: "accept" });
+    const ignore = el("input", { type: "radio", name: group(memoDate.itemKey), value: "ignore" });
+    memoDateInput = el("input", { type: "date" });
+    memoDateInput.value = memoDate.date ?? "";
+    for (const i of [accept, ignore, memoDateInput]) {
+      i.addEventListener("change", onChange);
+      i.addEventListener("input", onChange);
+      track(i, done);
+    }
+    root.append(el("fieldset", { className: "proposal-items" },
+      el("legend", {}, `${S.memoDateHeading(memoDate.dateText)}${done ? S.alreadyApplied : ""}`),
+      el("p", { className: "proposal-help" }, S.memoDateReasonLabels[memoDate.reason] ?? memoDate.reason),
+      el("label", { className: "proposal-item" }, accept, S.memoDateAccept),
+      el("label", { className: "proposal-item" }, ignore, S.memoDateIgnore),
+      el("label", {}, S.memoDateLabel, memoDateInput)));
+  }
+
   if (payload.autoApplied.length > 0) {
     root.append(el("h4", {}, S.autoAppliedTitle), el("ul", {}, ...payload.autoApplied.map((a) => el("li", {}, S.autoAppliedRow(a.name, a.action)))));
   }
@@ -112,7 +136,10 @@ export function createEntityRegisterReview(proposal: CleanupProposalDetail, onCh
     inputs.find(({ input }) => input.type === "radio" && input.name === group(name) && input.checked)?.input ?? null;
   return {
     root,
-    hasChoice: () => payload.items.some((i) => checked(i.itemKey) !== null) || (payload.schedule !== null && checked(payload.schedule.itemKey) !== null),
+    hasChoice: () =>
+      payload.items.some((i) => checked(i.itemKey) !== null) ||
+      (payload.schedule !== null && checked(payload.schedule.itemKey) !== null) ||
+      (memoDate !== null && checked(memoDate.itemKey) !== null),
     choices() {
       const out: Record<string, unknown> = {};
       for (const item of payload.items) {
@@ -124,12 +151,19 @@ export function createEntityRegisterReview(proposal: CleanupProposalDetail, onCh
         if (c?.value === "accept") out[payload.schedule.itemKey] = { accept: true, date: date!.value, title: title!.value.trim() };
         if (c?.value === "ignore") out[payload.schedule.itemKey] = { accept: false };
       }
+      if (memoDate) {
+        const c = checked(memoDate.itemKey);
+        if (c?.value === "accept") out[memoDate.itemKey] = { accept: true, date: memoDateInput!.value };
+        if (c?.value === "ignore") out[memoDate.itemKey] = { accept: false };
+      }
       return out;
     },
     validationError() {
-      if (!payload.schedule || checked(payload.schedule.itemKey)?.value !== "accept") return null;
-      if (!isRealDate(date!.value)) return S.invalidDate;
-      if (title!.value.trim() === "") return S.titleRequired;
+      if (payload.schedule && checked(payload.schedule.itemKey)?.value === "accept") {
+        if (!isRealDate(date!.value)) return S.invalidDate;
+        if (title!.value.trim() === "") return S.titleRequired;
+      }
+      if (memoDate && checked(memoDate.itemKey)?.value === "accept" && !isRealDate(memoDateInput!.value)) return S.invalidMemoDate;
       return null;
     },
     setDisabled(v) {

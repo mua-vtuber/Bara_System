@@ -11,7 +11,8 @@
  *  - 사람  → 기존 사람 신원이 정확히 1명으로 조회될 때만
  *           node_person_edges relation='mentions' 연결
  *           (작성자 authored_by 와 *구분* — 여기는 문장에 언급된 사람)
- *  - 날짜  → event-date.ts extractEventDate 로 ISO 환산 → store.setEventAt
+ *  - 날짜  → event-date.ts extractIngestEventDate(메모 저장 전용)로 ISO 환산 → store.setEventAt.
+ *           연도 없는 "1월 5일"·"1/5" 가 가장 구체적이면 비워 두고 정리 AI 가 채운다.
  *
  * 좁은 store 인터페이스(MetadataApplyStore)만 받아 단위 검증을 쉽게 한다.
  *
@@ -30,7 +31,7 @@
  * 데이터 정리 AI 의 person_link 단계가 기존 personId 중에서만 제안/연결한다.
  */
 
-import { extractEventDate } from "./event-date.ts";
+import { extractIngestEventDate } from "./event-date.ts";
 import type { FieldSource } from "./field-provenance.ts";
 import type { SetPlaceResult } from "./place-provenance-flow.ts";
 import type { Person, PersonRelation } from "./types.ts";
@@ -206,14 +207,17 @@ export async function applyExtractedMetadata(
   // 포함돼 있을 때만* 신뢰한다. 작은 추출 모델이 시간어 없는 글에도 "오늘 날짜"
   // 를 토막으로 지어내거나(환각) 이미 ISO 로 환산해 넣는 일이 잦은데, 그런 토막은
   // content 에 없으므로 버리고 content 전체를 정규식 1단으로 훑는다(본문에 진짜
-  // 날짜 "5월 12일" 이 있으면 잡고, 지어낸 토막은 형식 무관 걸러진다).
+  // 날짜 "2026년 5월 12일" 이 있으면 잡고, 지어낸 토막은 형식 무관 걸러진다).
+  // 가장 구체적인 표현이 연도 없는 "5월 12일"·"5/12" 이면 저장한 해를 연도로 지어내지
+  // 않고 비워 둔다 — 정리 AI(entity_register 단계)가 문맥으로 연도를 정해 채운다
+  // (docs/decisions/2026-10-16-yearless-date-cleanup-spec.md 3.1).
   // null 은 "닫힌 날짜 없음" 정직한 결과라 setEventAt 호출 안 함(빈 값 위조 아님).
   const rawFragment = item.eventDateText?.trim();
   const trustFragment = !!rawFragment && item.content.includes(rawFragment);
   const dateSrc = trustFragment ? rawFragment! : item.content;
   if (dateSrc && !locks?.eventDate) {
     try {
-      const iso = extractEventDate(dateSrc, now);
+      const iso = extractIngestEventDate(dateSrc, now);
       if (iso !== null) {
         await store.setEventAt(nodeId, iso, "system");
         result.eventAtApplied = iso;

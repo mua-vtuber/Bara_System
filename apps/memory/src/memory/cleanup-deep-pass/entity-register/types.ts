@@ -70,7 +70,16 @@ export interface MemoJudgement {
   nodeId: number;
   entities: EntityDecision[];
   schedule: ScheduleDecision;
+  memoDate: MemoDateDecision;
 }
+
+/**
+ * 원본 메모의 event_at 칸 읽기 결과 — 행이 없으면(판정 직전에 지워짐) found:false.
+ * source 는 metadata_json.fieldSources.event_at(출처 기록이 없으면 null) — 사유 문구와 되돌리기 검사가 읽는다.
+ */
+export type MemoEventAtState =
+  | { found: false }
+  | { found: true; eventAt: string | null; source: "direct" | "system" | "inferred" | null };
 
 /** 이 메모에서 이 단계가 이미 만든 살아 있는 일정. */
 export interface ActiveSchedule {
@@ -79,10 +88,23 @@ export interface ActiveSchedule {
   title: string;
 }
 
+/** 메모 날짜 채우기를 제안으로 보내는 이유(yearless-date-cleanup spec 3.3 — 일정 판정과 같은 규칙). */
+export type MemoDateProposeReason = "relative" | "mismatch" | "auto_apply_off";
+
+/** 메모 날짜를 채우지 않는 이유 — spec 3.3 표의 1~6번. */
+export type MemoDateNoneReason =
+  | "memo_missing" | "already_set" | "ignored" | "no_date" | "date_text_not_in_text" | "not_yearless";
+
+/** 원본 메모의 event_at 채우기 판정. 날짜(YYYY-MM-DD)만 다루고 시각은 다루지 않는다. */
+export type MemoDateDecision =
+  | { action: "none"; reason: MemoDateNoneReason }
+  | { action: "auto"; date: string; dateText: string }
+  | { action: "propose"; reason: MemoDateProposeReason; date: string | null; dateText: string };
+
 /**
- * 아래 두 목록의 값은 v48 마이그레이션(db/migrations-internal/v48-entity-register.ts)의
- * entity_register_records CHECK(decided_by IN …, item_kind IN …)에도 적혀 있다. 값을 더하거나 바꾸면
- * 이미 배포된 DB 의 CHECK 가 그 값을 거부하므로, 표를 다시 만드는 새 마이그레이션을 함께 더해야 한다.
+ * 아래 두 목록의 값은 마이그레이션(db/migrations-internal/v48-entity-register.ts, 목록을 넓힌
+ * v51-entity-register-memo-date.ts)의 entity_register_records CHECK(decided_by IN …, item_kind IN …)에도 적혀 있다.
+ * 값을 더하거나 바꾸면 이미 배포된 DB 의 CHECK 가 그 값을 거부하므로, 표를 다시 만드는 새 마이그레이션을 함께 더해야 한다.
  */
 export type RecordDecidedBy = "auto" | "approved";
-export type RecordItemKind = "entity_created" | "entity_linked" | "schedule_created";
+export type RecordItemKind = "entity_created" | "entity_linked" | "schedule_created" | "memo_date_filled";

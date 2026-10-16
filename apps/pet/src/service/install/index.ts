@@ -8,6 +8,7 @@ import { messages } from "../../ui/messages.ts";
 import { ConfigStore, type CredentialSnapshot } from "../config.ts";
 import { serviceError, type ServiceError } from "../errors.ts";
 import { isRunning, runCaptured, stopProcess } from "./process.ts";
+import { clientTokenFailure } from "./client-token-failure.ts";
 import { isCoreRunning, reserveFreshOrigin, waitForClient, waitForHealth, type ReadyWait } from "./net.ts";
 import { verifyRuntime, type PayloadManifest } from "./runtime.ts";
 import { ensureRemoteTunnel, inspectRemote, prepareRemoteServer, startTunnel } from "./remote.ts";
@@ -16,6 +17,7 @@ import type { RemoteRestoreSource } from "./remote-restore.ts";
 import { RemoteServerUpdater } from "./remote-update.ts";
 import { claimPreferredOrigin, triesPreferredPort, tunnelPortNotice, type PreferredBlock } from "./tunnel-origin.ts";
 import { rebindSnapshot } from "./connection-policy.ts";
+import { keepsTunnel } from "./tunnel-keeper.ts";
 import { assertTunnelListener, inspectListener } from "./port-owner.ts";
 import { dbSchemaVersionOf } from "../maintenance/manifest.ts";
 import { LocalServer } from "./local-server.ts";
@@ -60,6 +62,11 @@ export interface StartGate {
   /** The start was cancelled (it ends as cancelled, not as a failure). */
   cancelled(): void;
 }
+/** Told when the saved SSH tunnel opened, and when it closed by itself or a connection attempt for a connection that
+ * keeps one failed (`router.ts` hands both to its `TunnelKeeper`, which opens the tunnel again). */
+export interface TunnelEvents { opened(): void; lost(): void }
+const NO_TUNNEL_EVENTS: TunnelEvents = { opened: () => {}, lost: () => {} };
+
 const NO_GATE: StartGate = { beforePrepare: async () => undefined, started: async () => {}, failed: async (error) => error, cancelled: () => {} };
 
 /** Whether reusing the install failed in a way its own path repairs, also when the start gate named the failure
@@ -105,6 +112,9 @@ export class InstallManager {
   private activeTunnelRoute: string | null = null;
   /** Why the tunnel opened for `route` is not on the preferred port (null when it is); shown while that tunnel runs. */
   private tunnelPortRecord: { route: string; notice: TunnelPortNotice | null } | null = null;
+  private tunnelEvents: TunnelEvents = NO_TUNNEL_EVENTS;
+  /** Set by `close`: a tunnel that exits from then on was stopped by it, not lost. */
+  private closed = false;
   private readonly coreRoot: string;
   private readonly memoryData: string;
   private readonly journalPath: string;
@@ -130,6 +140,28 @@ export class InstallManager {
     this.journalPath = join(this.memoryData, "managed-install.json");
     this.databasePath = join(this.memoryData, "db", "bara.sqlite");
     this.serverUpdater = new RemoteServerUpdater(paths, () => this.verify());
+  }
+
+  /** Set once by the router, before any request runs. */
+  watchTunnel(events: TunnelEvents): void {
+    this.tunnelEvents = events;
+  }
+
+  /** The tunnel this service just verified now serves the saved connection: when it exits without this service
+   * stopping or replacing it (the PC slept, the network dropped, the server restarted), it is forgotten and reported
+   * lost, unless the saved connection changed meanwhile. */
+  private tunnelOpened(tunnel: Bun.Subprocess): void {
+    const route = this.activeTunnelRoute;
+    this.tunnelEvents.opened();
+    void tunnel.exited.then(async () => {
+      if (this.closed || this.tunnel !== tunnel) return;
+      this.routes.forgetTunnel(tunnel);
+      this.tunnel = null;
+      this.activeTunnelRoute = null;
+      // A settings read that fails is reported as a loss too: the attempt that follows says why it cannot connect.
+      const current = await this.config.snapshot().then((snapshot) => connectionRoute(snapshot.settings.connection), () => route);
+      if (current === route && !this.closed) this.tunnelEvents.lost();
+    });
   }
 
   private verify(): Promise<PayloadManifest> {
@@ -266,7 +298,7 @@ export class InstallManager {
       const mode = existsSync(tokenFile) ? "--read-existing" : "--fresh";
       const baseUrl = `http://127.0.0.1:${prepared.port}`;
       const captured = await runCaptured([this.paths.bunPath, "apps/setup/src/client-token.ts", "--url", `${baseUrl}/`,
-        "--tokens-file", tokenFile, mode], ctx, { cwd: this.coreRoot, sensitive: true, timeoutMs: INSTALL_TOKEN_TIMEOUT_MS, stepName: messages.installSteps.prepareCredentials });
+        "--tokens-file", tokenFile, mode], ctx, { cwd: this.coreRoot, sensitive: clientTokenFailure, timeoutMs: INSTALL_TOKEN_TIMEOUT_MS, stepName: messages.installSteps.prepareCredentials });
       const tokens = tokenResult(captured.stdout);
       const connection = { mode: "local" as const, baseUrl };
       ctx.progress("server");
@@ -311,6 +343,7 @@ export class InstallManager {
         saved);
       this.activeTunnelRoute = connectionRoute(connection);
       this.recordTunnelPort(block === null ? null : tunnelPortNotice(connection.baseUrl, this.preferredTunnelPort, block));
+      this.tunnelOpened(tunnel);
       const message = messages.remoteInstall[server.outcome];
       return { connection, message: server.restored
         ? `${message} ${messages.remoteRestore.restored(server.restored.backupName, server.restored.replaced)}` : message };
@@ -398,6 +431,7 @@ export class InstallManager {
         await rebindSnapshot(this.config, snapshot, { ...connection, baseUrl });
         this.activeTunnelRoute = connectionRoute({ ...connection, baseUrl });
       }
+      this.tunnelOpened(tunnel);
       return baseUrl;
     } catch (error) {
       this.routes.forgetTunnel(tunnel);
@@ -503,6 +537,10 @@ export class InstallManager {
     const promise = this.ensureSnapshot(snapshot, route, generation, { ...ctx, signal });
     this.connectionFlight = { route, abort, promise };
     try { await promise; }
+    catch (error) {
+      if (keepsTunnel(snapshot)) this.tunnelEvents.lost();
+      throw error;
+    }
     finally { if (this.connectionFlight?.promise === promise) this.connectionFlight = null; }
   }
 
@@ -519,6 +557,7 @@ export class InstallManager {
   }
 
   async close(): Promise<void> {
+    this.closed = true;
     this.serverUpdater.close();
     this.connectionFlight?.abort.abort();
     this.routes.forgetTunnel(this.tunnel);

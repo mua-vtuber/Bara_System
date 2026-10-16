@@ -75,6 +75,8 @@ export interface EventDateProfile {
   rollingWindow: RegExp;
   /** 절대 날짜 "YYYY년 M월 D일". 캡처 1=년·2=월·3=일. */
   absYmd: RegExp;
+  /** 연도 있는 숫자 날짜 "YYYY/M/D"·"YYYY.M.D"(빗금·점 혼용 불가). 캡처 1=년·2=월·3=일. */
+  absYmdNumeric: RegExp;
   /** 절대 날짜 "M월 D일"(연도 없음). 캡처 1=월·2=일. */
   absMd: RegExp;
   /** 절대 날짜 "M/D" 슬래시 표기. 캡처 1=월·2=일. */
@@ -100,6 +102,8 @@ export interface EventDateProfile {
   weekdayQualifierOffsets: Readonly<Record<string, number>>;
   /** 달 토큰("지난달" -1 등) → 달 오프셋. */
   monthOffsets: readonly OffsetPatternEntry[];
+  /** 달 토큰 바로 뒤의 "N일"(달 토큰 매치 끝부터 맞춤 — ^ 고정). 캡처 1=일. */
+  monthDay: RegExp;
   /** 해 토큰 → 매치 문자열별 해 오프셋("재작년" -2 / "작년" -1). */
   yearOffsets: readonly MatchOffsetPatternEntry[];
   /** 시각 "오전/오후 H시 (M분)". 캡처 1=오전·오후(선택)·2=시·3=분(선택). */

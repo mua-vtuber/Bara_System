@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "guide-window",
+  "description": "Guide notebook window only: dragging, minimizing, and hiding while preserving the reading position",
+  "windows": ["guide"],
+  "permissions": ["core:window:allow-start-dragging", "core:window:allow-minimize", "core:window:allow-hide"]
+}

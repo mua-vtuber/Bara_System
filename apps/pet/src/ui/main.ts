@@ -5,15 +5,19 @@ import { command, errorMessage, native, onPanel, onProgress, onTrayError, reques
 import { renderBubble } from "./bubble.ts";
 import { renderCleanup } from "./cleanup.ts";
 import { button, element, type Notice } from "./dom.ts";
+import { isInstallRunning } from "./error-text.ts";
 import { errorFeedback, workingFeedback } from "./feedback-model.ts";
+import { installLock } from "./install-lock.ts";
 import { messages } from "./messages.ts";
 import { renderNotebook } from "./notebook.ts";
 import { renderOnboarding } from "./onboarding.ts";
 import { readOnboarding, startStep, type OnboardingStep } from "./onboarding-model.ts";
+import { keptForInstall } from "./panel-view.ts";
 import { renderQuick } from "./quick.ts";
 import { renderRecovery } from "./recovery.ts";
 import { renderResult } from "./result.ts";
 import { renderSettings } from "./settings.ts";
+import { renderGuide } from "./guide.ts";
 import { readServerUpdate, startupServerUpdateNotice, tunnelPortText } from "./settings-helpers.ts";
 import { renderPet } from "./squirrel/pet-view.ts";
 import { startupFailureFeedback } from "./startup-failure.ts";
@@ -22,6 +26,7 @@ import "./style.css";
 import "./notebook.css";
 import "./self-update.css";
 import "./recent-history.css";
+import "./guide.css";
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 const view = new URLSearchParams(location.search).get("view") ?? "main";
@@ -33,6 +38,8 @@ if (view === "pet") {
   renderQuick(app);
 } else if (view === "bubble") {
   renderBubble(app);
+} else if (view === "guide") {
+  renderGuide(app);
 } else {
   const notebook = renderNotebook({
     navigate: show, native,
@@ -52,10 +59,15 @@ if (view === "pet") {
       await command("open_dashboard");
       dashboardStatus.dataset.kind = "success"; dashboardStatus.textContent = messages.main.dashboardOpened;
     } catch (error) {
-      dashboardStatus.dataset.kind = "error"; dashboardStatus.textContent = errorMessage(error);
+      // An install still running is not a failure: the dashboard opens once it is done (`INSTALL_RUNNING`).
+      dashboardStatus.dataset.kind = isInstallRunning(error) ? "info" : "error"; dashboardStatus.textContent = errorMessage(error);
     } finally { dashboard.disabled = false; }
   }, "button secondary notebook-dashboard");
-  notebook.tools.append(button(messages.feedback.lastAnswer, () => show("answer"), "text-button"), dashboard, dashboardStatus);
+  const guide = button(messages.guide.open, async () => {
+    if (!native) { window.open("?view=guide", "bara-guide"); return; }
+    try { await command("open_guide"); } catch (error) { notice(errorMessage(error), "error"); }
+  }, "text-button");
+  notebook.tools.append(button(messages.feedback.lastAnswer, () => show("answer"), "text-button"), guide, dashboard, dashboardStatus);
   footer.append(button(messages.feedback.openQuickInput, () => openQuick("input"), "button primary"),
     button(messages.feedback.openQuickQuestion, () => openQuick("question"), "button secondary"));
   app.append(shell);
@@ -72,6 +84,7 @@ if (view === "pet") {
   }
 
   async function openQuick(mode: "input" | "question") {
+    if (installLock.running) { notice(messages.installLock.quickRefused); return; }
     try { await command("hide_panel"); await command("open_quick", { mode }); }
     catch (error) { notice(errorMessage(error), "error"); }
   }
@@ -80,6 +93,8 @@ if (view === "pet") {
     // The host sends `pet-panel` whenever it brings the panel up (the tray's "설정", the pet's menu, the echo of
     // `open_panel`), also when the panel already shows that view. The setup and the settings stay as they are, so a
     // step, a form being filled in or a backup's progress is not reset; a result is drawn again, as the latest one.
+    // While an install runs in the view on screen, no other view replaces it: the window comes up showing the install.
+    if (keptForInstall(currentMode, mode, installLock.running)) { notice(messages.installLock.viewKept(messages.settings.stopSetup)); return; }
     notebook.change(currentMode, mode, () => {
       currentMode = mode;
       const version = ++renderVersion;
@@ -110,9 +125,12 @@ if (view === "pet") {
   show("result");
   void onPanel(show);
   /** A tray menu command has no window of its own, so its failure goes to the bubble. The status line keeps
-   * the text too, with the cause, when the bubble cannot be published. */
+   * the text too, with the cause, when the bubble cannot be published. The tray's "대시보드" refused while an install
+   * runs (`INSTALL_RUNNING`) is no failure and the bubble has no informational kind, so it is told only as
+   * information on the status line; the pet's own "설치 중" notice already shows that the install runs. */
   void onTrayError(error => {
     const text = errorMessage(error);
+    if (isInstallRunning(error)) { notice(text, "info"); return; }
     notice(text, "error");
     void command("publish_feedback", { feedback: errorFeedback(crypto.randomUUID(), "input", text) })
       .catch(publishError => notice(messages.quick.bubbleUnpublished(text, errorMessage(publishError)), "error"));

@@ -6,7 +6,8 @@ import { messages } from "../messages.ts";
 import type { CanvasLayout } from "./camera.ts";
 import { SQUIRREL_MOTION } from "./motion-config.ts";
 import type { MotionFeedback } from "./motion-types.ts";
-import { NoticeState, type NoticeKind } from "./pet-notice.ts";
+import { mountPetInstall } from "./pet-install.ts";
+import { NoticeState, noticeLook, type NoticeKind } from "./pet-notice.ts";
 import { HostVisibility, PendingInputs, petDrawable, RendererPresence, type PresenceStep } from "./pet-presence.ts";
 import { PetPress } from "./pet-press.ts";
 import { mountPetUpdate } from "./pet-update.ts";
@@ -34,6 +35,8 @@ function noticeLine(box: HTMLElement, node: HTMLElement): NoticeLine {
     const text = state.text;
     node.textContent = text ?? "";
     box.hidden = text === null;
+    const kind = state.kind;
+    if (kind === null) delete box.dataset.look; else box.dataset.look = noticeLook(kind);
   };
   const expire = (): void => {
     timer = undefined;
@@ -49,10 +52,12 @@ function noticeLine(box: HTMLElement, node: HTMLElement): NoticeLine {
       render();
     },
     clear(kind) {
-      if (!state.clear(kind)) return;
-      window.clearTimeout(timer);
-      timer = undefined;
-      render();
+      const shown = state.text;
+      if (state.clear(kind)) {
+        window.clearTimeout(timer);
+        timer = undefined;
+      }
+      if (state.text !== shown) render();
     },
   };
 }
@@ -70,7 +75,8 @@ function toMotionFeedback(feedback: Feedback): MotionFeedback | null {
 }
 
 /** The pet window: the pet button with the character's canvas, the error card that stands in for the character
- * when it cannot be drawn, and the notice line. Clicking opens the composer with its input and question modes.
+ * when it cannot be drawn, and the notice line. Clicking opens the composer with its input and question modes, except
+ * while an install runs (`pet-install.ts`), when the notice line says it works once the install is done.
  * Clicking, dragging and the right click work at once, before the character loads and when it fails.
  *
  * The character is created only when the pet is first shown, and it draws only while shown (plan 1C): the host's
@@ -127,7 +133,13 @@ export function renderPet(app: HTMLElement): void {
     if (press.move(event.screenX, event.screenY, event.buttons) && native) runCommand(() => getCurrentWindow().startDragging(), messages.pet.dragFailed);
   });
   petButton.addEventListener("pointerup", () => press.up());
-  petButton.addEventListener("click", () => { if (press.click()) openQuick(); });
+  // While an install runs the input strip would only be refused, so the click says when it works instead.
+  const install = mountPetInstall(notice);
+  petButton.addEventListener("click", () => {
+    if (!press.click()) return;
+    if (install.installing) notice.show("installNote", messages.installLock.petClickRefused);
+    else openQuick();
+  });
   petButton.addEventListener("contextmenu", event => {
     event.preventDefault();
     runCommand(() => command("open_panel", { mode: "settings" }), messages.pet.panelOpenFailed);

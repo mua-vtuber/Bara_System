@@ -17,6 +17,7 @@ import {
 } from "./memory-schema-groups-entity-register.ts";
 import { BACKFILL_RETRY_REQUIRED, extractorBackfillRetryProperties, visionBackfillRetryProperties } from "./memory-schema-groups-backfill-retry.ts";
 import { EXTRACTOR_OUTPUT_LIMIT_REQUIRED, extractorOutputLimitProperties } from "./memory-schema-groups-extractor-output.ts";
+import { METADATA_INFER_OUTPUT_LIMIT_REQUIRED, metadataInferOutputLimitProperties } from "./memory-schema-groups-metadata-infer-output.ts";
 import { llmApiProviderFields } from "./memory-schema-groups-llm-providers.ts";
 import { LLM_PROVIDERS } from "../llm/provider-registry.ts";
 
@@ -559,8 +560,9 @@ export const metadataInferGroup = {
       default: 200,
       minimum: 1,
     },
+    ...metadataInferOutputLimitProperties,
   },
-  required: ["enabled", "sessionGapMinutes", "batchSize"] as const,
+  required: ["enabled", "sessionGapMinutes", "batchSize", ...METADATA_INFER_OUTPUT_LIMIT_REQUIRED] as const,
 } as const satisfies GroupSchema;
 
 export const cleanupDeepPassGroup = {

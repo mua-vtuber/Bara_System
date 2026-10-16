@@ -148,7 +148,10 @@ describe("POST /api/entity-register/records/:id/revert", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       reverted: recordId,
-      result: { recordId, removedEdges: 1, deletedRow: { typeName: "person", id: "psn_a" }, keptRowReason: null, removedAlias: null, trashedScheduleNodeId: null },
+      result: {
+        recordId, removedEdges: 1, deletedRow: { typeName: "person", id: "psn_a" }, keptRowReason: null, removedAlias: null,
+        trashedScheduleNodeId: null, clearedMemoDate: null,
+      },
     });
     expect(db.query("SELECT COUNT(*) AS n FROM persons WHERE person_id = 'psn_a'").get()).toEqual({ n: 0 });
     expect([...records.ignoredNameKeys(memoId)]).toEqual(["민수"]);
@@ -163,6 +166,22 @@ describe("POST /api/entity-register/records/:id/revert", () => {
     const again = await app.request(`/api/entity-register/records/${recordId}/revert`, { method: "POST" });
     expect(again.status).toBe(409);
     expect(((await again.json()) as { error: string }).error).toContain("이미 되돌림");
+  });
+
+  test("reverting a memo-date record clears the date and answers clearedMemoDate", async () => {
+    const app = appWithSchedulerOff();
+    const memoId = insertMemo("1월 5일까지 제출");
+    expect(await deps.store.setEventAt(memoId, "2027-01-05", "inferred")).toBe(true);
+    const recordId = records.insert({
+      runId: "run_1", proposalId: null, sourceNodeId: memoId, itemKind: "memo_date_filled", targetType: "memo", targetId: String(memoId),
+      name: "1월 5일", decidedBy: "auto", detail: { ...emptyRecordDetail(), date: "2027-01-05" },
+    });
+    const listed = (await (await getList(app)).json()) as { records: RecentAutoRegisterItem[] };
+    expect(listed.records.map((r) => [r.itemKind, r.name, r.date])).toEqual([["memo_date_filled", "1월 5일", "2027-01-05"]]);
+    const res = await app.request(`/api/entity-register/records/${recordId}/revert`, { method: "POST" });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { result: { clearedMemoDate: string | null } }).result.clearedMemoDate).toBe("2027-01-05");
+    expect(db.query("SELECT event_at FROM knowledge_nodes WHERE id = ?").get(memoId)).toEqual({ event_at: null });
   });
 
   test("a malformed id is 400", async () => {

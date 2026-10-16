@@ -549,6 +549,12 @@ button,input,textarea,select{
   font-size:var(--pet-notice-font-size);
   line-height:var(--pet-card-line-height)
 }
+/* Told, not failed: the install that runs and the click that waits for it (`noticeLook` in pet-notice.ts). */
+.pet-notice[data-look=info]{
+  border-color:var(--working-line);
+  background:var(--accent-pale);
+  color:var(--muted-strong)
+}
 .pet-notice-text{
   margin:0;
   -webkit-line-clamp:var(--pet-notice-lines)

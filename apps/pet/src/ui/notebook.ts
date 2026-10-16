@@ -27,6 +27,9 @@ export function renderNotebook(actions: {
   minimize(): void;
   close(): void;
   native: boolean;
+  title?: string;
+  navigationLabel?: string;
+  tabs?: readonly (readonly [string, string])[];
 }) {
   const shell = element("div", "notebook");
   shell.style.setProperty("--notebook-tab-image", `url("${new URL("assets/notebook/index-tab.png", document.baseURI).href}")`);
@@ -37,7 +40,7 @@ export function renderNotebook(actions: {
   const brand = element("div", "notebook-brand");
   const icon = element("img", "app-icon");
   icon.src = new URL("assets/app-icon.png", document.baseURI).href; icon.alt = ""; icon.draggable = false;
-  brand.append(icon, element("strong", "", messages.common.title));
+  brand.append(icon, element("strong", "", actions.title ?? messages.common.title));
   const controls = element("div", "notebook-window-controls");
   for (const [symbol, label, action] of [
     ["−", messages.main.minimizeWindow, actions.minimize],
@@ -56,9 +59,9 @@ export function renderNotebook(actions: {
   };
   header.addEventListener("pointerdown", startDrag);
   binding.addEventListener("pointerdown", startDrag);
-  const tabs = element("nav", "notebook-tabs"); tabs.setAttribute("aria-label", messages.main.navigationLabel);
+  const tabs = element("nav", "notebook-tabs"); tabs.setAttribute("aria-label", actions.navigationLabel ?? messages.main.navigationLabel);
   const tabButtons = new Map<string, HTMLButtonElement>();
-  for (const [mode, title] of [
+  for (const [mode, title] of actions.tabs ?? [
     ["result", messages.feedback.resultHeading], ["recovery", messages.feedback.recovery],
     ["cleanup", messages.feedback.cleanup], ["settings", messages.main.settingsButton],
   ] as const) {

@@ -219,3 +219,32 @@ test("a pet submission that creates a proposal emits the proposals-ready event l
   expect(out2).toMatchObject({ ok: true, proposalId: null });
   expect(countEvents()).toBe(1);
 }, 300_000);
+
+test("a pet submission fills a yearless memo date exactly like the server cycle (yearless-date-cleanup 3.9)", async () => {
+  const DEADLINE = "1월 5일까지 제출";
+  // 일정 제목까지 주어 일정도 자동 — 제안 없이 메모 날짜·일정 두 기록이 남는 모양을 두 경로에서 비교한다.
+  const answer = { entities: [], eventDateText: "1월 5일", eventDate: "2027-01-05", scheduleTitle: "서류 제출" };
+  const viaPet = await store.addNode({ content: DEADLINE, sourceType: "auto_capture" });
+  const out = await submitExternalProposal(deps, { kind: "entity_register", payload: { nodeId: viaPet, ...answer }, candidate: await refOf(viaPet) });
+  expect(out).toMatchObject({ ok: true, autoApplied: 2, proposalId: null });
+
+  const viaServer = await store.addNode({ content: DEADLINE, sourceType: "auto_capture" });
+  await runEntityRegisterCycle({
+    store, eventBus, batchSize: 10, autoApply: true, stageVersion: ER_VERSION, maxAttemptsPerTarget: 3, perCallInputCap: 30_000, runId: "r",
+    infer: async ({ memos }) => ({ kind: "ok", parsed: memos.map((m) => ({ nodeId: m.nodeId, ...answer })) }),
+  });
+  const shape = (nodeId: number) => ({
+    node: db.query("SELECT event_at, metadata_json ->> '$.fieldSources.event_at' AS source FROM knowledge_nodes WHERE id = ?").get(nodeId),
+    records: db.query(
+      "SELECT item_kind, target_type, name, decided_by, detail_json ->> '$.date' AS date FROM entity_register_records WHERE source_node_id = ? ORDER BY item_kind",
+    ).all(nodeId),
+  });
+  expect(shape(viaPet)).toEqual({
+    node: { event_at: "2027-01-05", source: "inferred" },
+    records: [
+      { item_kind: "memo_date_filled", target_type: "memo", name: "1월 5일", decided_by: "auto", date: "2027-01-05" },
+      { item_kind: "schedule_created", target_type: "schedule", name: "서류 제출", decided_by: "auto", date: "2027-01-05" },
+    ],
+  });
+  expect(shape(viaServer)).toEqual(shape(viaPet));
+}, 300_000);

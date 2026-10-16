@@ -268,8 +268,9 @@ export class MemoryExtractor {
 
     // Phase 7 Task 4 — 등록 날짜(오늘 ISO)를 마지막 user 턴에 합류. LLM 이
     // "금요일"·연도 없는 "3월 5일" 같은 애매 표현을 등록일 기준으로 풀게 한다.
-    // 정규식 1단(extractEventDate)이 1단이라 LLM 이 환산 안 해도 확실한 날짜는
-    // 잡힌다 — 이 주입은 애매 표현 보강용.
+    // 정규식 1단(extractIngestEventDate)이 1단이라 LLM 이 환산 안 해도 확실한 날짜는
+    // 잡힌다 — 이 주입은 애매 표현 보강용. 단 연도 없는 "3월 5일" 은 저장할 때
+    // event_at 에 쓰지 않는다(정리 AI 가 연도를 정해 채움 — metadata-apply.ts 3번).
     const todayIso = toIsoDate(options.now ?? new Date());
     const context =
       input.context === undefined

@@ -5,3 +5,10 @@
 export function sameViewKept(current: string, next: string): boolean {
   return current === next && (next === "onboarding" || next === "settings");
 }
+
+/** Whether the main window keeps the view it shows instead of showing another view `next`, because an install started
+ * there still runs (`install-lock.ts`): its progress and its stop button stay on screen. The same view asked again is
+ * `sameViewKept`'s rule. */
+export function keptForInstall(current: string | null, next: string, installRunning: boolean): boolean {
+  return installRunning && current !== null && current !== next;
+}

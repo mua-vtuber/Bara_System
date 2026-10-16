@@ -1,12 +1,15 @@
 import { CORE_DEFAULT_PORT, INPUT_MAX_CHARS, LOCAL_INSTALL_MARGIN_BYTES, LOCAL_INSTALL_MODEL_BYTES, QUESTION_MAX_CHARS,
   type CaptureKind, type ProgressStage } from "../shared/contracts.ts";
 import nativeHost from "../shared/native-host.json";
+import { EXISTING_CHOICE_LABEL } from "./messages-labels.ts";
 import { recentMessages } from "./messages-recent.ts";
 import { serviceAiMessages } from "./messages-service-ai.ts";
 import { causeOrEmpty, serviceCoreMessages, withCause, withCauseThen } from "./messages-service-core.ts";
 import { serviceInstallMessages } from "./messages-service-install.ts";
 import { serviceReleaseMessages } from "./messages-service-release.ts";
 import { selfUpdateMessages } from "./messages-self-update.ts";
+import { installLockMessages } from "./messages-install-lock.ts";
+import { guideMessages } from "./messages-guide.ts";
 import type { SquirrelErrorCode } from "./squirrel/squirrel-errors.ts";
 
 export const labels: Record<CaptureKind, string> = {
@@ -28,6 +31,7 @@ const shortfall = (missingBytes: number, freeBytes: number) =>
 const BACKUP_FOLDER = nativeHost.contract.backupFolderName;
 
 export const messages = {
+  guide: guideMessages,
   common: {
     title: "바라", subtitle: "가볍게 남기고, 편하게 물어봐요.",
     input: "입력하기", question: "질문하기", settings: "연결과 설정", cleanup: "기억 정리",
@@ -79,7 +83,7 @@ export const messages = {
     prepareLocal: "이 PC에 준비하기", stopSetup: "준비 중단",
     localChoice: "이 컴퓨터", localChoiceDescription: "펫과 기억을 함께",
     remoteChoice: "내 외부 서버", remoteChoiceDescription: "새 서버에 설치",
-    existingChoice: "기존 바라", existingChoiceDescription: "사용하던 기억에 연결",
+    existingChoice: EXISTING_CHOICE_LABEL, existingChoiceDescription: "사용하던 기억에 연결",
     installRemote: "서버에 설치하고 연결", connectExisting: "기존 바라에 연결",
     verifyBeforeInstall: "서버 연결 확인을 누르고 서버 지문을 확인해 주세요.", connected: "기억에 연결했어요.",
     connectionApproved: "연결을 승인받았어요.",
@@ -340,7 +344,7 @@ export const messages = {
     INSTALL_SERVER_TIMEOUT: (seconds: number, detail: string) => `메모리 서버가 제한 시간(${seconds}초) 안에 준비되지 않았습니다(${detail}). 다시 시도해 주세요.`,
     SSH_SERVER_TIMEOUT: (seconds: number, detail: string) => `SSH로 연결한 메모리 서버가 제한 시간(${seconds}초) 안에 준비되지 않았습니다(${detail}). 서버에서 메모리 서비스가 실행 중인지 확인한 뒤 다시 시도해 주세요.`,
     INSTALL_EXISTING_CONNECTION: "이미 연결된 서버가 있습니다. 기존 연결을 사용해 주세요.",
-    INSTALL_EXISTING_CORE: (baseUrl: string) => `이 PC에서 이미 실행 중인 바라 서버(${baseUrl})를 찾았습니다. 새 저장소를 만들지 않았습니다. '기존 바라'를 선택해 이 서버에 연결해 주세요.`,
+    INSTALL_EXISTING_CORE: (baseUrl: string) => `이 PC에서 이미 실행 중인 바라 서버(${baseUrl})를 찾았습니다. 새 저장소를 만들지 않았습니다. '${EXISTING_CHOICE_LABEL}'를 선택해 이 서버에 연결해 주세요.`,
     INSTALL_DATA_MISSING: "이 PC에 준비했던 메모리 데이터(DB 파일)를 찾지 못해 연결을 멈췄습니다. 빈 저장소를 새로 만들지 않았습니다. 백업에서 데이터를 복원한 뒤 다시 시도해 주세요.",
     /** Raised before anything is written (`src/service/install/disk-space.ts`); both sizes are bytes. */
     INSTALL_DISK_LOW: (missingBytes: number, freeBytes: number) => {
@@ -355,9 +359,9 @@ export const messages = {
     REMOTE_SYSTEMD_MISSING: "원격 서버에서 systemd가 실행되고 있지 않아 메모리 서비스를 등록할 수 없습니다.",
     REMOTE_SUDO_REQUIRED: "원격 계정은 sudo -n 권한이 필요합니다.",
     REMOTE_PREFLIGHT_FAILED: (item: string | null) => `원격 서버의 설치 상태를 확인하지 못해 아무것도 바꾸지 않았습니다(${item === null ? "조사 결과 형식" : `조사 항목: ${item}`}).`,
-    REMOTE_EXISTING_CORE: (unit: string, state: string | null) => `원격 서버에 기존 바라(${state === null ? unit : `${unit}, 상태: ${state}`})가 있어 새로 설치하지 않았습니다. '기존 바라'에서 SSH 연결을 켜고 이 서버에 연결해 주세요.`,
+    REMOTE_EXISTING_CORE: (unit: string, state: string | null) => `원격 서버에 기존 바라(${state === null ? unit : `${unit}, 상태: ${state}`})가 있어 새로 설치하지 않았습니다. '${EXISTING_CHOICE_LABEL}'에서 SSH 연결을 켜고 이 서버에 연결해 주세요.`,
     REMOTE_EXISTING_SERVER: "원격 설치 경로에 기존 데이터가 있습니다. 기존 연결을 사용해 주세요.",
-    REMOTE_OTHER_PET_SERVER: (unit: string) => `원격 서버에 다른 경로로 설치된 바라 펫 서버(${unit})가 이미 등록되어 있어 새로 설치하지 않았습니다. '기존 바라'에서 SSH 연결을 켜고 그 서버에 연결해 주세요.`,
+    REMOTE_OTHER_PET_SERVER: (unit: string) => `원격 서버에 다른 경로로 설치된 바라 펫 서버(${unit})가 이미 등록되어 있어 새로 설치하지 않았습니다. '${EXISTING_CHOICE_LABEL}'에서 SSH 연결을 켜고 그 서버에 연결해 주세요.`,
     REMOTE_UNIT_FOREIGN: (unit: string) => `원격 서버의 서비스(${unit})가 펫이 설치한 서비스가 아니어서 건드리지 않았습니다. 기존 연결을 사용해 주세요.`,
     REMOTE_UNIT_UNRECOGNIZED: (unit: string) => `원격 서버의 서비스(${unit}) 설정을 펫이 해석하지 못해 건드리지 않았습니다. 서버에서 서비스 파일을 확인해 주세요.`,
     REMOTE_PORT_MISMATCH: (installed: number, requested: number) => `원격 서버에 설치된 바라 펫 서버는 포트 ${installed}번을 사용하는데 입력한 포트는 ${requested}번입니다. 바라 서버 포트를 설치된 포트와 같게 입력한 뒤 다시 시도해 주세요.`,
@@ -682,4 +686,5 @@ export const messages = {
   ...serviceReleaseMessages,
   ...selfUpdateMessages,
   ...recentMessages,
+  ...installLockMessages,
 };

@@ -11,6 +11,7 @@
  */
 
 import { EXTRACTOR_MAX_OUTPUT_TOKENS_DEFAULT } from "../memory/extractor-output-limit.ts";
+import { METADATA_INFER_MAX_OUTPUT_TOKENS_DEFAULT } from "../memory/metadata-infer-output-limit.ts";
 
 export const MEMORY_DEFAULTS = {
   db: {
@@ -138,6 +139,7 @@ export const MEMORY_DEFAULTS = {
     enabled: true,
     sessionGapMinutes: 180,
     batchSize: 200,
+    maxOutputTokens: METADATA_INFER_MAX_OUTPUT_TOKENS_DEFAULT,
   },
   cleanupDeepPass: {
     regexStrengthen: {

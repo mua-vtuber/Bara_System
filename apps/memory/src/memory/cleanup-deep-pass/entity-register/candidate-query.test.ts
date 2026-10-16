@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import { openMemoryDatabase } from "../../../db/migrations.ts";
 import { recordStageSuccess, recordStageTerminal } from "../stage-results-ledger.ts";
-import { collectEntityRegisterCandidates, listAlreadyLinkedNames } from "./candidate-query.ts";
+import { collectEntityRegisterCandidates, listAlreadyLinkedNames, readMemoEventAt } from "./candidate-query.ts";
 
 let db: Database;
 beforeEach(() => { db = openMemoryDatabase(":memory:", { embeddingDim: 8 }); });
@@ -60,6 +60,15 @@ test("the scan pages past already processed memos to fill the limit", () => {
     recordStageSuccess(db, { stage: "entity_register", targetKey: row.targetKey, inputFingerprint: row.inputFingerprint, stageVersion: 1, noop: true });
   }
   expect(collectEntityRegisterCandidates({ db, stageVersion: 1, limit: 10 }).map((r) => r.nodeId)).toEqual(ids.slice(10));
+});
+
+test("readMemoEventAt reads the column itself, even without a field source", () => {
+  const empty = memo("1월 5일까지 제출");
+  const legacy = memo("옛 메모");
+  db.run("UPDATE knowledge_nodes SET event_at = '2026-01-05' WHERE id = ?", [legacy]);
+  expect(readMemoEventAt(db, empty)).toEqual({ found: true, eventAt: null, source: null });
+  expect(readMemoEventAt(db, legacy)).toEqual({ found: true, eventAt: "2026-01-05", source: null });
+  expect(readMemoEventAt(db, 999_999)).toEqual({ found: false });
 });
 
 test("nodeIds limits the candidates to those memos", () => {

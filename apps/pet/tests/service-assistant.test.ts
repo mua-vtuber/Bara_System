@@ -59,12 +59,26 @@ async function realConfig(baseUrl: string, ai?: { baseUrl: string; model: string
 
 test("allowedCaptureKinds failure surfaces as classification.outcome failed with the original reason", async () => {
   const memory = memoryFixture({ clientInfo: () => new Response("", { status: 500 }) });
-  const { config, dir, audience } = await realConfig(memory.baseUrl);
+  const ai = aiFixture(() => Response.json({ message: { content: '{"kind":"idea"}' } }));
+  const { config, dir, audience } = await realConfig(memory.baseUrl, { baseUrl: ai.baseUrl, model: "authored-fixture" });
   try {
     const assistant = new Assistant(config, new MemoryClient(config, new CredentialRoutes(new LocalServer())));
     const result = await assistant.save({ requestId: randomUUID(), audience, content: "AI 서버가 꺼진 상태에서 저장하는 테스트 문장", autoClassify: true }, context);
     expect(result.state).toBe("saved");
     expect(result.classification).toEqual({ outcome: "failed", reason: "서버 요청이 실패했습니다 (500)." });
+  } finally { memory.server.stop(true); ai.server.stop(true); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("with no answer AI chosen a note is saved without any classification step or failure", async () => {
+  const memory = memoryFixture();
+  const { config, dir, audience } = await realConfig(memory.baseUrl);
+  try {
+    const assistant = new Assistant(config, new MemoryClient(config, new CredentialRoutes(new LocalServer())));
+    const result = await assistant.save({ requestId: randomUUID(), audience, content: "AI 없이 저장만 하는 테스트 문장", autoClassify: true }, context);
+    expect(result.state).toBe("saved");
+    expect(result.classification).toBeUndefined();
+    expect(memory.counts.clientInfo).toBe(0); // no capture-kind lookup either
+    expect(memory.counts.update).toBe(0);
   } finally { memory.server.stop(true); rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -72,13 +86,14 @@ test("allowedCaptureKinds failure surfaces as classification.outcome failed with
 // too, not a permission error -- allowedCaptureKinds shares client.info()'s /client-info judgment.
 test("allowedCaptureKinds on a pre-integration server (403) surfaces the version-mismatch reason, not FORBIDDEN", async () => {
   const memory = memoryFixture({ clientInfo: () => new Response("", { status: 403 }) });
-  const { config, dir, audience } = await realConfig(memory.baseUrl);
+  const ai = aiFixture(() => Response.json({ message: { content: '{"kind":"idea"}' } }));
+  const { config, dir, audience } = await realConfig(memory.baseUrl, { baseUrl: ai.baseUrl, model: "authored-fixture" });
   try {
     const assistant = new Assistant(config, new MemoryClient(config, new CredentialRoutes(new LocalServer())));
     const result = await assistant.save({ requestId: randomUUID(), audience, content: "구버전 서버에 저장하는 테스트 문장", autoClassify: true }, context);
     expect(result.state).toBe("saved");
     expect(result.classification).toEqual({ outcome: "failed", reason: "이 바라 서버는 펫 연동을 지원하지 않는 이전 버전입니다. 펫 연동을 지원하는 버전으로 서버를 업데이트한 뒤 다시 연결해 주세요." });
-  } finally { memory.server.stop(true); rmSync(dir, { recursive: true, force: true }); }
+  } finally { memory.server.stop(true); ai.server.stop(true); rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("ai.classify failure surfaces as classification.outcome failed with the AI's own message", async () => {

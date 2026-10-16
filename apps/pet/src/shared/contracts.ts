@@ -242,7 +242,9 @@ export type ServerUpdateStatus =
   | { state: "current"; installed: RemoteServerRelease; leftoverLock: string | null; cancelledAfterCheck: boolean }
   | { state: "updating"; from: string | null; to: string }
   | { state: "failed"; from: string | null; to: string | null; code: string; message: string; stopped: boolean };
-export interface AppStatus { connection: ConnectionStatus; activeOperations: string[]; installed: boolean; maintenance: MaintenanceStatus;
+/** `installing`: an install (`install.local`, `install.remote`) was accepted and has not ended yet, whether it still
+ * waits its turn or runs; false again after it succeeded, failed or was cancelled (`src/shared/run-count.ts`, counted in `src/service/router.ts`). */
+export interface AppStatus { connection: ConnectionStatus; activeOperations: string[]; installing: boolean; installed: boolean; maintenance: MaintenanceStatus;
   update: UpdateStatus | null; serverUpdate: ServerUpdateStatus | null;
   /** Set while the running remote tunnel is not on its preferred local port; null otherwise. */
   tunnelPort: TunnelPortNotice | null }
@@ -429,6 +431,9 @@ export interface RpcOperations {
   "operation.cancel": { params: { requestId: string }; result: { cancelled: boolean } };
 }
 export type RpcMethod = keyof RpcOperations;
+/** Service error code of a request refused while an install runs (`AppStatus.installing`): the dashboard link and a
+ * question, which need the finished install (`src/service/router.ts`). A screen tells it apart from a failure. */
+export const INSTALL_RUNNING_CODE = "INSTALL_RUNNING";
 /** Service error codes a `memory.update` can end with that the edit dialog answers with a
  * "reload the latest" action: the server refused a stale revision (`conflict`) or an AI classification
  * over a user one (`captureConflict`), or the edit was saved but its read-back failed (`rereadFailed`). */

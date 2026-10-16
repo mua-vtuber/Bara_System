@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
-import { ANSWER_OUTCOMES, PROGRESS_STAGES } from "../shared/contracts.ts";
+import { ANSWER_OUTCOMES, INSTALL_RUNNING_CODE, PROGRESS_STAGES } from "../shared/contracts.ts";
 import nativeHost from "../shared/native-host.json";
-import { errorText, hostErrorCode, isHostErrorPayload } from "./error-text.ts";
+import { errorText, hostErrorCode, isHostErrorPayload, isInstallRunning } from "./error-text.ts";
 import { messages } from "./messages.ts";
 
 test("every native host error code has a Korean text and no text is left without a code", () => {
@@ -71,4 +71,10 @@ test("only a well-formed host error object counts as one", () => {
   expect(isHostErrorPayload(Object.assign(new Error("x"), { code: "X" }))).toBe(false);
   expect(hostErrorCode({ code: "EDIT_CONFLICT", message: "x" })).toBe("EDIT_CONFLICT");
   expect(hostErrorCode("EDIT_CONFLICT: x")).toBeUndefined();
+});
+
+test("only the install refusal counts as an install still running", () => {
+  expect(isInstallRunning({ code: INSTALL_RUNNING_CODE, message: "x" })).toBe(true);
+  expect(isInstallRunning({ code: "EDIT_CONFLICT" })).toBe(false);
+  expect(isInstallRunning(new Error(INSTALL_RUNNING_CODE))).toBe(false);
 });

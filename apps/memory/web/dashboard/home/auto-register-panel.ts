@@ -23,6 +23,7 @@ function revertSummary(r: EntityRegisterRevertResult): string[] {
   if (r.deletedRow) parts.push(S.revertDeletedRow(r.deletedRow.typeName, r.deletedRow.id));
   if (r.keptRowReason) parts.push(S.revertKeptRow(r.keptRowReason));
   if (r.trashedScheduleNodeId !== null) parts.push(S.revertTrashedSchedule(r.trashedScheduleNodeId));
+  if (r.clearedMemoDate !== null) parts.push(S.revertClearedMemoDate(r.clearedMemoDate));
   return parts;
 }
 

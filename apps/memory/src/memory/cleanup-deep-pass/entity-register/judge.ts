@@ -5,11 +5,11 @@
 import { getLanguageProfile } from "../../lang/profile-loader.ts";
 import type { EntityRegisterProfile, EventDateProfile } from "../../lang/language-profile.ts";
 import { ENTITY_REGISTER_LIMITS } from "./constants.ts";
-import { checkScheduleDate, parseIsoDate } from "./date-check.ts";
+import { checkScheduleDate, isYearlessAbsoluteText, parseIsoDate } from "./date-check.ts";
 import { entryNames, exactMatches, nameKey, normalizeName, similarMatches, splitHonorific } from "./name-match.ts";
 import type {
   ActiveSchedule, EntityDecision, EntityNameIndex, EntityRegisterAiResult, EntityRegisterMemo,
-  EntityRegisterOption, MemoJudgement, NameIndexEntry, ProposeReason, ScheduleDecision,
+  EntityRegisterOption, MemoDateDecision, MemoEventAtState, MemoJudgement, NameIndexEntry, ProposeReason, ScheduleDecision,
 } from "./types.ts";
 
 export interface JudgeProfile {
@@ -26,6 +26,10 @@ export interface JudgeInput {
   ignoredNames: ReadonlySet<string>;
   scheduleIgnored: boolean;
   activeSchedule: ActiveSchedule | null;
+  /** 원본 메모의 현재 event_at 칸(출처 무관). 행이 없으면 found:false. */
+  memoEventAt: MemoEventAtState;
+  /** 이 메모에서 메모 날짜를 거절했거나 되돌렸는가. */
+  memoDateIgnored: boolean;
   autoApply: boolean;
   profile: JudgeProfile;
 }
@@ -117,6 +121,31 @@ function judgeSchedule(input: JudgeInput, content: string): ScheduleDecision {
   return { action: "propose", reason: check === "relative" ? "relative" : "mismatch", ...base, existingScheduleNodeId: null };
 }
 
+/**
+ * 원본 메모의 event_at 채우기(yearless-date-cleanup spec 3.3). 일정 판정과 독립이다 — 일정 제목이 없어도,
+ * 과거형 메모여도 같은 규칙으로 본다. 연도는 코드가 확인하지 않고 AI 가 문맥으로 정한 값을 쓴다.
+ * 위에서부터 처음 맞는 줄을 따른다. 연도 없는 절대 날짜 표현만 다룬다(그 밖은 저장 경로 몫 — 6번).
+ */
+export function judgeMemoDate(input: JudgeInput, content: string): MemoDateDecision {
+  if (!input.memoEventAt.found) return { action: "none", reason: "memo_missing" };
+  if (input.memoEventAt.eventAt !== null) return { action: "none", reason: "already_set" };
+  if (input.memoDateIgnored) return { action: "none", reason: "ignored" };
+  const r = input.result;
+  const dateText = r.eventDateText ? normalizeName(r.eventDateText) : "";
+  if (!dateText || !r.eventDate) return { action: "none", reason: "no_date" };
+  if (!content.includes(dateText)) return { action: "none", reason: "date_text_not_in_text" };
+  if (!isYearlessAbsoluteText(dateText, input.profile.eventDate)) return { action: "none", reason: "not_yearless" };
+  const check = checkScheduleDate({ dateText, aiDate: r.eventDate, createdAt: input.memo.createdAt, profile: input.profile.eventDate });
+  if (check === "auto") {
+    return input.autoApply
+      ? { action: "auto", date: r.eventDate, dateText }
+      : { action: "propose", reason: "auto_apply_off", date: r.eventDate, dateText };
+  }
+  // 날짜 칸은 AI 날짜가 실제 날짜일 때만 미리 채운다(일정 제안과 같은 규칙).
+  const date = parseIsoDate(r.eventDate) ? r.eventDate : null;
+  return { action: "propose", reason: check, date, dateText };
+}
+
 export function judgeMemo(input: JudgeInput): MemoJudgement {
   const content = normalizeName(input.memo.content);
   const linked = new Set(input.memo.alreadyLinked.map(nameKey));
@@ -130,5 +159,10 @@ export function judgeMemo(input: JudgeInput): MemoJudgement {
     seen.add(dedupe);
     entities.push(judgeEntity(input, content, linked, type, name));
   }
-  return { nodeId: input.memo.nodeId, entities, schedule: judgeSchedule(input, content) };
+  return {
+    nodeId: input.memo.nodeId,
+    entities,
+    schedule: judgeSchedule(input, content),
+    memoDate: judgeMemoDate(input, content),
+  };
 }

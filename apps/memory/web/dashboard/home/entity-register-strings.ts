@@ -22,7 +22,11 @@ export const ENTITY_REGISTER_STRINGS = {
   recentTitle: "최근 자동 등록",
   emptyRecent: "자동으로 등록한 항목이 아직 없습니다.",
   listFailed: (detail: string) => `최근 자동 등록을 불러오지 못했습니다: ${detail}`,
-  itemKind: (kind: string) => (kind === "entity_created" ? "새로 등록" : kind === "entity_linked" ? "연결" : "일정"),
+  itemKindLabels: { entity_created: "새로 등록", entity_linked: "연결", schedule_created: "일정", memo_date_filled: "메모 날짜" } as Record<string, string>,
+  itemKindUnknown: "알 수 없는 기록",
+  itemKind(kind: string): string {
+    return Object.hasOwn(this.itemKindLabels, kind) ? this.itemKindLabels[kind]! : `${this.itemKindUnknown}: ${kind}`;
+  },
   revertButton: "되돌리기",
   reverting: "되돌리는 중...",
   revertFailed: (detail: string) => `되돌리지 못했습니다: ${detail}`,
@@ -32,13 +36,15 @@ export const ENTITY_REGISTER_STRINGS = {
   revertKeptRow: (reason: string) => `항목은 남겼습니다: ${reason}`,
   revertDeletedRow: (typeName: string, id: string) => `새로 만든 항목(${typeName} ${id})을 지웠습니다.`,
   revertTrashedSchedule: (nodeId: number) => `일정 메모 #${nodeId}을(를) 휴지통으로 옮겼습니다.`,
+  revertClearedMemoDate: (date: string) => `메모 날짜(${date})를 지웠습니다.`,
   fromMemo: "원본 메모",
   noMemo: "원본 메모 없음",
   proposalTitle: "항목·일정 등록",
   proposalTarget: (nodeId: unknown) => `기억 #${String(nodeId)}`,
   /** 제안 항목 제목 — 종류 이름(기본 종류는 한글, 사용자 종류는 그 이름) · 메모 속 이름. */
   itemHeading: (typeLabel: string, name: string) => `${typeLabel} · ${name}`,
-  proposalChange: (items: number, hasSchedule: boolean) => `확인이 필요한 항목 ${items}개${hasSchedule ? " · 일정 1개" : ""}`,
+  proposalChange: (items: number, hasSchedule: boolean, hasMemoDate = false) =>
+    `확인이 필요한 항목 ${items}개${hasSchedule ? " · 일정 1개" : ""}${hasMemoDate ? " · 메모 날짜 1개" : ""}`,
   reasonLabels: {
     homonym: "같은 이름이 여럿 있어 어느 쪽인지 골라 주세요.",
     similar: "비슷한 기존 이름이 있습니다.",
@@ -55,12 +61,22 @@ export const ENTITY_REGISTER_STRINGS = {
   optionLink: (target: string, addAlias: boolean, memoName: string) => `기존 '${target}'와 같음${addAlias ? ` ('${memoName}'를 별명으로 기억)` : ""}`,
   optionCreate: (name: string, alias: string | null) => (alias ? `'${name}'(으)로 새로 등록 ('${alias}'를 별명으로)` : `'${name}'(으)로 새로 등록`),
   optionIgnore: "무시",
+  memoDateHeading: (dateText: string) => `메모 날짜 · ${dateText}`,
+  memoDateReasonLabels: {
+    relative: "연도가 따로 적혀 있어 날짜를 확인해 주세요.",
+    mismatch: "본문 날짜와 AI 날짜가 어긋납니다.",
+    auto_apply_off: "바로 반영이 꺼져 있어 확인을 받습니다.",
+  } as Record<string, string>,
+  memoDateAccept: "메모 날짜 채우기",
+  memoDateIgnore: "메모 날짜 무시",
+  memoDateLabel: "날짜",
+  invalidMemoDate: "메모 날짜를 YYYY-MM-DD 형식의 실제 날짜로 적어 주세요.",
   scheduleAccept: "일정 등록",
   scheduleIgnore: "일정 무시",
   scheduleDate: "날짜",
   scheduleTitleLabel: "제목",
   alreadyApplied: " (이미 적용됨)",
-  autoActionLabels: { linked: "기존 항목에 연결", created: "새로 등록", schedule: "일정 등록" } as Record<string, string>,
+  autoActionLabels: { linked: "기존 항목에 연결", created: "새로 등록", schedule: "일정 등록", memo_date: "메모 날짜 채움" } as Record<string, string>,
   autoActionUnknown: "알 수 없는 처리",
   autoAppliedRow(name: string, action: string): string {
     return `${name} (${Object.hasOwn(this.autoActionLabels, action) ? this.autoActionLabels[action] : `${this.autoActionUnknown}: ${action}`})`;
@@ -71,5 +87,5 @@ export const ENTITY_REGISTER_STRINGS = {
   titleRequired: "일정 제목을 적어 주세요.",
   approveRefused: (detail: string) => `승인하지 못했습니다(제안은 그대로 검토 대기입니다): ${detail}`,
   approveFailed: (status: number, detail: string) => `승인에 실패했습니다(HTTP ${status}): ${detail}. 제안은 그대로 두었으니 다시 시도할 수 있습니다.`,
-  rejectNotice: "거절하면 이 제안의 이름과 일정이 모두 '무시'로 기록되어, 같은 메모에서 다시 제안하지 않습니다.",
+  rejectNotice: "거절하면 이 제안의 이름·일정·메모 날짜가 모두 '무시'로 기록되어, 같은 메모에서 다시 제안하지 않습니다.",
 } as const;

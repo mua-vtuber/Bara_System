@@ -53,14 +53,26 @@ export const READY_POLL_INTERVAL_MS = 500;
  * port, connect and answer together. A refused loopback connect returns at once, and a running core
  * answers `/health` without touching its database. */
 export const EXISTING_CORE_PROBE_TIMEOUT_MS = 2_500;
+/** After the saved SSH tunnel closed by itself or failed to open, the first wait before the service opens it again
+ * (`tunnel-keeper.ts`). Each failed attempt doubles the wait up to `TUNNEL_RECONNECT_MAX_DELAY_MS`. */
+export const TUNNEL_RECONNECT_FIRST_DELAY_MS = 3_000;
+/** The longest wait between two attempts to open the tunnel again: an unreachable server is asked once a minute. */
+export const TUNNEL_RECONNECT_MAX_DELAY_MS = 60_000;
+/** The tunnel's `ssh` asks the server every this many seconds whether the connection still lives (`ServerAliveInterval`),
+ * and exits after `TUNNEL_KEEPALIVE_MAX_MISSED` unanswered asks. Without it a connection that died while the PC slept
+ * or the network changed keeps its `ssh` running with nothing behind it, and the tunnel is never opened again. */
+export const TUNNEL_KEEPALIVE_INTERVAL_S = 15;
+export const TUNNEL_KEEPALIVE_MAX_MISSED = 3;
 /** Wait for a started SSH tunnel to become the only listener on its local port. */
 export const TUNNEL_OWNER_TIMEOUT_MS = 15_000;
 /** One OS listener-table lookup (`port-owner.ts`). A warm Windows PowerShell CIM query takes under
  * one second; the limit leaves room for a cold PowerShell start right after login. */
 export const PORT_OWNER_LOOKUP_TIMEOUT_MS = 15_000;
-/** One loopback TCP connect that decides whether a listener lookup is needed at all. A refused
- * loopback connect returns in well under a millisecond; an unanswered one is handed to the lookup. */
-export const LISTENER_PROBE_TIMEOUT_MS = 2_000;
+/** One loopback TCP connect that decides whether a listener lookup is needed at all; an unanswered one is
+ * handed to the lookup. On Windows a connect to a closed port may be refused only after about 2 seconds
+ * (the OS retries on a reset), and a probe cut off before that finds no listener in the lookup either,
+ * which `LocalServer` reports as the port taken by another program. Hence well above those 2 seconds. */
+export const LISTENER_PROBE_TIMEOUT_MS = 5_000;
 
 /** Replace procedure (`release-swap.ts`): how long a started server may take to answer `/health` with the version its
  * release record names. Its first start after an update loads models, as after an install (`REMOTE_INSTALL_READY_TIMEOUT_MS`). */

@@ -2,6 +2,7 @@ import { messages } from "./messages.ts";
 import { connectionAudience, type CleanupFailure, type CleanupProvider, type CleanupRejection, type CleanupResult } from "../shared/contracts.ts";
 import { command, errorMessage, onProgress, request } from "./bridge.ts";
 import { button, element, type Notice } from "./dom.ts";
+import { isInstallRunning } from "./error-text.ts";
 
 /** Whether the "정리 제안 만들기" button may run, and the notice to show for the unconfigured state
  * (PV-9/WP-P2-16): a cleanup provider of `"none"` -- never chosen yet -- must disable the run button
@@ -88,7 +89,7 @@ export function renderCleanup(host: HTMLElement, notice: Notice): () => void {
   const review = button(messages.cleanup.review, async () => { try {
     const audience = runAudience ?? connectionAudience((await request("settings.get", {})).connection);
     await command("open_dashboard", { review: true, audience });
-  } catch (error) { notice(errorMessage(error), "error"); } });
+  } catch (error) { notice(errorMessage(error), isInstallRunning(error) ? "info" : "error"); } });
   const actions = element("div", "stack-actions"); actions.append(run, cancel, review);
   const notConfigured = element("p", "hint", messages.cleanup.notConfigured); notConfigured.hidden = true;
   host.append(intro, actions, element("p", "hint", messages.cleanup.settingsHint), notConfigured, result);

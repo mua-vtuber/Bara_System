@@ -104,6 +104,8 @@ const ROLLING_WINDOW = DATE_TOKENS.rollingWindow;
 const ISO_YMD_DATETIME =
   /(?<!\d)(\d{4})-(\d{1,2})-(\d{1,2})(?:[T\s](\d{1,2}):(\d{2})(?::\d{2})?)?(?!\d)/;
 const ABS_YMD = DATE_TOKENS.absYmd;
+/** 연도 있는 숫자 날짜 "YYYY/M/D"·"YYYY.M.D" — ABS_YMD 와 같은 순위(연도 있음). */
+const ABS_YMD_NUMERIC = DATE_TOKENS.absYmdNumeric;
 const ABS_MD = DATE_TOKENS.absMd;
 const ABS_MD_SLASH = DATE_TOKENS.absMdSlash;
 
@@ -144,6 +146,9 @@ const WEEKDAY_QUALIFIER_OFFSETS = DATE_TOKENS.weekdayQualifierOffsets;
 
 /** 달 단위 토큰 → 달 오프셋. */
 const MONTH_OFFSETS = DATE_TOKENS.monthOffsets;
+
+/** 달 토큰 바로 뒤의 "N일"("다음 달 15일"). 달 토큰 매치 끝부터 맞춘다(^ 고정). */
+const MONTH_DAY = DATE_TOKENS.monthDay;
 
 /**
  * 해 단위 토큰 → 매치 문자열별 해 오프셋. 옛 resolver 함수("매치가 재작년이면
@@ -193,29 +198,55 @@ function extractTimeOfDay(text: string): string | null {
 
 // ── 단계별 추출(언어 의존 매칭 → 언어 중립 계산) ─────────────────────────────
 
-function matchAbsolute(text: string, now: Date): string | null {
+/**
+ * 절대 날짜 매칭 결과 종류. 연도가 적힌 날짜는 ISO 그대로(dated), 연도가 없는
+ * "M월 D일"·"M/D" 는 월·일만(yearless) 돌려준다. 연도를 채울지(저장한 해) 비울지는
+ * 부르는 쪽이 정한다 — matchAbsolute(채움) / extractIngestEventDate(비움).
+ */
+type AbsoluteMatch =
+  | { kind: "dated"; iso: string }
+  | { kind: "yearless"; month: number; day: number };
+
+/** 연·월·일 캡처(1=년·2=월·3=일)를 ISO 로. 월·일 범위 밖이면 null. */
+function datedFromCapture(m: RegExpExecArray): AbsoluteMatch | null {
+  const year = parseInt(m[1]!, 10);
+  const month = parseInt(m[2]!, 10);
+  const day = parseInt(m[3]!, 10);
+  return isValidMonthDay(month, day) ? { kind: "dated", iso: toIso(year, month, day) } : null;
+}
+
+/** 월·일 캡처(1=월·2=일)를 연도 없는 결과로. 월·일 범위 밖이면 null. */
+function yearlessFromCapture(m: RegExpExecArray): AbsoluteMatch | null {
+  const month = parseInt(m[1]!, 10);
+  const day = parseInt(m[2]!, 10);
+  return isValidMonthDay(month, day) ? { kind: "yearless", month, day } : null;
+}
+
+/**
+ * 절대 날짜를 순서(ISO → YYYY년 M월 D일 → YYYY/M/D·YYYY.M.D → M월 D일 → M/D)로 찾아
+ * 처음 유효한 하나를 돌려준다. 연도 있는 두 모양은 같은 순위라 연도 없는 모양보다 먼저 본다.
+ */
+function matchAbsoluteKind(text: string): AbsoluteMatch | null {
   const iso = matchIsoDateTime(text);
-  if (iso) return iso.date;
+  if (iso) return { kind: "dated", iso: iso.date };
   const ymd = ABS_YMD.exec(text);
-  if (ymd) {
-    const year = parseInt(ymd[1]!, 10);
-    const month = parseInt(ymd[2]!, 10);
-    const day = parseInt(ymd[3]!, 10);
-    if (isValidMonthDay(month, day)) return toIso(year, month, day);
-  }
+  const ymdResult = ymd ? datedFromCapture(ymd) : null;
+  if (ymdResult) return ymdResult;
+  const numeric = ABS_YMD_NUMERIC.exec(text);
+  const numericResult = numeric ? datedFromCapture(numeric) : null;
+  if (numericResult) return numericResult;
   const md = ABS_MD.exec(text);
-  if (md) {
-    const month = parseInt(md[1]!, 10);
-    const day = parseInt(md[2]!, 10);
-    if (isValidMonthDay(month, day)) return toIso(now.getFullYear(), month, day);
-  }
+  const mdResult = md ? yearlessFromCapture(md) : null;
+  if (mdResult) return mdResult;
   const slash = ABS_MD_SLASH.exec(text);
-  if (slash) {
-    const month = parseInt(slash[1]!, 10);
-    const day = parseInt(slash[2]!, 10);
-    if (isValidMonthDay(month, day)) return toIso(now.getFullYear(), month, day);
-  }
-  return null;
+  return slash ? yearlessFromCapture(slash) : null;
+}
+
+/** 절대 날짜 → ISO. 연도 없는 표현은 now 의 해로 채운다(검색 시간 범위·직접 입력용, 동작 그대로). */
+function matchAbsolute(text: string, now: Date): string | null {
+  const m = matchAbsoluteKind(text);
+  if (m === null) return null;
+  return m.kind === "dated" ? m.iso : toIso(now.getFullYear(), m.month, m.day);
 }
 
 function matchIsoDateTime(text: string): { date: string; time: string | null } | null {
@@ -322,7 +353,29 @@ function matchWeekday(text: string, now: Date): string | null {
   return dateToIso(mostRecentWeekday(now, targetGetDay));
 }
 
+/**
+ * 상대 달 토큰 + 바로 뒤 "N일"("다음 달 15일") → 그 달의 N일.
+ * 반환: null = 이런 표현 없음 / { date: null } = 표현은 있으나 그 달에 없는 날
+ * ("11월 31일" 처럼 — 넘침 보정으로 다음 달 날짜를 지어내지 않는다) / { date } = 닫힌 날짜.
+ * 표현이 있는데 날이 틀리면 달 1일·달 span 으로 내려가지 않도록 호출부가 구분한다.
+ */
+function matchRelativeMonthDay(text: string, now: Date): { date: string | null } | null {
+  for (const { regex, offset } of MONTH_OFFSETS) {
+    const m = regex.exec(text);
+    if (!m) continue;
+    const dayM = MONTH_DAY.exec(text.slice(m.index + m[0].length));
+    if (!dayM) return null;
+    const monthStart = addMonthsToStart(startOfMonth(now), offset);
+    const day = parseInt(dayM[1]!, 10);
+    if (day < 1 || day > endOfMonth(monthStart).getDate()) return { date: null };
+    return { date: toIso(monthStart.getFullYear(), monthStart.getMonth() + 1, day) };
+  }
+  return null;
+}
+
 function matchMonth(text: string, now: Date): string | null {
+  const withDay = matchRelativeMonthDay(text, now);
+  if (withDay) return withDay.date;
   for (const { regex, offset } of MONTH_OFFSETS) {
     if (regex.test(text)) {
       return dateToIso(addMonthsToStart(startOfMonth(now), offset));
@@ -377,6 +430,22 @@ export function extractEventDate(text: string, now: Date): string | null {
     matchMonth(text, now) ??
     matchYear(text, now)
   );
+}
+
+/**
+ * 메모 본문 저장 전용 — 의미 추출 뒤 event_at 에 쓸 날짜(metadata-apply.ts 만 부른다).
+ *
+ * extractEventDate 와 같은 순서로 풀되, 가장 구체적인 표현이 연도 없는 절대 날짜
+ * ("1월 5일"·"1/5")이면 null 을 돌려준다. 저장한 해를 연도로 지어내지 않고, 더 약한
+ * 표현("내일" 등)으로 내려가지도 않는다 — 그 메모의 날짜는 정리 AI 가 문맥으로 연도를
+ * 정해 채운다(docs/decisions/2026-10-16-yearless-date-cleanup-spec.md 3.1).
+ * 검색어·직접 입력(#날짜:)은 이 함수가 아니라 extractEventDate·extractEventDateTime 을 쓴다.
+ */
+export function extractIngestEventDate(text: string, now: Date): string | null {
+  if (ROLLING_WINDOW.test(text)) return null;
+  const absolute = matchAbsoluteKind(text);
+  if (absolute !== null && absolute.kind === "yearless") return null;
+  return extractEventDate(text, now);
 }
 
 /**
@@ -503,6 +572,11 @@ export function eventDateRange(text: string, now: Date): EventDateRange | null {
     matchRelativeDay(text, now) ??
     matchWeekday(text, now);
   if (point) return pointRange(point);
+
+  // 상대 달 + 일("다음 달 15일")은 그 하루 점 — 달 span 보다 먼저. 그 달에 없는
+  // 날이면 달 전체로 넓혀 지어내지 않고 null(extractEventDate 정합).
+  const monthDay = matchRelativeMonthDay(text, now);
+  if (monthDay) return monthDay.date === null ? null : pointRange(monthDay.date);
 
   // span 표현 — 주 > 달 > 해 순(점이 없을 때만).
   return (

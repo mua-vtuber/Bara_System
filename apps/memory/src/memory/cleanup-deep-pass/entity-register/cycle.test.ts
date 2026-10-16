@@ -57,7 +57,8 @@ test("one cycle: clean names auto-register, a similar name becomes a proposal, t
     [WEDDING]: { entities: [{ type: "person", name: "민수" }], eventDateText: "11월 3일", eventDate: "2026-11-03", scheduleTitle: "민수 결혼" },
     [MONGRYONG]: { entities: [{ type: "person", name: "몽룡" }], eventDateText: null, eventDate: null, scheduleTitle: null },
   })));
-  expect(summary).toMatchObject({ candidatesFound: 2, completed: 2, autoApplied: 2, proposalsInserted: 1, failures: 0 });
+  // 자동 3 = 민수 등록 + 일정 + 원본 메모 날짜 채움("11월 3일" 은 연도 없는 날짜, 메모 event_at 이 비어 있음).
+  expect(summary).toMatchObject({ candidatesFound: 2, completed: 2, autoApplied: 3, proposalsInserted: 1, failures: 0 });
   expect(getStageResult(db, "entity_register", String(wedding))!.status).toBe("completed");
   expect(getStageResult(db, "entity_register", String(mongryong))!.status).toBe("completed");
   expect((db.query("SELECT kind FROM cleanup_proposals").all() as Array<{ kind: string }>).map((r) => r.kind)).toEqual(["entity_register"]);

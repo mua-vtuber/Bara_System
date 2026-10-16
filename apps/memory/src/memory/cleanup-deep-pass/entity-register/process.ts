@@ -22,9 +22,11 @@ import type { CleanupProposalsRepository } from "../../../db/store-internal/clea
 import { withMemoryMutationLock } from "../../shared-memory-mutation-lock.ts";
 import { getStageResult, recordStageDeterministicFailure, recordStageRetryable, recordStageSuccess, recordStageTerminal } from "../stage-results-ledger.ts";
 import { DEFAULT_RETRY_REAPPEAR_DELAY_MS, nextRetryAt } from "../stage-retry.ts";
-import { applyMemoChanges, EntityRegisterApplyRefusedError, type ApplyOutcome, type EntityApplication, type ScheduleApplication } from "./apply.ts";
-import type { EntityRegisterCandidateRow } from "./candidate-query.ts";
-import { ENTITY_REGISTER_LEDGER_STAGE } from "./constants.ts";
+import {
+  applyMemoChanges, EntityRegisterApplyRefusedError, type ApplyOutcome, type EntityApplication, type MemoDateApplication, type ScheduleApplication,
+} from "./apply.ts";
+import { readMemoEventAt, type EntityRegisterCandidateRow } from "./candidate-query.ts";
+import { ENTITY_REGISTER_LEDGER_STAGE, MEMO_DATE_AUTO_NOTE_TYPE } from "./constants.ts";
 import { judgeMemo, type JudgeProfile } from "./judge.ts";
 import { addToNameIndex } from "./name-index.ts";
 import { buildEntityRegisterProposal, insertEntityRegisterProposal, type AutoAppliedNote } from "./proposal.ts";
@@ -60,7 +62,7 @@ export interface ProcessMemoOutcome {
   skipped: ApplyOutcome["skipped"];
 }
 
-function toApplications(j: MemoJudgement): { entities: EntityApplication[]; schedule: ScheduleApplication | null } {
+function toApplications(j: MemoJudgement): { entities: EntityApplication[]; schedule: ScheduleApplication | null; memoDate: MemoDateApplication | null } {
   const entities: EntityApplication[] = [];
   for (const d of j.entities) {
     if (d.action === "auto_link") entities.push({ memoName: d.name, type: d.type, action: { kind: "link", targetId: d.target.id, targetName: d.target.name, addAlias: false } });
@@ -69,7 +71,10 @@ function toApplications(j: MemoJudgement): { entities: EntityApplication[]; sche
   const schedule: ScheduleApplication | null = j.schedule.action === "auto"
     ? { title: j.schedule.title, date: j.schedule.date, dateText: j.schedule.dateText, replaceNodeId: null }
     : null;
-  return { entities, schedule };
+  const memoDate: MemoDateApplication | null = j.memoDate.action === "auto"
+    ? { date: j.memoDate.date, dateText: j.memoDate.dateText }
+    : null;
+  return { entities, schedule, memoDate };
 }
 
 export async function processEntityRegisterMemo(deps: ProcessDeps, memo: EntityRegisterCandidateRow, result: EntityRegisterAiResult): Promise<ProcessMemoOutcome> {
@@ -134,18 +139,19 @@ async function processUnderLock(deps: ProcessDeps, memo: EntityRegisterCandidate
     memo, result, index: deps.index, allowedTypes: deps.allowedTypes,
     ignoredNames: deps.records.ignoredNameKeys(memo.nodeId), scheduleIgnored: deps.records.isScheduleIgnored(memo.nodeId),
     activeSchedule: active ? { nodeId: active.nodeId, date: active.date, title: active.title } : null,
+    memoEventAt: readMemoEventAt(db, memo.nodeId), memoDateIgnored: deps.records.isMemoDateIgnored(memo.nodeId),
     autoApply: deps.autoApply, profile: deps.profile,
   });
 
-  const { entities, schedule } = toApplications(j);
+  const { entities, schedule, memoDate } = toApplications(j);
   const notes: AutoAppliedNote[] = [];
   let autoApplied = 0;
   let skipped: ApplyOutcome["skipped"] = [];
-  if (entities.length > 0 || schedule) {
+  if (entities.length > 0 || schedule || memoDate) {
     try {
       const out = await applyMemoChanges(
         { store: deps.store, records: deps.records, memo, runId: deps.runId, proposalId: null, decidedBy: "auto" },
-        { entities, schedule },
+        { entities, schedule, memoDate },
       );
       skipped = out.skipped;
       for (const e of out.entities) {
@@ -157,6 +163,11 @@ async function processUnderLock(deps: ProcessDeps, memo: EntityRegisterCandidate
       if (out.scheduleRecordId !== null) {
         autoApplied += 1;
         notes.push({ type: "schedule", name: schedule!.title, action: "schedule" });
+      }
+      if (out.memoDateRecordId !== null) {
+        autoApplied += 1;
+        // 참고 줄 이름은 채운 날짜(연도 포함) — 제안 카드가 "2027-01-05 (메모 날짜 채움)" 으로 보인다.
+        notes.push({ type: MEMO_DATE_AUTO_NOTE_TYPE, name: memoDate!.date, action: "memo_date" });
       }
     } catch (e) {
       const cause = e instanceof Error ? e.message : String(e);

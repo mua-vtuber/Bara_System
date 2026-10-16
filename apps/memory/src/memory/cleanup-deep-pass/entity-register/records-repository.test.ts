@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import { openMemoryDatabase } from "../../../db/migrations.ts";
-import { EntityRegisterRecordsRepository, SCHEDULE_IGNORE_NAME_KEY, emptyRecordDetail } from "./records-repository.ts";
+import { EntityRegisterRecordsRepository, MEMO_DATE_IGNORE_NAME_KEY, SCHEDULE_IGNORE_NAME_KEY, emptyRecordDetail } from "./records-repository.ts";
 
 let db: Database;
 let repo: EntityRegisterRecordsRepository;
@@ -56,6 +56,27 @@ test("ignores are kept per memo and per kind", () => {
   expect([...repo.ignoredNameKeys(1)]).toEqual(["민수"]);
   expect(repo.isScheduleIgnored(1)).toBe(true);
   expect(repo.isScheduleIgnored(2)).toBe(false);
+  expect(repo.isMemoDateIgnored(1)).toBe(false);
+});
+
+test("a memo-date ignore is its own kind and does not mark the schedule or names ignored", () => {
+  repo.addIgnore(3, "memo_date", MEMO_DATE_IGNORE_NAME_KEY, "reverted");
+  expect(repo.isMemoDateIgnored(3)).toBe(true);
+  expect(repo.isScheduleIgnored(3)).toBe(false);
+  expect([...repo.ignoredNameKeys(3)]).toEqual([]);
+  expect(repo.isMemoDateIgnored(4)).toBe(false);
+});
+
+test("a memo-date record round-trips with the date in the shared detail", () => {
+  const memo = insertMemo("1월 5일까지 제출");
+  const id = repo.insert({
+    runId: "r1", proposalId: null, sourceNodeId: memo, itemKind: "memo_date_filled", targetType: "memo",
+    targetId: String(memo), name: "1월 5일", decidedBy: "auto", detail: { ...emptyRecordDetail(), date: "2027-01-05" },
+  });
+  const rec = repo.get(id)!;
+  expect(rec.itemKind).toBe("memo_date_filled");
+  expect(rec.detail.date).toBe("2027-01-05");
+  expect(repo.activeScheduleForMemo(memo)).toBeNull();
 });
 
 test("an older live schedule is still found when the newest schedule node has no date", () => {

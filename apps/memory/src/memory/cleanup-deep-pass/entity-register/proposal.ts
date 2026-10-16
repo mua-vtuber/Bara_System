@@ -11,15 +11,21 @@ import type { SqliteMemoryStore } from "../../../db/store.ts";
 import type { CleanupProposal, CleanupProposalsRepository } from "../../../db/store-internal/cleanup-proposals-repository.ts";
 import { entityRegisterFingerprint } from "../stage-fingerprint.ts";
 import { withMemoryMutationLock } from "../../shared-memory-mutation-lock.ts";
-import { applyMemoChanges, EntityRegisterApplyRefusedError, type EntityApplication, type ScheduleApplication } from "./apply.ts";
-import { readOriginalMemo } from "./candidate-query.ts";
+import {
+  applyMemoChanges, EntityRegisterApplyRefusedError, type EntityApplication, type MemoDateApplication, type ScheduleApplication,
+} from "./apply.ts";
+import { readMemoEventAt, readOriginalMemo } from "./candidate-query.ts";
 import { ENTITY_REGISTER_KIND, ENTITY_REGISTER_LIMITS } from "./constants.ts";
 import { parseIsoDate } from "./date-check.ts";
 import { nameKey, normalizeName } from "./name-match.ts";
-import { SCHEDULE_IGNORE_NAME_KEY, type EntityRegisterRecordsRepository } from "./records-repository.ts";
-import type { EntityRegisterOption, MemoJudgement, ProposeReason, ScheduleProposeReason } from "./types.ts";
+import {
+  MEMO_DATE_IGNORE_NAME_KEY, SCHEDULE_IGNORE_NAME_KEY, type EntityRegisterRecordsRepository, type IgnoreKind,
+} from "./records-repository.ts";
+import type { EntityRegisterOption, MemoDateProposeReason, MemoJudgement, ProposeReason, ScheduleProposeReason } from "./types.ts";
 
 export const SCHEDULE_ITEM_KEY = "schedule";
+/** 메모 날짜 채우기 제안 항목 키(2026-10-16 yearless-date-cleanup spec 3.7). */
+export const MEMO_DATE_ITEM_KEY = "memo_date";
 export function entityItemKey(index: number): string {
   return `entity:${index}`;
 }
@@ -28,10 +34,23 @@ export interface EntityRegisterProposalItem { itemKey: string; type: string; nam
 export interface ScheduleProposalItem {
   itemKey: typeof SCHEDULE_ITEM_KEY; reason: ScheduleProposeReason; title: string; date: string | null; dateText: string; existingScheduleNodeId: number | null;
 }
-export interface AutoAppliedNote { type: string; name: string; action: "linked" | "created" | "schedule" }
+export interface MemoDateProposalItem { itemKey: typeof MEMO_DATE_ITEM_KEY; reason: MemoDateProposeReason; date: string | null; dateText: string }
+export interface AutoAppliedNote { type: string; name: string; action: "linked" | "created" | "schedule" | "memo_date" }
 export interface EntityRegisterProposalPayload {
   nodeId: number; inputFingerprint: string; stageVersion: number; runId: string | null;
   items: EntityRegisterProposalItem[]; schedule: ScheduleProposalItem | null; autoApplied: AutoAppliedNote[];
+  /**
+   * 메모 날짜 제안. 새로 만드는 제안에는 늘 있다(없으면 null). 이 기능 이전에 만들어져 대기 중인 제안에는 칸이 없다 —
+   * 그 제안이 실제로 그 항목을 갖지 않았다는 뜻이라 memoDateItemOf 가 null 로 읽는다(값 위조 아님).
+   */
+  memoDate?: MemoDateProposalItem | null;
+}
+
+const MEMO_DATE_PROPOSE_REASONS: ReadonlySet<string> = new Set<MemoDateProposeReason>(["relative", "mismatch", "auto_apply_off"]);
+
+/** 제안의 메모 날짜 항목 — 칸이 없는 옛 제안은 "메모 날짜 항목 없음"(spec 3.7). */
+export function memoDateItemOf(payload: EntityRegisterProposalPayload): MemoDateProposalItem | null {
+  return Object.hasOwn(payload, "memoDate") ? (payload.memoDate ?? null) : null;
 }
 
 export function buildEntityRegisterProposal(
@@ -47,8 +66,12 @@ export function buildEntityRegisterProposal(
   const schedule: ScheduleProposalItem | null = s.action === "propose"
     ? { itemKey: SCHEDULE_ITEM_KEY, reason: s.reason, title: s.title, date: s.date, dateText: s.dateText, existingScheduleNodeId: s.existingScheduleNodeId }
     : null;
-  if (items.length === 0 && schedule === null) return null;
-  return { nodeId: j.nodeId, ...meta, items, schedule };
+  const m = j.memoDate;
+  const memoDate: MemoDateProposalItem | null = m.action === "propose"
+    ? { itemKey: MEMO_DATE_ITEM_KEY, reason: m.reason, date: m.date, dateText: m.dateText }
+    : null;
+  if (items.length === 0 && schedule === null && memoDate === null) return null;
+  return { nodeId: j.nodeId, ...meta, items, schedule, memoDate };
 }
 
 export function insertEntityRegisterProposal(proposals: CleanupProposalsRepository, payload: EntityRegisterProposalPayload): string {
@@ -98,22 +121,38 @@ export function validateEntityRegisterPayload(payload: Record<string, unknown>):
       return bad("schedule 형식(itemKey·title·date·dateText·existingScheduleNodeId)");
     }
   }
+  // 칸이 없으면 이 기능 이전의 제안 — 메모 날짜 항목 없음으로 받는다. 칸이 있는데 모양이 틀리면 400.
+  if (Object.hasOwn(payload, "memoDate") && payload.memoDate !== null) {
+    const md = payload.memoDate as Partial<MemoDateProposalItem> | undefined;
+    if (
+      md === undefined || md.itemKey !== MEMO_DATE_ITEM_KEY || typeof md.reason !== "string" || !MEMO_DATE_PROPOSE_REASONS.has(md.reason) ||
+      typeof md.dateText !== "string" || !isNullableString(md.date)
+    ) {
+      return bad("memoDate 형식(itemKey·reason·date·dateText)");
+    }
+  }
   if (!Array.isArray(payload.autoApplied)) return bad("autoApplied 는 배열이어야 함");
   return { ok: true };
 }
 
-export function listEntityRegisterItems(payload: Record<string, unknown>): Array<{ itemKey: string; group: "entities" | "schedule"; key: string; value: unknown }> {
+type EntityRegisterItemGroup = "entities" | "schedule" | "memo_date";
+
+export function listEntityRegisterItems(payload: Record<string, unknown>): Array<{ itemKey: string; group: EntityRegisterItemGroup; key: string; value: unknown }> {
   const p = payload as unknown as EntityRegisterProposalPayload;
-  const out: Array<{ itemKey: string; group: "entities" | "schedule"; key: string; value: unknown }> =
+  const out: Array<{ itemKey: string; group: EntityRegisterItemGroup; key: string; value: unknown }> =
     p.items.map((item) => ({ itemKey: item.itemKey, group: "entities", key: item.name, value: item }));
   if (p.schedule) out.push({ itemKey: SCHEDULE_ITEM_KEY, group: "schedule", key: p.schedule.title, value: p.schedule });
+  const memoDate = memoDateItemOf(p);
+  if (memoDate) out.push({ itemKey: MEMO_DATE_ITEM_KEY, group: "memo_date", key: memoDate.dateText, value: memoDate });
   return out;
 }
 
 export type EntityRegisterChoice =
   | { kind: "option"; optionIndex: number }
   | { kind: "schedule"; accept: true; date: string; title: string }
-  | { kind: "schedule"; accept: false };
+  | { kind: "schedule"; accept: false }
+  | { kind: "memo_date"; accept: true; date: string }
+  | { kind: "memo_date"; accept: false };
 
 const NO_CHOICE_MESSAGE = "고른 항목 없음 — choices 에 하나 이상 골라야 함";
 
@@ -137,6 +176,14 @@ export function parseEntityRegisterChoices(body: unknown, payload: EntityRegiste
         throw new EntityRegisterChoiceError(`${key}: { accept: true, date: "YYYY-MM-DD", title } 또는 { accept: false } 여야 함`);
       }
       out.set(key, { kind: "schedule", accept: true, date: v.date, title });
+      continue;
+    }
+    if (key === MEMO_DATE_ITEM_KEY && memoDateItemOf(payload)) {
+      if (v?.accept === false) { out.set(key, { kind: "memo_date", accept: false }); continue; }
+      if (v?.accept !== true || typeof v.date !== "string" || !parseIsoDate(v.date)) {
+        throw new EntityRegisterChoiceError(`${key}: { accept: true, date: "YYYY-MM-DD"(실제 날짜) } 또는 { accept: false } 여야 함`);
+      }
+      out.set(key, { kind: "memo_date", accept: true, date: v.date });
       continue;
     }
     const item = payload.items.find((i) => i.itemKey === key);
@@ -181,7 +228,9 @@ function statusOf(items: EntityRegisterApprovalItem[]): EntityRegisterApprovalRe
   return applied === items.length ? "applied" : "partially_applied";
 }
 
-type PendingIgnore = { itemKey: string; kind: "entity" | "schedule"; key: string };
+type PendingIgnore = { itemKey: string; kind: IgnoreKind; key: string };
+
+const MEMO_DATE_ALREADY_SET_DETAIL = "메모 날짜가 이미 채워져 있음 — 제안이 오래됨";
 
 /** 처리하려던 제안이 그 사이 다른 요청(승인·거절)으로 이미 처리됨 — 잠금 안에서 다시 읽어 판정한다. */
 export class EntityRegisterProposalNotPendingError extends Error {
@@ -215,7 +264,12 @@ export async function approveEntityRegisterProposal(args: {
     if (choices.size === 0) throw new EntityRegisterChoiceError(NO_CHOICE_MESSAGE);
     const proposal = requirePending(proposals, args.proposal.id);
     const payload = proposal.payload as unknown as EntityRegisterProposalPayload;
-    const keys = [...payload.items.map((i) => i.itemKey), ...(payload.schedule ? [SCHEDULE_ITEM_KEY] : [])];
+    const memoDateItem = memoDateItemOf(payload);
+    const keys = [
+      ...payload.items.map((i) => i.itemKey),
+      ...(payload.schedule ? [SCHEDULE_ITEM_KEY] : []),
+      ...(memoDateItem ? [MEMO_DATE_ITEM_KEY] : []),
+    ];
     // 무시 기록·원장·상태를 한 트랜잭션으로 — 반쪽 기록(무시만 남고 상태는 pending)을 남기지 않는다.
     const finish = (items: EntityRegisterApprovalItem[], staleReason: string | null, ignores: PendingIgnore[]): EntityRegisterApprovalResult => {
       const status = statusOf(items);
@@ -270,17 +324,37 @@ export async function approveEntityRegisterProposal(args: {
       else schedule = { title: choice.title, date: choice.date, dateText: payload.schedule.dateText, replaceNodeId: payload.schedule.existingScheduleNodeId };
     }
 
-    if (entityApps.length > 0 || schedule !== null) {
+    let memoDate: MemoDateApplication | null = null;
+    if (memoDateItem) {
+      const choice = choices.get(MEMO_DATE_ITEM_KEY);
+      if (!choice || choice.kind !== "memo_date") results.set(MEMO_DATE_ITEM_KEY, { itemKey: MEMO_DATE_ITEM_KEY, status: "skipped", detail: NOT_CHOSEN_DETAIL });
+      else if (!choice.accept) ignores.push({ itemKey: MEMO_DATE_ITEM_KEY, kind: "memo_date", key: MEMO_DATE_IGNORE_NAME_KEY });
+      else {
+        const current = readMemoEventAt(store.getRawDb(), payload.nodeId);
+        if (current.found && current.eventAt !== null) {
+          results.set(MEMO_DATE_ITEM_KEY, { itemKey: MEMO_DATE_ITEM_KEY, status: "failed", detail: MEMO_DATE_ALREADY_SET_DETAIL });
+        } else {
+          memoDate = { date: choice.date, dateText: memoDateItem.dateText };
+        }
+      }
+    }
+
+    if (entityApps.length > 0 || schedule !== null || memoDate !== null) {
       try {
         const outcome = await applyMemoChanges(
           { store, records, memo, runId: payload.runId, proposalId: proposal.id, decidedBy: "approved" },
-          { entities: entityApps.map((e) => e.app), schedule },
+          { entities: entityApps.map((e) => e.app), schedule, memoDate },
         );
         for (const { itemKey, app } of entityApps) {
           const skip = outcome.skipped.find((s) => s.memoName === app.memoName && s.type === app.type);
           results.set(itemKey, skip ? { itemKey, status: "failed", detail: skip.reason } : { itemKey, status: "applied", detail: null });
         }
         if (schedule) results.set(SCHEDULE_ITEM_KEY, { itemKey: SCHEDULE_ITEM_KEY, status: "applied", detail: null });
+        if (memoDate) {
+          results.set(MEMO_DATE_ITEM_KEY, outcome.memoDateRecordId !== null
+            ? { itemKey: MEMO_DATE_ITEM_KEY, status: "applied", detail: null }
+            : { itemKey: MEMO_DATE_ITEM_KEY, status: "failed", detail: MEMO_DATE_ALREADY_SET_DETAIL });
+        }
       } catch (e) {
         if (!(e instanceof EntityRegisterApplyRefusedError)) throw e;
         // 거부는 항목 행·별칭·엣지·일정·기록을 남기지 않는다(쓰기 트랜잭션 전이거나 그 안에서 되돌려짐). 다만
@@ -289,6 +363,7 @@ export async function approveEntityRegisterProposal(args: {
         const reason = `적용 직전 확인에서 거부(전체 취소) — 오래된 제안: ${e.message}`;
         for (const { itemKey } of entityApps) results.set(itemKey, { itemKey, status: "failed", detail: reason });
         if (schedule) results.set(SCHEDULE_ITEM_KEY, { itemKey: SCHEDULE_ITEM_KEY, status: "failed", detail: reason });
+        if (memoDate) results.set(MEMO_DATE_ITEM_KEY, { itemKey: MEMO_DATE_ITEM_KEY, status: "failed", detail: reason });
         for (const ig of ignores) results.set(ig.itemKey, { itemKey: ig.itemKey, status: "failed", detail: reason });
         return finish(keys.map((k) => results.get(k)!), reason, []);
       }
@@ -312,6 +387,7 @@ export async function rejectEntityRegisterProposal(args: {
     store.getRawDb().transaction(() => {
       for (const item of payload.items) records.addIgnore(payload.nodeId, "entity", nameKey(item.name), "ignored");
       if (payload.schedule) records.addIgnore(payload.nodeId, "schedule", SCHEDULE_IGNORE_NAME_KEY, "ignored");
+      if (memoDateItemOf(payload)) records.addIgnore(payload.nodeId, "memo_date", MEMO_DATE_IGNORE_NAME_KEY, "ignored");
       proposals.updateStatus(proposal.id, "rejected");
     })();
   });

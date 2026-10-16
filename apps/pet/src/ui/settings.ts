@@ -6,6 +6,7 @@ import { attachOrder, JobFollower, type JobPorts } from "./backup-jobs.ts";
 import { command, errorMessage, native, onProgress, request } from "./bridge.ts";
 import { button, confirmAction, element, field, input, select, type Notice } from "./dom.ts";
 import { hostErrorCode } from "./error-text.ts";
+import { installLock } from "./install-lock.ts";
 import { messages } from "./messages.ts";
 import { readOnboarding, startStep, type OnboardingStep } from "./onboarding-model.ts";
 import { elapsedText, entryLine, lastRestoreText, RESTORE_UNSTOPPABLE_STAGES, restoreDoneText } from "./restore-model.ts";
@@ -136,12 +137,13 @@ export function renderConnection(notice: Notice, done: () => void, compact = fal
   async function install() {
     await run(async id => {
       if (mode === "local") {
-        const result = await request("install.local", {}, id); if (live) { notice(result.message, "success"); done(); }
+        // The lock keeps this screen while the install runs and ends before `done` moves on (`install-lock.ts`).
+        const result = await installLock.track(() => request("install.local", {}, id)); if (live) { notice(result.message, "success"); done(); }
       } else if (mode === "remote") {
         if (!verifiedFingerprint || !trust.checked) throw new Error(messages.settings.verifyBeforeInstall);
         const choice = restorePick.choice();
         if ("error" in choice) throw new Error(choice.error);
-        const result = await request("install.remote", { ssh: ssh(), acceptedFingerprint: verifiedFingerprint, ...choice }, id);
+        const result = await installLock.track(() => request("install.remote", { ssh: ssh(), acceptedFingerprint: verifiedFingerprint, ...choice }, id));
         // Connecting to a server the Pet installed earlier first brings it to this Pet's server version (spec 5.3). An
         // update that failed but left the server serving does not fail the install, so its cause is told here, read
         // before `done` can close this view. A status that cannot be read is told as an error with its cause, so a failed

@@ -131,7 +131,7 @@ test("recent auto-registrations list the memo and revert removes the row with it
   let reverted = false;
   routes["/api/entity-register/records/5/revert"] = () => {
     reverted = true;
-    return Response.json({ reverted: 5, result: { recordId: 5, removedEdges: 1, deletedRow: null, keptRowReason: "다른 메모가 참조함", removedAlias: "민수형", trashedScheduleNodeId: null } });
+    return Response.json({ reverted: 5, result: { recordId: 5, removedEdges: 1, deletedRow: null, keptRowReason: "다른 메모가 참조함", removedAlias: "민수형", trashedScheduleNodeId: null, clearedMemoDate: null } });
   };
   routes["/api/entity-register/records"] = () => Response.json(reverted ? { records: [], total: 0 } : { records: [record()], total: 1 });
   const panel = await mount();
@@ -142,6 +142,24 @@ test("recent auto-registrations list the memo and revert removes the row with it
   expect(panel.root.textContent).toContain(S.emptyRecent);
   expect(panel.root.textContent).toContain(S.revertRemovedAlias("민수형"));
   expect(panel.root.textContent).toContain(S.revertKeptRow("다른 메모가 참조함"));
+});
+
+test("a memo-date record reads '메모 날짜 · 1월 5일 (2027-01-05)' and its revert says which date was cleared", async () => {
+  routes["/api/cleanup-runs/availability"] = available;
+  let reverted = false;
+  routes["/api/entity-register/records/7/revert"] = () => {
+    reverted = true;
+    return Response.json({ reverted: 7, result: {
+      recordId: 7, removedEdges: 0, deletedRow: null, keptRowReason: null, removedAlias: null, trashedScheduleNodeId: null, clearedMemoDate: "2027-01-05",
+    } });
+  };
+  const memoDateRecord = record({ id: 7, itemKind: "memo_date_filled", targetType: "memo", targetId: "1", name: "1월 5일", date: "2027-01-05", memoContent: "1월 5일까지 제출" });
+  routes["/api/entity-register/records"] = () => Response.json(reverted ? { records: [], total: 0 } : { records: [memoDateRecord], total: 1 });
+  const panel = await mount();
+  expect(panel.root.textContent).toContain("메모 날짜 · 1월 5일 (2027-01-05)");
+  panel.root.querySelector<HTMLButtonElement>("button.auto-register-revert")!.click();
+  await tick();
+  expect(panel.root.textContent).toContain("메모 날짜(2027-01-05)를 지웠습니다.");
 });
 
 test("a record whose memo was purged says there is no source memo", async () => {

@@ -186,6 +186,7 @@ const MEMORY_SECTION_PATHS: Record<MemorySectionId, string[]> = {
     "reranker.topK_output",
     "reranker.maxPairTokens",
     "llm.extractor.maxOutputTokens",
+    "metadataInfer.maxOutputTokens",
     "reranker.host",
     "valueDecay",
     "images.passthroughMaxPx",
@@ -525,6 +526,8 @@ const MEMORY_SCHEMA_OVERRIDES: Record<
   },
   // 추출 출력 한도는 스키마 설명(한도·시간 제한·Ollama 창 관계)이 사용자에게 보여야 해서 빈 설명으로 덮지 않고 표시만 켠다(spec 3.1).
   "llm.extractor.maxOutputTokens": { "x-ui": { showDescription: true } },
+  // 장소·시각 채우기 출력 한도도 같은 이유(잘림 멈춤·한도 변경 시 재시도·Ollama 창 관계)로 스키마 설명을 보인다.
+  "metadataInfer.maxOutputTokens": { "x-ui": { showDescription: true } },
   "reranker.host": {
     title: "재정렬 실행 위치",
     description: "",

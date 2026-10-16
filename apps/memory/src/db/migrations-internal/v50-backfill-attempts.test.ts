@@ -30,10 +30,10 @@ function insertAttempt(target: Database, kind: string, status: string, nodeId: n
 }
 
 describe("v50 마이그레이션", () => {
-  test("새 DB 에 표와 막힘 색인이 생기고 코드가 아는 최고 버전은 50 이다", () => {
+  test("새 DB 에 표와 막힘 색인이 생기고 코드가 아는 최고 버전은 50 이상이다", () => {
     expect(hasObject(db, "table", "backfill_attempts")).toBe(true);
     expect(hasObject(db, "index", "idx_backfill_attempts_block")).toBe(true);
-    expect(CURRENT_SCHEMA_VERSION).toBe(V50);
+    expect(CURRENT_SCHEMA_VERSION).toBeGreaterThanOrEqual(V50);
   });
 
   test("기존 v49 DB 도 같은 up() 으로 올라간다", () => {

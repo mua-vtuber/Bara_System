@@ -32,7 +32,6 @@ import { EventRepository } from "../db/store-internal/event-repository.ts";
 import { EventBus } from "../server-internal/event-bus.ts";
 import {
   CLEANUP_PROPOSALS_READY_EVENT,
-  createOllamaInferFn,
   METADATA_FILL_KIND,
   runMetadataInferCycle,
   type InferredProposal,
@@ -40,10 +39,11 @@ import {
   type SessionInferInput,
 } from "./metadata-infer-cycle.ts";
 import { wireHashtagEntities } from "./hashtag-entity-wiring.ts";
-import type { ChatMessage, LlmClient } from "../llm/types.ts";
+import { METADATA_INFER_MAX_OUTPUT_TOKENS_DEFAULT } from "./metadata-infer-output-limit.ts";
 
 const MODEL = "bge-m3";
 const G = 180; // 세션 간격(분).
+const LIMIT = METADATA_INFER_MAX_OUTPUT_TOKENS_DEFAULT; // 출력 한도(설정 기본값).
 
 let db: Database;
 let store: SqliteMemoryStore;
@@ -136,6 +136,7 @@ describe("runMetadataInferCycle — graceful", () => {
       eventBus,
       gapMinutes: G,
       batchSize: 50,
+      maxOutputTokens: LIMIT,
       now: () => Date.parse("2026-06-02T00:00:00"),
     });
 
@@ -157,6 +158,7 @@ describe("runMetadataInferCycle — 섞인 세션만 LLM 호출", () => {
       eventBus,
       gapMinutes: G,
       batchSize: 50,
+      maxOutputTokens: LIMIT,
       now: () => Date.parse("2026-06-02T00:00:00"),
     });
 
@@ -176,6 +178,7 @@ describe("runMetadataInferCycle — 섞인 세션만 LLM 호출", () => {
       eventBus,
       gapMinutes: G,
       batchSize: 50,
+      maxOutputTokens: LIMIT,
       now: () => Date.parse("2026-06-02T00:00:00"),
     });
 
@@ -204,6 +207,7 @@ describe("runMetadataInferCycle — 제안 insert + emit + 자동 적용 0", () 
       eventBus,
       gapMinutes: G,
       batchSize: 50,
+      maxOutputTokens: LIMIT,
       now: () => Date.parse("2026-06-02T00:00:00"),
     });
 
@@ -252,6 +256,7 @@ describe("runMetadataInferCycle — 제안 insert + emit + 자동 적용 0", () 
       eventBus,
       gapMinutes: G,
       batchSize: 50,
+      maxOutputTokens: LIMIT,
       now: () => Date.parse("2026-06-02T00:00:00"),
     });
 
@@ -278,6 +283,7 @@ describe("runMetadataInferCycle — ID 검증(환각 차단)", () => {
       eventBus,
       gapMinutes: G,
       batchSize: 50,
+      maxOutputTokens: LIMIT,
       now: () => Date.parse("2026-06-02T00:00:00"),
     });
 
@@ -303,6 +309,7 @@ describe("runMetadataInferCycle — ID 검증(환각 차단)", () => {
       eventBus,
       gapMinutes: G,
       batchSize: 50,
+      maxOutputTokens: LIMIT,
       now: () => Date.parse("2026-06-02T00:00:00"),
     });
 
@@ -331,6 +338,7 @@ describe("runMetadataInferCycle — ID 검증(환각 차단)", () => {
       eventBus,
       gapMinutes: G,
       batchSize: 50,
+      maxOutputTokens: LIMIT,
       now: () => Date.parse("2026-06-02T00:00:00"),
     });
 
@@ -349,6 +357,7 @@ describe("runMetadataInferCycle — 값 출처 검증(본문 짐작 값 차단)"
       eventBus,
       gapMinutes: G,
       batchSize: 50,
+      maxOutputTokens: LIMIT,
       now: () => Date.parse("2026-06-02T00:00:00"),
     });
   }
@@ -405,32 +414,6 @@ describe("runMetadataInferCycle — 값 출처 검증(본문 짐작 값 차단)"
   });
 });
 
-describe("createOllamaInferFn — 지시문·메모 목록 양식", () => {
-  test("메모 목록은 [번호] 양식이고 'node' 글자가 없으며, 근거에 번호를 쓰지 말라고 지시한다", async () => {
-    const seen: ChatMessage[] = [];
-    const client: LlmClient = {
-      name: "fixture",
-      chat: async (messages) => {
-        seen.push(...messages);
-        return "[]";
-      },
-    };
-    const result = await createOllamaInferFn(client)({
-      nodes: [
-        { id: 97, content: "에버랜드 왔다", place: "에버랜드", eventAt: null },
-        { id: 98, content: "롤러코스터 탔다", place: null, eventAt: null },
-      ],
-    });
-
-    expect(result).toEqual([]);
-    const system = seen.find((m) => m.role === "system")!.content;
-    const user = seen.find((m) => m.role === "user")!.content;
-    expect(user).toContain('[97] "에버랜드 왔다" (장소=에버랜드, 시각=없음)');
-    expect(user).not.toContain("node");
-    expect(system).toContain("메모 번호는 쓰지 말고");
-  });
-});
-
 describe("runMetadataInferCycle — 멱등 제외", () => {
   test("(9) 이미 metadata_fill 제안 있는 노드 → 후보에서 빠짐", async () => {
     const n1 = await addMemo("에버랜드 왔다", "alice", "2026-06-01 10:00:00");
@@ -447,6 +430,7 @@ describe("runMetadataInferCycle — 멱등 제외", () => {
       eventBus,
       gapMinutes: G,
       batchSize: 50,
+      maxOutputTokens: LIMIT,
       now: () => Date.parse("2026-06-02T00:00:00"),
     });
     expect(listFillProposals()).toHaveLength(1);
@@ -462,6 +446,7 @@ describe("runMetadataInferCycle — 멱등 제외", () => {
       eventBus,
       gapMinutes: G,
       batchSize: 50,
+      maxOutputTokens: LIMIT,
       now: () => Date.parse("2026-06-02T00:00:00"),
     });
 
@@ -485,6 +470,7 @@ describe("runMetadataInferCycle — 멱등 제외", () => {
       eventBus,
       gapMinutes: G,
       batchSize: 50,
+      maxOutputTokens: LIMIT,
       now: () => Date.parse("2026-06-02T00:00:00"),
     });
     db.prepare(
@@ -501,6 +487,7 @@ describe("runMetadataInferCycle — 멱등 제외", () => {
       eventBus,
       gapMinutes: G,
       batchSize: 50,
+      maxOutputTokens: LIMIT,
       now: () => Date.parse("2026-06-02T00:00:00"),
     });
 
@@ -533,6 +520,7 @@ describe("runMetadataInferCycle — 평가 완료 마킹(무한 재평가 차단
       eventBus,
       gapMinutes: G,
       batchSize: 50,
+      maxOutputTokens: LIMIT,
       now: () => Date.parse("2026-06-02T00:00:00"),
     });
 
@@ -552,6 +540,7 @@ describe("runMetadataInferCycle — 평가 완료 마킹(무한 재평가 차단
       eventBus,
       gapMinutes: G,
       batchSize: 50,
+      maxOutputTokens: LIMIT,
       now: () => Date.parse("2026-06-02T00:00:00"),
     });
 
@@ -575,6 +564,7 @@ describe("runMetadataInferCycle — 평가 완료 마킹(무한 재평가 차단
       eventBus,
       gapMinutes: G,
       batchSize: 50,
+      maxOutputTokens: LIMIT,
       now: () => Date.parse("2026-06-02T00:00:00"),
     });
 
@@ -596,6 +586,7 @@ describe("runMetadataInferCycle — 평가 완료 마킹(무한 재평가 차단
       eventBus,
       gapMinutes: G,
       batchSize: 50,
+      maxOutputTokens: LIMIT,
       now: () => Date.parse("2026-06-02T00:00:00"),
     });
 
@@ -619,6 +610,7 @@ describe("runMetadataInferCycle — 평가 완료 마킹(무한 재평가 차단
       eventBus,
       gapMinutes: G,
       batchSize: 50,
+      maxOutputTokens: LIMIT,
       now: () => Date.parse("2026-06-02T00:00:00"),
     });
 
@@ -634,6 +626,7 @@ describe("runMetadataInferCycle — 평가 완료 마킹(무한 재평가 차단
       eventBus,
       gapMinutes: G,
       batchSize: 50,
+      maxOutputTokens: LIMIT,
       now: () => Date.parse("2026-06-02T00:00:00"),
     });
 
@@ -660,6 +653,7 @@ describe("runMetadataInferCycle — 익은(닫힌) 세션만", () => {
       eventBus,
       gapMinutes: G,
       batchSize: 50,
+      maxOutputTokens: LIMIT,
       now: () => lastMs + (G - 1) * 60_000,
     });
 
@@ -682,6 +676,7 @@ describe("runMetadataInferCycle — 익은(닫힌) 세션만", () => {
       eventBus,
       gapMinutes: G,
       batchSize: 50,
+      maxOutputTokens: LIMIT,
       now: () => lastMs + G * 60_000, // 정확히 G 분 후 → 익음(경계 포함).
     });
 
@@ -720,6 +715,7 @@ describe("runMetadataInferCycle — has_place place-엔티티 정합(후속 M-2)
       eventBus,
       gapMinutes: G,
       batchSize: 50,
+      maxOutputTokens: LIMIT,
       now: ripeNow("2026-06-01 10:10:00"),
     });
 
@@ -746,6 +742,7 @@ describe("runMetadataInferCycle — has_place place-엔티티 정합(후속 M-2)
       eventBus,
       gapMinutes: G,
       batchSize: 50,
+      maxOutputTokens: LIMIT,
       now: ripeNow("2026-06-02 10:10:00"),
     });
 
@@ -767,6 +764,7 @@ describe("runMetadataInferCycle — has_place place-엔티티 정합(후속 M-2)
       eventBus,
       gapMinutes: G,
       batchSize: 50,
+      maxOutputTokens: LIMIT,
       now: ripeNow("2026-06-03 10:10:00"),
     });
 
@@ -787,6 +785,7 @@ describe("runMetadataInferCycle — has_place place-엔티티 정합(후속 M-2)
       eventBus,
       gapMinutes: G,
       batchSize: 50,
+      maxOutputTokens: LIMIT,
       now: ripeNow("2026-06-04 10:10:00"),
     });
 

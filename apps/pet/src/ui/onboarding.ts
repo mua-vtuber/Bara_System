@@ -3,6 +3,7 @@ import { renderAiSettings } from "./ai-settings.ts";
 import { slotStatus, type SlotStatus } from "./ai-settings-model.ts";
 import { command, errorMessage, native, request } from "./bridge.ts";
 import { button, element, type Notice } from "./dom.ts";
+import { installLock } from "./install-lock.ts";
 import { messages } from "./messages.ts";
 import { createStepScope } from "./onboarding-lifecycle.ts";
 import { nextStep, ONBOARDING_KEY, ONBOARDING_STEPS, previousStep, record, stepNumber, type OnboardingStep } from "./onboarding-model.ts";
@@ -24,8 +25,12 @@ export function renderOnboarding(host: HTMLElement, notice: Notice, start: Onboa
   const scope = createStepScope();
   const heading = element("div", "composer-intro");
   const title = element("h1"); const progress = element("p", "muted");
-  // Leaving is always possible: the setup is marked finished and every part stays in the settings screen.
-  const later = button(messages.onboarding.skipSetup, () => { notice(messages.onboarding.laterNotice); go("done"); }, "text-button");
+  // Leaving is always possible, except while an install runs on the storage step (its screen stays, `install-lock.ts`):
+  // the setup is marked finished and every part stays in the settings screen.
+  const later = button(messages.onboarding.skipSetup, () => {
+    if (installLock.running) { notice(messages.installLock.viewKept(messages.settings.stopSetup)); return; }
+    notice(messages.onboarding.laterNotice); go("done");
+  }, "text-button");
   heading.append(title, progress, later);
   const body = element("div", "onboarding-step");
   const actions = element("div", "stack-actions");

@@ -134,3 +134,57 @@ test("each candidate shows its type next to the name: built-in types in Korean, 
   const legends = [...review.root.querySelectorAll("legend")].map((l) => l.textContent);
   expect(legends).toEqual([S.itemHeading("사람", "몽룡"), S.itemHeading("보드게임", "카탄")]);
 });
+
+const withMemoDate: CleanupProposalDetail = {
+  ...detail,
+  id: "cp_m",
+  payload: {
+    ...(detail.payload as Record<string, unknown>),
+    items: [],
+    schedule: null,
+    memoDate: { itemKey: "memo_date", reason: "auto_apply_off", date: "2027-01-05", dateText: "1월 5일" },
+    autoApplied: [],
+  },
+};
+
+test("a memo-date proposal shows its own field with the AI date filled in, and fill sends { accept, date }", () => {
+  const review = createEntityRegisterReview(withMemoDate, () => {});
+  document.body.append(review.root);
+  expect([...review.root.querySelectorAll("legend")].map((l) => l.textContent)).toEqual([S.memoDateHeading("1월 5일")]);
+  expect(review.root.textContent).toContain(S.memoDateReasonLabels.auto_apply_off!);
+  const date = review.root.querySelector<HTMLInputElement>("input[type=date]")!;
+  expect(date.value).toBe("2027-01-05");
+  expect(review.hasChoice()).toBe(false);
+  review.root.querySelector<HTMLInputElement>("input[name='cp_m::memo_date'][value='accept']")!.click();
+  expect(review.hasChoice()).toBe(true);
+  expect(review.choices()).toEqual({ memo_date: { accept: true, date: "2027-01-05" } });
+  date.value = "2027-01-07";
+  expect(review.choices()).toEqual({ memo_date: { accept: true, date: "2027-01-07" } });
+  review.root.querySelector<HTMLInputElement>("input[name='cp_m::memo_date'][value='ignore']")!.click();
+  expect(review.choices()).toEqual({ memo_date: { accept: false } });
+});
+
+test("filling the memo date needs a real YYYY-MM-DD date", () => {
+  const review = createEntityRegisterReview(withMemoDate, () => {});
+  document.body.append(review.root);
+  review.root.querySelector<HTMLInputElement>("input[name='cp_m::memo_date'][value='accept']")!.click();
+  const date = review.root.querySelector<HTMLInputElement>("input[type=date]")!;
+  for (const bad of ["", "2027-13-01", "2027-02-30"]) {
+    date.value = bad;
+    expect(review.validationError()).toBe(S.invalidMemoDate);
+  }
+  date.value = "2027-01-05";
+  expect(review.validationError()).toBeNull();
+});
+
+test("an old proposal without the memoDate field shows no memo-date field", () => {
+  const review = createEntityRegisterReview(detail, () => {});
+  expect(review.root.querySelector("input[name='cp_1::memo_date']")).toBeNull();
+  expect(review.root.textContent).not.toContain(S.memoDateAccept);
+});
+
+test("the auto-applied memo date is labelled as filled", () => {
+  const withNote = { ...withMemoDate, payload: { ...(withMemoDate.payload as object), autoApplied: [{ type: "memo_date", name: "2027-01-05", action: "memo_date" }] } };
+  const review = createEntityRegisterReview(withNote as CleanupProposalDetail, () => {});
+  expect(review.root.textContent).toContain("2027-01-05 (메모 날짜 채움)");
+});

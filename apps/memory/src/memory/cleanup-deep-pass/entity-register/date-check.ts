@@ -1,6 +1,6 @@
 /**
  * entity-register/date-check.ts — 일정 날짜 판정(spec 4.5). 순수 함수.
- * 날짜 형식 패턴은 lang/ko.yaml event_date 가 단일 출처다(abs_ymd·abs_md·abs_md_slash·day_offsets·
+ * 날짜 형식 패턴은 lang/ko.yaml event_date 가 단일 출처다(abs_ymd·abs_ymd_numeric·abs_md·abs_md_slash·day_offsets·
  * hour_minute·colon_time). 상대 표현은 정리가 도는 날이 아니라 메모 작성일 기준으로 계산한다.
  * 기존 extractEventDate 에는 의존하지 않는다(spec 4.5 — "다음 달 15일" 오류와 무관하게).
  */
@@ -56,6 +56,16 @@ function hasLeftoverDigits(text: string, profile: EventDateProfile): boolean {
   return /\d/.test(rest);
 }
 
+/**
+ * 날짜 표현이 연도 없는 절대 날짜("1월 5일"·"1/5")인가 — 메모 날짜 채우기는 이 표현만 다룬다
+ * (yearless-date-cleanup spec 3.4). 연도 있는 모양(abs_ymd·abs_ymd_numeric)이 맞으면 false, 그다음
+ * abs_md·abs_md_slash 가 맞으면 true. 저장 쪽(event-date.ts extractIngestEventDate)과 같은 순서 규칙이다.
+ */
+export function isYearlessAbsoluteText(dateText: string, profile: EventDateProfile): boolean {
+  if (profile.absYmd.test(dateText) || profile.absYmdNumeric.test(dateText)) return false;
+  return profile.absMd.test(dateText) || profile.absMdSlash.test(dateText);
+}
+
 export function checkScheduleDate(args: {
   dateText: string;
   aiDate: string;
@@ -64,7 +74,7 @@ export function checkScheduleDate(args: {
 }): DateCheck {
   const ai = parseIsoDate(args.aiDate);
   if (!ai) return "mismatch";
-  const ymd = args.profile.absYmd.exec(args.dateText);
+  const ymd = args.profile.absYmd.exec(args.dateText) ?? args.profile.absYmdNumeric.exec(args.dateText);
   if (ymd) {
     return Number(ymd[1]) === ai.y && Number(ymd[2]) === ai.m && Number(ymd[3]) === ai.d ? "auto" : "mismatch";
   }

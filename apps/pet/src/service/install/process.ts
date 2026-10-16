@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { basename, isAbsolute, join } from "node:path";
 import { messages } from "../../ui/messages.ts";
-import { serviceError } from "../errors.ts";
+import { serviceError, type ServiceError } from "../errors.ts";
 import type { RequestContext } from "../../shared/contracts.ts";
 
 export interface Captured { stdout: string; stderr: string }
@@ -110,6 +110,10 @@ async function boundedLines(stream: ReadableStream<Uint8Array>, child: Bun.Subpr
   return kept;
 }
 
+/** Names the cause of a failed `sensitive` step from its error output, which it alone may read: it returns a
+ * fixed error that carries none of that output (e.g. `clientTokenFailure`), or undefined to keep the generic one. */
+export type SensitiveFailure = (stderr: string) => ServiceError | undefined;
+
 /** Why a captured child process ended without a clean zero exit. Distinguishes a step that
  * genuinely ran out of its total budget from one whose output went silent (stalled transfer)
  * from one that ran to completion and simply failed. */
@@ -117,10 +121,12 @@ type StopReason = "timeout" | "stalled" | null;
 
 /** `onLine` sees each complete stdout line as it streams (never for a `sensitive` step, whose output may hold
  * a secret); the returned `stdout` is the whole output except the lines `onLine` took (see `boundedLines`).
+ * A `sensitive` step that fails says only `installService.sensitiveStepFailed`, unless `sensitive` is a
+ * `SensitiveFailure` that names the cause.
  * `maxStdoutBytes` raises the stdout bound for a step whose one result line is large by design (the portable
  * archive's manifest lists every attachment); stderr keeps the default bound. */
 export async function runCaptured(argv: string[], ctx: Pick<RequestContext, "signal">, options: {
-  cwd?: string; env?: Record<string, string>; sensitive?: boolean; stepName?: string; onLine?: (line: string) => boolean | void;
+  cwd?: string; env?: Record<string, string>; sensitive?: boolean | SensitiveFailure; stepName?: string; onLine?: (line: string) => boolean | void;
   maxStdoutBytes?: number;
 } & ({ timeoutMs: number; idleTimeoutMs?: never } | { idleTimeoutMs: number; timeoutMs?: never })): Promise<Captured> {
   ctx.signal.throwIfAborted();
@@ -152,7 +158,10 @@ export async function runCaptured(argv: string[], ctx: Pick<RequestContext, "sig
     if (stopReason === "timeout") throw serviceError("INSTALL_STEP_TIMEOUT", messages.installService.stepTimeout(stepLabel));
     if (stopReason === "stalled") throw serviceError("INSTALL_STEP_STALLED", messages.installService.stepStalled(stepLabel));
     if (code !== 0) {
-      if (options.sensitive) throw serviceError("INSTALL_COMMAND_FAILED", messages.installService.sensitiveStepFailed);
+      if (options.sensitive) {
+        const known = typeof options.sensitive === "function" ? options.sensitive(stderr) : undefined;
+        throw known ?? serviceError("INSTALL_COMMAND_FAILED", messages.installService.sensitiveStepFailed);
+      }
       // The step's own error output rides along for a caller that names the cause (`failedStepStderr`);
       // `publicError` never reads it. A `sensitive` step's output may hold a secret, so it never carries any.
       throw Object.assign(serviceError("INSTALL_COMMAND_FAILED", messages.installService.stepFailed(stepLabel, code)), { stderr });

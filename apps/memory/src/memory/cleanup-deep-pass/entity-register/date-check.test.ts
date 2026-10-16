@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { getLanguageProfile } from "../../lang/profile-loader.ts";
-import { addDaysToCreatedAt, checkScheduleDate } from "./date-check.ts";
+import { addDaysToCreatedAt, checkScheduleDate, isYearlessAbsoluteText } from "./date-check.ts";
 
 const profile = getLanguageProfile().eventDate;
 const check = (dateText: string, aiDate: string, createdAt = "2026-10-10 09:00:00") =>
@@ -24,11 +24,31 @@ test.each([
   ["다음 달 15일", "2026-11-15", "relative"],
   ["몇 년 후", "2029-10-10", "relative"],
   ["11월 3일", "2026-13-40", "mismatch"],
-  ["2006/9/28", "2007-09-28", "relative"],
+  // 연도 있는 숫자 날짜(abs_ymd_numeric)는 abs_ymd 와 같은 갈래로 연·월·일까지 대조한다.
+  ["2006/9/28", "2006-09-28", "auto"],
+  ["2006/9/28", "2007-09-28", "mismatch"],
+  ["2027.1.5", "2027-01-05", "auto"],
+  ["2026 . 1 . 5", "2026-01-05", "auto"],
+  ["2026/1.5", "2026-01-05", "relative"],
   ["06년 9월 28일", "2007-09-28", "relative"],
   ["10월 14일 14:30", "2026-10-14", "auto"],
 ] as const)("%s with AI date %s → %s", (text, ai, expected) => {
   expect(check(text, ai)).toBe(expected);
+});
+
+test.each([
+  ["1월 5일", true],
+  ["1/5", true],
+  ["06년 9월 28일", true],
+  // 연도 있는 숫자 날짜(abs_ymd_numeric, T1b)는 연도 있는 날짜다. spec 10장 T5 표의 "2006/9/28 → true" 는
+  // Q4 결정(T1b) 전에 쓰인 줄이라 T1b 규칙(abs_ymd 와 같은 갈래)을 따른다.
+  ["2006/9/28", false],
+  ["2026.1.5", false],
+  ["2025년 1월 5일", false],
+  ["내일", false],
+  ["다음 주", false],
+] as const)("isYearlessAbsoluteText(%s) → %s", (text, expected) => {
+  expect(isYearlessAbsoluteText(text, profile)).toBe(expected);
 });
 
 test("a day word counts from the memo's creation date, across a year boundary", () => {

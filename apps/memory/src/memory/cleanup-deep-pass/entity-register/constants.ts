@@ -65,6 +65,13 @@ export const SCHEDULE_SOURCE_NODE_KEY = "scheduleSourceNodeId";
 /** 일정 노드 metadata 의 이 단계 기록 칸({ runId, decidedBy }). */
 export const ENTITY_REGISTER_METADATA_KEY = "entityRegister";
 
+/** 메모 날짜 채우기 기록(item_kind 'memo_date_filled')의 target_type — target_id 는 원본 메모 id 글자다. */
+export const MEMO_DATE_RECORD_TARGET_TYPE = "memo";
+/** 반영 결과 skipped 에 메모 날짜 줄을 넣을 때의 type 값. */
+export const MEMO_DATE_SKIPPED_TYPE = "memo_date";
+/** 제안 payload 의 자동 반영 참고 줄(autoApplied)에서 메모 날짜를 채운 줄의 type 값. */
+export const MEMO_DATE_AUTO_NOTE_TYPE = "memo_date";
+
 /** AI가 고를 수 있는 종류 — 배치 가능 종류(정적 10 + 사용자 종류) 중 제외 종류를 뺀 것. */
 export function entityRegisterTypeNames(): string[] {
   return placementTypeNames().filter((t) => !ENTITY_REGISTER_EXCLUDED_TYPES.has(t));

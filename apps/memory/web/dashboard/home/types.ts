@@ -218,7 +218,7 @@ export interface CleanupRunView {
 
 export interface RecentAutoRegisterItem {
   id: number;
-  itemKind: "entity_created" | "entity_linked" | "schedule_created";
+  itemKind: "entity_created" | "entity_linked" | "schedule_created" | "memo_date_filled";
   targetType: string;
   targetId: string;
   name: string;
@@ -237,4 +237,6 @@ export interface EntityRegisterRevertResult {
   keptRowReason: string | null;
   removedAlias: string | null;
   trashedScheduleNodeId: number | null;
+  /** 메모 날짜 기록을 되돌려 지운 날짜. 안 지웠으면(그 사이 바뀜·메모 없음·다른 기록) null. */
+  clearedMemoDate: string | null;
 }
