@@ -922,6 +922,38 @@ describe("createNodeWindowView", () => {
     expect(calls).toEqual([{ nodeId: "node:trashable", sourceId: 42 }]);
   });
 
+  test("수정·삭제 버튼은 내용 머리줄 아래·본문 위 한 줄에 수정→삭제 순으로 나란히 놓인다", () => {
+    const vm = makeVm([
+      {
+        id: "node:both",
+        sourceId: 7,
+        type: "memory",
+        sourceType: "user_explicit",
+        label: "제목",
+        snippet: "제목과 다른 긴 본문",
+      },
+    ]);
+    const modal = createNodeWindowView({
+      vm,
+      nodeId: "node:both",
+      pos: { x: 0, y: 0 },
+      onClose: () => {},
+      onFocus: () => {},
+      onMove: () => {},
+      onEditNode: async () => {},
+      onTrashNode: async () => {},
+    });
+
+    const section = modal.querySelector<HTMLElement>(".node-window__content")!;
+    const kids = [...section.children].map((child) => child.className.split(" ")[0]);
+    expect(kids).toEqual(["node-window__content-head", "node-window__actions", "node-window__snippet"]);
+    const actions = section.querySelector(".node-window__actions")!;
+    expect([...actions.children].map((child) => child.className)).toEqual([
+      "node-window__edit",
+      "node-window__trash",
+    ]);
+  });
+
   test("onTrashNode 미주입 시 삭제 버튼이 렌더되지 않는다", () => {
     const vm = makeVm([
       {

@@ -70,8 +70,8 @@ function renderItem(
       title: row.label,
       onclick: () => onPick(row.nodeId),
     },
-    el("span", { className: "mp-item__label" }, row.label),
     row.memoryId != null ? memoryNumberChip(row.memoryId) : null,
+    el("span", { className: "mp-item__label" }, row.label),
     typeEl,
     el("span", { className: "mp-stat" }, row.stat),
   );

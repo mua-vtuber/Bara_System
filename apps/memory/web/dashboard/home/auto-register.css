@@ -1,8 +1,9 @@
 .dash-panel--autoreg { grid-area: autoreg; }
-/* 다른 칸 본문(.dash-list 등)과 같은 안쪽 여백. 넓은 화면은 실행·결과 | 최근 자동 등록 두 칸. */
+/* 다른 칸 본문(.dash-list 등)과 같은 안쪽 여백. 오른쪽 좁은 칸에 놓이므로
+   실행·결과 위, 최근 자동 등록 아래로 한 줄씩 쌓는다. */
 .auto-register {
   display: grid;
-  grid-template-columns: minmax(240px, 1fr) minmax(0, 2fr);
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
   gap: var(--sp-3) var(--sp-5);
   min-height: 0;
@@ -31,6 +32,3 @@
 .auto-register-head { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
 .auto-register-memo { color: var(--text-dim); font-size: var(--fs-sm); margin: var(--sp-1) 0 0; }
 .auto-register-empty { color: var(--text-dim); font-size: var(--fs-sm); }
-@media (max-width: 840px) {
-  .auto-register { grid-template-columns: 1fr; }
-}

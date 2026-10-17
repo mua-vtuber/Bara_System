@@ -766,9 +766,14 @@ function buildContentSection(
     { className: "node-window__content", "aria-label": "내용" },
     el("div", { className: "node-window__content-head" }, "내용"),
   );
+  // 수정·삭제는 본문 위 한 줄에 오른쪽 정렬로 나란히 둔다 — 본문이 길어도 스크롤 없이 보인다.
+  if (editControls || trashControl) {
+    const actions = el("div", { className: "node-window__actions" });
+    if (editControls) actions.appendChild(editControls);
+    if (trashControl) actions.appendChild(trashControl);
+    section.appendChild(actions);
+  }
   if (snip) section.appendChild(snip);
-  if (editControls) section.appendChild(editControls);
-  if (trashControl) section.appendChild(trashControl);
   return section;
 }
 

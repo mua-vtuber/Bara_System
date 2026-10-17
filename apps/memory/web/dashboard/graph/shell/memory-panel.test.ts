@@ -202,5 +202,6 @@ test("render — 기억 번호가 있는 항목은 #N 을 흐린 보조 표기�
   );
   const [withNo, without] = [...panel.root.querySelectorAll(".mp-item")];
   expect(withNo!.querySelector(".memory-no")?.textContent).toBe("#87");
+  expect(withNo!.firstElementChild?.classList.contains("memory-no")).toBe(true);
   expect(without!.querySelector(".memory-no")).toBeNull();
 });

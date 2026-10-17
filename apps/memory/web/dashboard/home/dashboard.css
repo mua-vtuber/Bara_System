@@ -347,11 +347,14 @@ body {
   display: grid;
   overflow: auto;
   grid-template-columns: minmax(280px, .95fr) minmax(420px, 1.55fr) minmax(300px, 1fr);
-  grid-template-rows: minmax(280px, .52fr) minmax(330px, .48fr) minmax(220px, auto);
+  /* 세 칸이 서로 다른 높이에서 나뉜다 — 왼쪽은 그래프|목록, 가운데는 내용보기|새 메모,
+     오른쪽은 일정목록|자동 정리. 네 줄로 쪼개 각 칸의 경계를 따로 둔다. */
+  grid-template-rows: minmax(240px, .4fr) minmax(60px, .12fr) minmax(120px, .16fr) minmax(260px, .32fr);
   grid-template-areas:
     "graph detail schedule"
-    "list detail input"
-    "autoreg autoreg autoreg";
+    "list detail schedule"
+    "list detail autoreg"
+    "list input autoreg";
   gap: 10px;
 }
 
@@ -1053,12 +1056,12 @@ body {
 
   .dash-grid {
     grid-template-columns: minmax(280px, .9fr) minmax(420px, 1.4fr);
-    grid-template-rows: minmax(240px, .8fr) minmax(240px, .7fr) minmax(260px, .7fr) minmax(220px, auto);
+    grid-template-rows: minmax(240px, .8fr) minmax(240px, .7fr) minmax(260px, .7fr) minmax(260px, auto);
     grid-template-areas:
       "graph detail"
       "list detail"
-      "schedule input"
-      "autoreg autoreg";
+      "list input"
+      "schedule autoreg";
   }
 }
 

@@ -39,11 +39,11 @@ export function resultRow(
     onClick: () => handlers.onPick(view.nodeId),
   }) as HTMLButtonElement;
 
+  // 기억 번호 — 줄 맨 앞에 작고 흐리게(정리 제안의 "기억 #N" 과 같은 번호).
+  if (view.memoryId != null) btn.append(memoryNumberChip(view.memoryId));
   // 시간 배지 — 제목 앞(이벤트 날짜 있는 글만).
   if (view.eventAt != null) btn.append(eventTimeChip(view.eventAt, view.eventUntil));
   btn.append(el("span", { className: "rp-row__label" }, view.title));
-  // 기억 번호 — 제목 뒤 작고 흐리게(정리 제안의 "기억 #N" 과 같은 번호).
-  if (view.memoryId != null) btn.append(memoryNumberChip(view.memoryId));
 
   const sourceLabels = new Set<string>();
   const appendSource = (source: string): void => {

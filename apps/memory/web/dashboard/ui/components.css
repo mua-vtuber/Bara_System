@@ -1441,6 +1441,23 @@
   }
 }
 
+/* 수정·삭제 버튼 줄 — "내용" 머리줄과 본문 사이에 오른쪽 정렬로 나란히 둔다.
+   안쪽 묶음(.node-window__edit / __trash)의 개별 여백·윗줄 선은 걷어낸다. */
+.node-window__actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-top: 1px solid var(--border);
+}
+
+.node-window__actions .node-window__edit,
+.node-window__actions .node-window__trash {
+  padding: 0;
+  border-top: none;
+}
+
 .node-window__edit {
   display: flex;
   justify-content: flex-end;

@@ -60,6 +60,10 @@ describe("번호 표시 위치", () => {
     const detail = nodeDetail(view);
     expect(detail.querySelector(".node-detail__badges .memory-no")?.textContent).toBe("#87");
   });
+  it("결과 행에서 번호는 시간 배지·제목보다 앞, 줄 맨 앞에 온다", () => {
+    const row = resultRow({ ...view, eventAt: "2026-10-17T09:00:00+09:00" }, { onPick: () => {} });
+    expect(row.firstElementChild?.classList.contains("memory-no")).toBe(true);
+  });
   it("번호가 없으면 아무것도 그리지 않는다", () => {
     const bare = { nodeId: "x", title: "제목" };
     expect(resultRow(bare, { onPick: () => {} }).querySelector(".memory-no")).toBeNull();
