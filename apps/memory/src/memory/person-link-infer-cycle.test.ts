@@ -25,6 +25,7 @@ import {
   CLEANUP_PROPOSALS_READY_EVENT,
   PERSON_LINK_KIND,
   estimatePersonLinkNodeTokens,
+  parsePersonLinkResponse,
   personLinkFixedOverheadTokens,
   runPersonLinkInferCycle,
   type PersonLinkDecision,
@@ -405,34 +406,90 @@ describe("runPersonLinkInferCycle — 서버 검증", () => {
   });
 });
 
+describe("parsePersonLinkResponse — null 표기", () => {
+  test("따옴표 없는 JSON null 은 null 그대로, 문자열 \"null\" 도 null 로 읽는다", () => {
+    const out = parsePersonLinkResponse(
+      '[{"nodeId":1,"links":[{"personId":null,"confidence":0}]},{"nodeId":2,"links":[{"personId":"null","confidence":0}]},{"nodeId":3,"links":[{"personId":"p1","confidence":0.9}]}]',
+    );
+    expect(out.map((d) => d.personId)).toEqual([null, null, "p1"]);
+  });
+
+  test("JSON null 회신 → completed_noop (검증 탈락 아님)", async () => {
+    await store.findOrCreatePersonByName("민수");
+    const nodeId = await addMemo("민수를 만났다.", ["민수"]);
+    const infer: PersonLinkInferFn = async (input) => ({
+      kind: "ok",
+      parsed: parsePersonLinkResponse(
+        `[{"nodeId":${input.nodes[0]!.id},"links":[{"personId":null,"confidence":0}]}]`,
+      ),
+    });
+    const summary = await runPersonLinkInferCycle(deps({ infer }));
+    expect(summary.completedNoop).toBe(1);
+    expect(summary.rejectedInvalid).toBe(0);
+    expect(getStageResult(db, "person_link", String(nodeId))!.status).toBe("completed_noop");
+  });
+});
+
 describe("runPersonLinkInferCycle — 노드 단위 커버리지 (A-7)", () => {
-  test("부분 응답 — 결정 없는 노드는 완료 처리 안 됨(다음 배치 후보 잔존)", async () => {
+  test("배치에서 빠진 노드는 단독 호출로 다시 보내고, 거기서 답하면 정상 완료된다", async () => {
+    const minsu = await store.findOrCreatePersonByName("민수");
+    const first = await addMemo("민수와 회의했다.", ["민수"]);
+    const second = await addMemo("민수와 점심을 먹었다.", ["민수"]);
+
+    // 2노드 배치 호출에서는 first 만 답하고, 단독 재호출(노드 1개)에서는 정상 답한다.
+    const infer = fixtureInfer((input) => {
+      if (input.nodes.length > 1) {
+        return [{ nodeId: first, personId: minsu.personId, confidence: 0.96 }];
+      }
+      return [{ nodeId: input.nodes[0]!.id, personId: minsu.personId, confidence: 0.96 }];
+    });
+
+    const summary = await runPersonLinkInferCycle(deps({ infer: infer.fn }));
+
+    expect(infer.calls.map((c) => c.nodes.map((n) => n.id))).toEqual([
+      [first, second],
+      [second],
+    ]);
+    expect(summary.autoLinked).toBe(2);
+    expect(summary.completed).toBe(2);
+    expect(summary.coverageMisses).toBe(0);
+    expect(getStageResult(db, "person_link", String(second))!.status).toBe("completed");
+  });
+
+  test("단독 재호출에서도 빠지면 결정적 실패로 원장에 남고 attempt 가 세어진다", async () => {
     const minsu = await store.findOrCreatePersonByName("민수");
     const decided = await addMemo("민수와 회의했다.", ["민수"]);
     const omitted = await addMemo("지현과 점심을 먹었다.", ["지현"]);
 
-    // 모델이 decided 노드만 답하고 omitted 노드는 응답에서 통째 누락.
-    const first = fixtureInfer((input) => {
-      // 두 노드 다 입력에 실렸는지 확인.
-      expect(input.nodes.map((n) => n.id).sort((a, b) => a - b)).toEqual(
-        [decided, omitted].sort((a, b) => a - b),
-      );
-      return [{ nodeId: decided, personId: minsu.personId, confidence: 0.96 }];
-    });
+    // omitted 노드는 어떤 호출에서도 답하지 않는다.
+    const infer = fixtureInfer((input) =>
+      input.nodes.some((n) => n.id === decided)
+        ? [{ nodeId: decided, personId: minsu.personId, confidence: 0.96 }]
+        : [],
+    );
 
-    const summary = await runPersonLinkInferCycle(deps({ infer: first.fn }));
+    const summary = await runPersonLinkInferCycle(deps({ infer: infer.fn }));
+    expect(infer.calls.map((c) => c.nodes.map((n) => n.id))).toEqual([
+      [decided, omitted],
+      [omitted],
+    ]);
     expect(summary.autoLinked).toBe(1);
-    // decided 노드만 원장 completed, omitted 노드는 원장 미기록.
-    expect(getStageResult(db, "person_link", String(decided))!.status).toBe("completed");
-    expect(getStageResult(db, "person_link", String(omitted))).toBeNull();
-
-    // 다음 사이클 — omitted 노드는 후보로 잔존(다시 입력에 실린다), decided 는 제외.
-    const second = fixtureInfer(() => []);
-    const summary2 = await runPersonLinkInferCycle(deps({ infer: second.fn }));
-    expect(summary2.candidatesFound).toBe(1);
-    expect(second.calls[0]!.nodes.map((n) => n.id)).toEqual([omitted]);
-    // 커버리지 미달 건수는 첫 사이클에 로그로 남는다(uncovered 집계).
     expect(summary.coverageMisses).toBe(1);
+    expect(getStageResult(db, "person_link", String(decided))!.status).toBe("completed");
+    const row = getStageResult(db, "person_link", String(omitted))!;
+    expect(row.status).toBe("retryable_failure");
+    expect(row.attemptCount).toBe(1);
+    expect(row.lastError).toContain("결정이 없음");
+
+    // 상한(MAX_ATTEMPTS)까지 반복하면 terminal 로 끝나 더는 후보로 안 올라온다.
+    for (let n = 2; n <= MAX_ATTEMPTS; n += 1) {
+      await runPersonLinkInferCycle(deps({ infer: infer.fn }));
+    }
+    expect(getStageResult(db, "person_link", String(omitted))!.status).toBe("terminal_failure");
+    const after = fixtureInfer(() => []);
+    const last = await runPersonLinkInferCycle(deps({ infer: after.fn }));
+    expect(last.candidatesFound).toBe(0);
+    expect(after.calls).toHaveLength(0);
   });
 
   test("커버된 노드마다 결과 원장 정확히 1행(연결/제안/빈 값 모두 완료 처리)", async () => {
@@ -510,7 +567,8 @@ describe("runPersonLinkInferCycle — 토큰 인지 microbatch + 호출당 상�
       {
         personId: minsu.personId,
         displayName: "민수",
-        aliases: [],
+        // 실제 로드 형태 그대로 — findOrCreatePersonByName 은 이름을 별칭에도 넣는다.
+        aliases: ["민수"],
         facts: { birthday: null, address: null, gender: null },
         attributes: [],
       },
@@ -574,7 +632,8 @@ describe("runPersonLinkInferCycle — 토큰 인지 microbatch + 호출당 상�
       {
         personId: minsu.personId,
         displayName: "민수",
-        aliases: [],
+        // 실제 로드 형태 그대로 — findOrCreatePersonByName 은 이름을 별칭에도 넣는다.
+        aliases: ["민수"],
         facts: { birthday: null, address: null, gender: null },
         attributes: [],
       },

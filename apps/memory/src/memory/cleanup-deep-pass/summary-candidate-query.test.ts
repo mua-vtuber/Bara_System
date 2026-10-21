@@ -12,12 +12,13 @@
  *   - 멱등 = chunk_summaries 행 생기면 다음 호출에서 제외.
  *   - batchSize 제한 + 사용 이력 소비 정렬(spec 5-5 — candidate-query.ts 와 동일 공식).
  *   - 각 후보에 atomics(LLM 입력 닻) + content + parentId(문서 id) + chunkIndex 를 단다.
- *   - 관계 발굴 입력 묶음 = parentId(문서) 별 그룹핑. 한 문서의 청크들이 한 묶음.
- *   - Task 12: 각 묶음에 그 문서의 허용 개념 집합(concepts — 개념/사람 id + 이름)을 단다.
- *     개념 2개 미만 문서는 묶음에서 제외(쌍 성립 불가 / spec §4.2).
- *   - 관계 멱등 = 그 document_id 에 relation_summaries 행(source_document_id) 있으면
- *     그 문서 통째 제외(Task 11 스키마 — 옛 from_node_id/to_node_id 청크 판정 폐기).
- *   - collectDocumentConcepts = 청크→atomic→node_concept_edges(개념) ∪
+ *   - 호출 묶음(planSummaryCalls) = parentId(문서) 별 + 한 호출 청크 수 상한씩 자르기.
+ *   - 각 묶음의 허용 개념 집합(relationConcepts)은 *그 묶음 청크* 의 atomic 에서 닿는 개념만
+ *     (2026-10-19 — 같은 문서의 묶음 밖 청크 개념은 넣지 않는다). 2개 미만이면 null(관계 skip).
+ *   - 관계 발굴 멱등은 청크 묶음 단위 — 문서에 relation_summaries 행이 있어도 새 청크 묶음은
+ *     관계 발굴을 받는다(옛 문서 단위 영구 마감 폐기). 같은 문서 기존 쌍은
+ *     listRelationPairsForDocument 로 가른다(방향 무관 relationPairKey).
+ *   - collectChunkSetConcepts = 청크→atomic→node_concept_edges(개념) ∪
  *     node_person_edges(사람) UNION. DISTINCT.
  */
 
@@ -25,10 +26,15 @@ import { expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { openMemoryDatabase } from "../../db/migrations.ts";
 import {
-  collectDocumentConcepts,
+  collectChunkSetConcepts,
   findChunkSummaryCandidates,
-  groupRelationDiscoveryInput,
+  listRelationPairsForDocument,
+  planSummaryCalls,
+  relationPairKey,
 } from "./summary-candidate-query.ts";
+
+/** 테스트용 호출 청크 수 상한 — 자르기를 따로 보는 테스트 밖에서는 넉넉히 둬 문서당 한 묶음. */
+const ROOMY_MAX_CHUNKS_PER_CALL = 50;
 
 /** 실 기준 스키마를 적용한 :memory: DB(sqlite-vec 로드 포함). */
 function makeSchemaDb(): Database {
@@ -325,7 +331,7 @@ test("선호(memory_type='preference') document_chunk 는 atomic 임계 충족�
   db.close();
 });
 
-test("collectDocumentConcepts = 청크→atomic→개념 ∪ 사람 UNION · DISTINCT", () => {
+test("collectChunkSetConcepts = 청크→atomic→개념 ∪ 사람 UNION · DISTINCT", () => {
   const db = makeSchemaDb();
   insertDocument(db, "doc-a");
   // 청크 2개 · 각 atomic 2건. 한 atomic 은 개념 둘, 다른 atomic 은 사람 하나.
@@ -344,7 +350,7 @@ test("collectDocumentConcepts = 청크→atomic→개념 ∪ 사람 UNION · DIS
   // a10 → 사람 수민(mentions).
   linkPerson(db, a10!, sumin, "mentions");
 
-  const got = collectDocumentConcepts(db, "doc-a");
+  const got = collectChunkSetConcepts(db, [c0, c1]);
   // 개념 2(코틀린·컴포즈) + 사람 1(수민) = 3건. 코틀린은 role 다른 두 엣지여도 1건.
   expect(got.map((x) => x.conceptId).sort()).toEqual(
     [kotlin, compose, sumin].sort(),
@@ -356,26 +362,31 @@ test("collectDocumentConcepts = 청크→atomic→개념 ∪ 사람 UNION · DIS
   db.close();
 });
 
-test("collectDocumentConcepts 는 atomic 자체를 개념으로 세지 않는다(다른 문서 개념도 격리)", () => {
+test("collectChunkSetConcepts 는 atomic 자체를 개념으로 세지 않고, 묶음 밖 청크 개념(같은 문서 포함)도 넣지 않는다", () => {
   const db = makeSchemaDb();
   insertDocument(db, "doc-a");
   insertDocument(db, "doc-b");
-  const a0 = insertChunk(db, "A 조각", "doc-a", 0);
-  const [aAtom] = attachAtomics(db, a0, 1);
+  const a0 = insertChunk(db, "A 첫 조각", "doc-a", 0);
+  const [a0Atom] = attachAtomics(db, a0, 1);
+  const a1 = insertChunk(db, "A 둘째 조각", "doc-a", 1);
+  const [a1Atom] = attachAtomics(db, a1, 1);
   const b0 = insertChunk(db, "B 조각", "doc-b", 0);
   const [bAtom] = attachAtomics(db, b0, 1);
-  const cA = insertConcept(db, "doc-a-개념");
+  const cA0 = insertConcept(db, "doc-a-첫청크-개념");
+  const cA1 = insertConcept(db, "doc-a-둘째청크-개념");
   const cB = insertConcept(db, "doc-b-개념");
-  linkConcept(db, aAtom!, cA);
+  linkConcept(db, a0Atom!, cA0);
+  linkConcept(db, a1Atom!, cA1);
   linkConcept(db, bAtom!, cB);
 
-  // doc-a 집합엔 doc-a 개념만(doc-b 개념 격리). atomic 노드 id 는 결과에 없다.
-  const got = collectDocumentConcepts(db, "doc-a");
-  expect(got.map((x) => x.conceptId)).toEqual([cA]);
+  // a0 만 실은 묶음 — 같은 문서 a1 의 개념도, 다른 문서 개념도 없다. atomic 노드 id 도 없다.
+  expect(collectChunkSetConcepts(db, [a0]).map((x) => x.conceptId)).toEqual([cA0]);
+  // 청크가 없으면 개념도 없다.
+  expect(collectChunkSetConcepts(db, [])).toEqual([]);
   db.close();
 });
 
-test("관계 발굴 묶음 = parentId 별 그룹핑 + 각 묶음에 허용 개념 집합(concepts)", () => {
+test("호출 묶음 = parentId 별 그룹핑 + 각 묶음에 그 묶음 청크의 허용 개념 집합(relationConcepts)", () => {
   const db = makeSchemaDb();
   insertDocument(db, "doc-a");
   insertDocument(db, "doc-b");
@@ -397,24 +408,24 @@ test("관계 발굴 묶음 = parentId 별 그룹핑 + 각 묶음에 허용 개�
   linkPerson(db, b0Atom!, minsu);
 
   const candidates = findChunkSummaryCandidates(db, 4, 50);
-  const groups = groupRelationDiscoveryInput(candidates, db);
+  const groups = planSummaryCalls(candidates, db, ROOMY_MAX_CHUNKS_PER_CALL);
 
   // 두 문서 묶음. doc-a 청크 2개·개념 2건, doc-b 청크 1개·개념 2건.
   expect(groups.map((g) => g.documentId).sort()).toEqual(["doc-a", "doc-b"]);
   const docA = groups.find((g) => g.documentId === "doc-a")!;
   expect(docA.chunks.map((c) => c.chunkId).sort((x, y) => x - y)).toEqual([a0, a1].sort((x, y) => x - y));
-  expect(docA.concepts.map((x) => x.conceptId).sort()).toEqual([kotlin, sumin].sort());
+  expect(docA.relationConcepts!.map((x) => x.conceptId).sort()).toEqual([kotlin, sumin].sort());
   const docB = groups.find((g) => g.documentId === "doc-b")!;
   expect(docB.chunks.map((c) => c.chunkId)).toEqual([b0]);
-  expect(docB.concepts.map((x) => x.conceptId).sort()).toEqual([java, minsu].sort());
+  expect(docB.relationConcepts!.map((x) => x.conceptId).sort()).toEqual([java, minsu].sort());
   db.close();
 });
 
-test("개념 2개 미만 문서는 관계 발굴 묶음에서 제외(쌍 성립 불가 — 정직한 skip)", () => {
+test("개념 2개 미만 묶음은 relationConcepts=null(쌍 성립 불가 — 정직한 skip), 청크요약 묶음은 그대로", () => {
   const db = makeSchemaDb();
   insertDocument(db, "doc-a");
   insertDocument(db, "doc-b");
-  // doc-a 개념 2건(포함) / doc-b 개념 1건(제외).
+  // doc-a 개념 2건(관계 가능) / doc-b 개념 1건(관계 skip).
   const a0 = insertChunk(db, "A 조각", "doc-a", 0, "2026-06-05 10:00:00");
   const [a0Atom] = attachAtomics(db, a0, 4);
   const b0 = insertChunk(db, "B 조각", "doc-b", 0, "2026-06-05 10:01:00");
@@ -428,36 +439,74 @@ test("개념 2개 미만 문서는 관계 발굴 묶음에서 제외(쌍 성립 
   linkConcept(db, b0Atom!, lone);
 
   const candidates = findChunkSummaryCandidates(db, 4, 50);
-  const groups = groupRelationDiscoveryInput(candidates, db);
-  // doc-b 는 개념 1건이라 쌍 불가 → 제외. doc-a 만 남는다.
-  expect(groups.map((g) => g.documentId)).toEqual(["doc-a"]);
+  const groups = planSummaryCalls(candidates, db, ROOMY_MAX_CHUNKS_PER_CALL);
+  // 두 문서 다 호출 묶음은 남는다(청크요약은 해야 하므로). doc-b 만 관계 갈래 skip.
+  expect(groups.map((g) => g.documentId)).toEqual(["doc-a", "doc-b"]);
+  expect(groups[0]!.relationConcepts).not.toBeNull();
+  expect(groups[1]!.relationConcepts).toBeNull();
   db.close();
 });
 
-test("이미 source_document_id 행 있는 문서는 관계 묶음에서 통째 제외(문서 단위 멱등)", () => {
+test("한 호출 청크 수 상한을 넘는 문서는 입력 순서대로 잘리고, 각 묶음 개념은 그 묶음 청크에서만 나온다", () => {
+  const db = makeSchemaDb();
+  insertDocument(db, "doc-a");
+  // 청크 3개 — 상한 2 이면 [c0, c1] / [c2] 두 묶음.
+  const c0 = insertChunk(db, "첫 조각", "doc-a", 0, "2026-06-05 10:00:00");
+  const [c0Atom] = attachAtomics(db, c0, 4);
+  const c1 = insertChunk(db, "둘째 조각", "doc-a", 1, "2026-06-05 10:01:00");
+  const [c1Atom] = attachAtomics(db, c1, 4);
+  const c2 = insertChunk(db, "셋째 조각", "doc-a", 2, "2026-06-05 10:02:00");
+  const [c2Atom] = attachAtomics(db, c2, 4);
+  const front1 = insertConcept(db, "앞개념1");
+  const front2 = insertConcept(db, "앞개념2");
+  const back1 = insertConcept(db, "뒤개념1");
+  const back2 = insertConcept(db, "뒤개념2");
+  linkConcept(db, c0Atom!, front1);
+  linkConcept(db, c1Atom!, front2);
+  linkConcept(db, c2Atom!, back1);
+  linkConcept(db, c2Atom!, back2);
+
+  const candidates = findChunkSummaryCandidates(db, 4, 50);
+  const groups = planSummaryCalls(candidates, db, 2);
+  expect(groups.map((g) => g.chunks.map((c) => c.chunkId))).toEqual([[c0, c1], [c2]]);
+  expect(groups[0]!.relationConcepts!.map((x) => x.conceptId).sort()).toEqual([front1, front2].sort());
+  expect(groups[1]!.relationConcepts!.map((x) => x.conceptId).sort()).toEqual([back1, back2].sort());
+  expect(() => planSummaryCalls(candidates, db, 0)).toThrow(/청크 수 상한/);
+  db.close();
+});
+
+test("문서에 이미 relation_summaries 행이 있어도 새 청크 묶음은 관계 발굴 대상(옛 문서 단위 영구 마감 폐기)", () => {
+  const db = makeSchemaDb();
+  insertDocument(db, "doc-a");
+  // 앞 묶음이 이미 관계 하나를 저장한 문서 — 뒤쪽 새 청크는 여전히 관계 개념을 받는다.
+  const a0 = insertChunk(db, "A 뒤쪽 조각", "doc-a", 5, "2026-06-05 10:00:00");
+  const [a0Atom] = attachAtomics(db, a0, 4);
+  const swift = insertConcept(db, "스위프트");
+  const rust = insertConcept(db, "러스트");
+  linkConcept(db, a0Atom!, swift);
+  linkConcept(db, a0Atom!, rust);
+  insertRelationSummaryRow(db, "rs_1", "cpt_앞개념", "cpt_다른앞개념", "doc-a");
+
+  const candidates = findChunkSummaryCandidates(db, 4, 50);
+  const groups = planSummaryCalls(candidates, db, ROOMY_MAX_CHUNKS_PER_CALL);
+  expect(groups).toHaveLength(1);
+  expect(groups[0]!.relationConcepts!.map((x) => x.conceptId).sort()).toEqual([swift, rust].sort());
+  db.close();
+});
+
+test("listRelationPairsForDocument = 그 문서 관계요약 개념 쌍(방향 무관), 다른 문서 쌍은 없음", () => {
   const db = makeSchemaDb();
   insertDocument(db, "doc-a");
   insertDocument(db, "doc-b");
-  // 두 문서 다 개념 2건(쌍 성립). doc-a 만 이미 발굴 완료(source_document_id 행 존재).
-  const a0 = insertChunk(db, "A 조각", "doc-a", 0, "2026-06-05 10:00:00");
-  const [a0Atom] = attachAtomics(db, a0, 4);
-  const b0 = insertChunk(db, "B 조각", "doc-b", 0, "2026-06-05 10:01:00");
-  const [b0Atom] = attachAtomics(db, b0, 4);
+  insertRelationSummaryRow(db, "rs_a", "cpt_가", "cpt_나", "doc-a");
+  insertRelationSummaryRow(db, "rs_b", "cpt_다", "cpt_라", "doc-b");
 
-  const kotlin = insertConcept(db, "코틀린");
-  const java = insertConcept(db, "자바");
-  const swift = insertConcept(db, "스위프트");
-  const rust = insertConcept(db, "러스트");
-  linkConcept(db, a0Atom!, kotlin);
-  linkConcept(db, a0Atom!, java);
-  linkConcept(db, b0Atom!, swift);
-  linkConcept(db, b0Atom!, rust);
-
-  // doc-a 관계요약이 이미 있음(source_document_id='doc-a') → doc-a 통째 제외.
-  insertRelationSummaryRow(db, "rs_1", kotlin, java, "doc-a");
-
-  const candidates = findChunkSummaryCandidates(db, 4, 50);
-  const groups = groupRelationDiscoveryInput(candidates, db);
-  expect(groups.map((g) => g.documentId)).toEqual(["doc-b"]);
+  const pairs = listRelationPairsForDocument(db, "doc-a");
+  expect(pairs.size).toBe(1);
+  // 저장 방향(가→나)과 반대 방향(나→가) 모두 같은 쌍.
+  expect(pairs.has(relationPairKey("cpt_가", "cpt_나"))).toBe(true);
+  expect(pairs.has(relationPairKey("cpt_나", "cpt_가"))).toBe(true);
+  expect(pairs.has(relationPairKey("cpt_다", "cpt_라"))).toBe(false);
+  expect(listRelationPairsForDocument(db, "doc-none").size).toBe(0);
   db.close();
 });

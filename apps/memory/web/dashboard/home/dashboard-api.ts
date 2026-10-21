@@ -167,6 +167,22 @@ export function trashMemory(
   );
 }
 
+export interface ScheduleVisibilityResult {
+  nodeId: number;
+  hidden: boolean;
+  action: "flagged" | "unflagged" | "reverted_schedule";
+  revertedRecordId?: number;
+  sourceMemoFlagged?: boolean;
+}
+
+/** 기억을 일정 목록에서 빼거나(hidden=true) 다시 넣는다. 글과 날짜는 그대로다. */
+export function setScheduleVisibility(id: number, hidden: boolean): Promise<ScheduleVisibilityResult> {
+  return jsonFetch<ScheduleVisibilityResult>(
+    `/memories/${encodeURIComponent(String(id))}/schedule-visibility`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ hidden }) },
+  );
+}
+
 export function getCleanupRunAvailability(): Promise<CleanupRunAvailability> {
   return jsonFetch<CleanupRunAvailability>("/api/cleanup-runs/availability");
 }

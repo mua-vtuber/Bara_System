@@ -190,6 +190,24 @@ export function NodeRepoMetaMixin<
     }
 
     /**
+     * 노드 metadata 의 최상위 칸 하나를 켜거나(value) 지운다(null). 다른 칸은 json_set/json_remove 로 보존.
+     * content·임베딩은 안 건드리므로 재색인이 필요 없다. 노드가 없으면 false.
+     */
+    setNodeMetadataFlag(nodeId: number, key: string, value: boolean | null): boolean {
+      const path = `$.${key}`;
+      const result = value === null
+        ? this.db
+            .query("UPDATE knowledge_nodes SET metadata_json = json_remove(COALESCE(metadata_json, '{}'), ?) WHERE id = ?")
+            .run(path, nodeId)
+        : this.db
+            .query("UPDATE knowledge_nodes SET metadata_json = json_set(COALESCE(metadata_json, '{}'), ?, json(?)) WHERE id = ?")
+            .run(path, JSON.stringify(value), nodeId);
+      if (result.changes === 0) return false;
+      this.dbRevision += 1;
+      return true;
+    }
+
+    /**
      * 추출 완료 노드의 metadata 에 완료 플래그를 기록한다. 입력 통로 통합 Task 5 —
      * scheduler 가 한 후보(raw 또는 청크)를 추출하고 atomic 자식을 merged_into 로
      * 연결한 직후 호출해, 다음 백필 사이클에서 같은 노드가 다시 줍히지 않게 한다.

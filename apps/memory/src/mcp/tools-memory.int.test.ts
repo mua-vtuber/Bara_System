@@ -375,11 +375,19 @@ test("(e) search_memory 전 칸 방어 파싱 + contextBudget + limit", async ()
   });
   expect(memoryTypeFiltered.isError).not.toBe(true);
 
+  // polarity 는 enum 이라 오타가 호출 시점에 거절된다(조용히 필터 미적용 금지).
   const bogus = await client.callTool({
     name: "search_memory",
-    arguments: { query: "통합 테스트", polarity: "bogus", limit: 0 },
+    arguments: { query: "통합 테스트", polarity: "bogus" },
   });
-  expect(bogus.isError).not.toBe(true);
+  expect(bogus.isError).toBe(true);
+
+  // 숫자 칸 limit 0 은 REST 공유 방어 파싱이 기본값으로 처리한다.
+  const zeroLimit = await client.callTool({
+    name: "search_memory",
+    arguments: { query: "통합 테스트", polarity: "neutral", limit: 0 },
+  });
+  expect(zeroLimit.isError).not.toBe(true);
 });
 
 test("(e2) search_memory query 빈 문자열 → INVALID_INPUT + SearchInputError 문구 그대로(T8)", async () => {

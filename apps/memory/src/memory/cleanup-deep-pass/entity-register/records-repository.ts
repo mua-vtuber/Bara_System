@@ -198,6 +198,19 @@ export class EntityRegisterRecordsRepository {
       .all(sourceNodeId) as RawRecord[]).map(toRecord);
   }
 
+  /** 이 노드를 만든 살아 있는 일정 기록(schedule_created, target_id = 일정 노드 id). 없으면 null — 사용자가 직접 쓴 일정·일반 메모. */
+  activeScheduleRecordForNode(scheduleNodeId: number): EntityRegisterRecord | null {
+    requirePositiveInteger(scheduleNodeId, "scheduleNodeId");
+    const row = this.db
+      .query(
+        `SELECT * FROM entity_register_records
+          WHERE item_kind = 'schedule_created' AND status = 'active' AND target_id = ?
+          ORDER BY id DESC LIMIT 1`,
+      )
+      .get(String(scheduleNodeId)) as RawRecord | null;
+    return row ? toRecord(row) : null;
+  }
+
   activeScheduleForMemo(sourceNodeId: number): (ActiveSchedule & { recordId: number }) | null {
     requirePositiveInteger(sourceNodeId, "sourceNodeId");
     // CAST 는 "12abc" 를 12 로 읽어 엉뚱한 노드에 붙으므로, 조인 전에 target_id 모양을 먼저 본다.

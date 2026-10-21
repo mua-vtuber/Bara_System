@@ -28,6 +28,8 @@ export const OPENAI_DIALECT: OpenAiChatDialect = {
   tokenLimitParam: "max_completion_tokens",
   acceptsSampling: openAiModelAcceptsSampling,
   apiKeyRequired: true,
+  // Structured Outputs 문서: "the root level object of a schema must be an object".
+  jsonSchemaObjectRootOnly: true,
 };
 
 export interface OpenAiClientOptions {

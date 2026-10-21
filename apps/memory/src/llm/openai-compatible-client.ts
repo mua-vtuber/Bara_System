@@ -31,6 +31,8 @@ export const OPENAI_COMPATIBLE_DIALECT: OpenAiChatDialect = {
   tokenLimitParam: "max_tokens",
   acceptsSampling: () => true,
   apiKeyRequired: false,
+  // LM Studio 등은 문법 제약으로 최상위 배열도 받는다 — 받은 schema 그대로 보낸다.
+  jsonSchemaObjectRootOnly: false,
 };
 
 export interface OpenAiCompatibleClientOptions {

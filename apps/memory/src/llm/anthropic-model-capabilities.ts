@@ -92,6 +92,46 @@ export function anthropicModelAcceptsSampling(modelId: string): boolean {
   return true;
 }
 
+/**
+ * 생각(thinking)을 끄는 요청 칸. Anthropic SDK 0.96 의 타입에는 "between_tools" 가 없어 여기서 따로
+ * 적는다(전송은 SDK 가 본문을 그대로 싣는다).
+ */
+export type AnthropicThinkingOffParam = { type: "disabled" } | { type: "between_tools" };
+
+/**
+ * 생각을 끄려면 칸을 넣어야 하는 모델(정규화한 이름 → 넣을 값). 값마다의 근거는 모두
+ * Claude API 문서(2026-10 확인)의 모델별 thinking 설명이다:
+ *   - claude-opus-5 -> {type:"disabled"}: Opus 5 는 "disabled" 를 effort high 이하에서만 받는다
+ *     (기본 effort high). 이 클라이언트는 effort 를 보내지 않아 기본값이라 받는다.
+ *   - claude-haiku-5-5 -> {type:"disabled"}: Haiku 5.5 도 "disabled" 를 effort high 이하에서만
+ *     받는다(기본 effort medium). effort 를 보내지 않아 기본값이라 받는다.
+ *   - claude-sonnet-5 -> {type:"disabled"}: Sonnet 5 는 "disabled" 를 제한 없이 받는다.
+ *   - claude-sonnet-5-5 -> {type:"between_tools"}: Sonnet 5.5 는 "disabled" 를 400 으로 거절하고
+ *     {type:"between_tools"}(다른 칸 없이)로만 끈다. effort high 이하에서만 가능한데 이 클라이언트는
+ *     effort 를 보내지 않아 기본값 high 라 가능하다.
+ * 표에 없는 모델은 칸을 넣지 않는다(같은 문서 기준):
+ *   - Opus 5.5·Fable 5.x·Mythos: 생각을 끌 수 없다 — 칸을 빼는 것이 유일한 요청이다(지금 동작 그대로).
+ *   - Opus 4.8 이하·Sonnet 4.6 이하·Haiku 4.5 이하: thinking 칸을 빼면 이미 생각하지 않는다.
+ *   - 이름 규칙을 모르는 모델: 넣으면 400 이 날 수 있어 넣지 않는다.
+ * 새 모델이 나오면 이 표만 고친다.
+ */
+const THINKING_OFF_PARAMS: ReadonlyMap<string, AnthropicThinkingOffParam> = new Map([
+  ["claude-opus-5", { type: "disabled" }],
+  ["claude-sonnet-5", { type: "disabled" }],
+  ["claude-haiku-5-5", { type: "disabled" }],
+  ["claude-sonnet-5-5", { type: "between_tools" }],
+]);
+
+/** 생각을 끄라는 요청(think === false)일 때 요청 본문에 펼쳐 넣을 칸. 넣을 것이 없으면 빈 객체. */
+export function anthropicThinkingParams(
+  modelId: string,
+  think: boolean | undefined,
+): { thinking?: AnthropicThinkingOffParam } {
+  if (think !== false) return {};
+  const off = THINKING_OFF_PARAMS.get(normalizeAnthropicModelId(modelId));
+  return off === undefined ? {} : { thinking: off };
+}
+
 /** 요청 본문에 펼쳐 넣을 표본 조절 칸. 허용 안 되는 모델이거나 값이 없으면 빈 객체. */
 export function anthropicSamplingParams(
   modelId: string,

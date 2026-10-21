@@ -31,7 +31,7 @@ export function registerDoctorTools(server: McpServer, ctx: McpToolContext): voi
         // 결과로 정직 변환) — 여기 닿는 예외는 그 흡수망 밖의 예상 밖 결함이다.
         return toolError(
           "INTERNAL",
-          `자가 진단 실패: ${e instanceof Error ? e.message : String(e)}`,
+          `Self-diagnosis failed: ${e instanceof Error ? e.message : String(e)}`,
         );
       }
     },

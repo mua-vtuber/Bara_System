@@ -7,7 +7,7 @@
  *
  * 정책: "전부 추출" — 사실, 선호, 계획, 아이디어, 꿈, 지인 정보 등
  * 본인이 다시 떠올리고 싶을 만한 모든 것. 일시적 상태("지금 밥 먹는 중")
- * 만 제외. importance 0.3 미만 항목은 LLM 자체 판단으로 폐기.
+ * 만 제외. importance 하한(minImportance) 미만과 importance 가 없는 항목은 버리고 센다.
  *
  * 흐름:
  *   1. 시스템 프롬프트 + 사용자 텍스트(<text> 태그로 격리)를 LLM에 송신.
@@ -77,17 +77,16 @@ import {
 import {
   EXTRACTION_RESPONSE_SCHEMA,
   EXTRACTION_RETRY_TEMPERATURE,
-  EXTRACTION_SYSTEM_PROMPT,
   buildExtractionMessages,
-  toIsoDate,
+  buildExtractionSystemPrompt,
 } from "./extractor-internal/prompt.ts";
 import {
   classifyEmptyResponse,
+  countFilteredOut,
   dedupeWithinResponse,
   filterByImportance,
   filterTrivialSingleExtraction,
-  items_filtered_out,
-  parseExtractionResponse,
+  parseExtractionResponseDetailed,
 } from "./extractor-internal/parse.ts";
 import {
   applyHashtagWiring,
@@ -123,6 +122,7 @@ export {
   EXTRACTION_RETRY_TEMPERATURE,
   EXTRACTION_SYSTEM_PROMPT,
   buildExtractionMessages,
+  buildExtractionSystemPrompt,
 } from "./extractor-internal/prompt.ts";
 export {
   classifyEmptyResponse,
@@ -132,7 +132,9 @@ export {
   isTrivialSingleExtractionRestatement,
   normalizeRestatementText,
   parseExtractionResponse,
+  parseExtractionResponseDetailed,
 } from "./extractor-internal/parse.ts";
+export type { ParsedExtraction } from "./extractor-internal/parse.ts";
 export type { HashtagWiringResult } from "./extractor-internal/hashtag-wiring.ts";
 export {
   applyHashtagWiring,
@@ -188,9 +190,10 @@ export class MemoryExtractor {
   ) {
     this.conflictChecker =
       options.conflictChecker ?? new ConflictChecker(store);
-    this.systemPrompt = options.systemPrompt ?? EXTRACTION_SYSTEM_PROMPT;
     this.duplicateSim = options.duplicateSim ?? EXTRACTOR_DUPLICATE_SIM;
     this.minImportance = options.minImportance ?? EXTRACTOR_MIN_IMPORTANCE;
+    // 시스템 프롬프트가 말하는 importance 하한 = 이 추출기가 실제로 버리는 하한.
+    this.systemPrompt = options.systemPrompt ?? buildExtractionSystemPrompt(this.minImportance);
     this.forceJsonFormat = options.forceJsonFormat ?? false;
     const maxOutputTokens = options.maxOutputTokens ?? EXTRACTOR_MAX_OUTPUT_TOKENS_DEFAULT;
     const limitError = extractorMaxOutputTokensError(maxOutputTokens);
@@ -266,12 +269,9 @@ export class MemoryExtractor {
       return { items: [], rawResponse: "" };
     }
 
-    // Phase 7 Task 4 — 등록 날짜(오늘 ISO)를 마지막 user 턴에 합류. LLM 이
-    // "금요일"·연도 없는 "3월 5일" 같은 애매 표현을 등록일 기준으로 풀게 한다.
-    // 정규식 1단(extractIngestEventDate)이 1단이라 LLM 이 환산 안 해도 확실한 날짜는
-    // 잡힌다 — 이 주입은 애매 표현 보강용. 단 연도 없는 "3월 5일" 은 저장할 때
-    // event_at 에 쓰지 않는다(정리 AI 가 연도를 정해 채움 — metadata-apply.ts 3번).
-    const todayIso = toIsoDate(options.now ?? new Date());
+    // 오늘 날짜는 LLM 에 보내지 않는다(2026-10-20). 모델은 날짜 표현을 글자 그대로
+    // eventDateText 에 옮기고, 저장 단계가 그 토막이 본문에 실제로 있을 때만 믿어 정규식으로
+    // 환산한다(metadata-apply.ts 3번 — 등록 기준점은 prepareExtraction 의 now).
     const context =
       input.context === undefined
         ? undefined
@@ -279,7 +279,6 @@ export class MemoryExtractor {
     const messages = buildExtractionMessages(
       analysisText,
       this.systemPrompt,
-      todayIso,
       context,
     );
     // 2026-06-02 T2 — 형식 강제 조건부. forceJsonFormat=true 면 옛 동작
@@ -308,6 +307,9 @@ export class MemoryExtractor {
         temperature,
         maxOutputTokens,
         ...formatOptions,
+        // 추출은 생각(thinking) 없이 바로 답하게 한다 — 끄는 방법이 확인된 공급자·모델만
+        // 실제로 끄고, 나머지는 지금 동작 그대로다(llm/types.ts think 칸).
+        think: false,
         signal: options.signal,
         callLabel:
           attempt === "first"
@@ -323,7 +325,8 @@ export class MemoryExtractor {
     };
 
     let raw = await callLlm(baseTemperature, "first");
-    let parsed = parseExtractionResponse(raw);
+    let parsedDetailed = parseExtractionResponseDetailed(raw);
+    let parsed = parsedDetailed.items;
 
     // 2026-06-02 T3 — 형식-깨짐 한정 1회 재요청. 형식 강제를 끈 (T2) 안전망:
     // 첫 응답이 빈 배열인데 raw 가 *형식 깨짐* 으로 판별되면 같은 messages 로
@@ -337,7 +340,8 @@ export class MemoryExtractor {
     if (parsed.length === 0 && classifyEmptyResponse(raw) === "garbled") {
       const firstRaw = raw;
       raw = await callLlm(EXTRACTION_RETRY_TEMPERATURE, "retry");
-      parsed = parseExtractionResponse(raw);
+      parsedDetailed = parseExtractionResponseDetailed(raw);
+      parsed = parsedDetailed.items;
       if (parsed.length === 0 && classifyEmptyResponse(raw) === "garbled") {
         throw new ExtractionMalformedResponseError({
           llmName: this.llm.name,
@@ -347,6 +351,12 @@ export class MemoryExtractor {
       }
     }
 
+    // importance 가 없어 버린 항목은 기본값으로 살리지 않고 알린다(저장 결과 filteredOutCount 에도 들어간다).
+    if (parsedDetailed.missingImportanceCount > 0) {
+      console.warn(
+        `[extractor] importance 가 없거나 숫자가 아닌 항목 ${parsedDetailed.missingImportanceCount}개를 버렸다 (llm=${this.llm.name})`,
+      );
+    }
     const filtered = filterByImportance(parsed, this.minImportance);
     const deduped = dedupeWithinResponse(filtered);
     const nonTrivial = filterTrivialSingleExtraction(analysisText, deduped);
@@ -538,7 +548,7 @@ export class MemoryExtractor {
     // metadata 적용 잠금·차단 이름은 LLM 이 본 입력과 같은 context 에서 읽는다.
     const llmInput = llmInputOf(scopedInput);
 
-    const filteredOutCount = items_filtered_out(rawResponse, parsedItems);
+    const filteredOutCount = countFilteredOut(rawResponse, parsedItems);
 
     const storedNodeIds: number[] = [];
     const bumpedNodeIds: number[] = [];
@@ -586,11 +596,8 @@ export class MemoryExtractor {
 
       // 새 노드 삽입. 임베딩은 이미 계산했으므로 재사용.
       // buildChildMetadata가 패스스루 + extractor 고유 키(source/llm/platform/
-      // protectUntil)를 합산. triple 필드(subject/predicate/object)는 추가로.
+      // protectUntil)를 합산.
       const metadata = buildChildMetadata(item, scopedInput, this.llm.name);
-      if (item.subject) metadata.subject = item.subject;
-      if (item.predicate) metadata.predicate = item.predicate;
-      if (item.object) metadata.object = item.object;
       const personCandidates = normalizeExtractedPersonCandidates(item.person);
       if (personCandidates.length > 0) {
         metadata.personCandidates = personCandidates;

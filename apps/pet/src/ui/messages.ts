@@ -666,9 +666,11 @@ export const messages = {
       : code === "AUTH_REQUIRED" ? "AI 인증에 실패했습니다. API 키를 확인해 주세요."
       : "AI 답변을 만들지 못했습니다. 찾은 기억을 직접 확인해 주세요.",
   },
-  /** The settings screen's license section (`licenses.ts`). The license texts themselves are not here: the UI build
-   * reads them from their source files (`scripts/license-texts.ts`). */
+  /** The settings screen's credits line and license popup (`licenses.ts`). The license texts themselves are not here:
+   * the UI build reads them from their source files (`scripts/license-texts.ts`). */
   licenses: {
+    credits: (license: string) => `감독: Mua_VTuber · 제작: Claude Code, Codex · 라이선스: ${license}`,
+    open: "라이선스 보기",
     heading: "라이선스",
     baraHeading: "바라",
     baraSummary: (license: string, source: string) =>

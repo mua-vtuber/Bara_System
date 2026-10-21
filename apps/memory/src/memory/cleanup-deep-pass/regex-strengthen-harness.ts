@@ -11,8 +11,12 @@
 
 import type { RegexCategory, Polarity } from "../regex-l0/types.ts";
 
-/** 컴파일·과매치 시험 시 사용하는 정규식 플래그 — patterns-loader / user-repo 와 일관. */
-const REGEX_FLAGS = "i";
+/**
+ * 컴파일·과매치 시험 시 사용하는 정규식 플래그 — patterns-loader / user-repo 와 일관. "u" 가
+ * 없으므로 \p{...} 같은 유니코드 속성 표기는 쓸 수 없다. 지시문(buildRegexStrengthenInstruction)이
+ * 이 값을 읽어 정규식 종류를 알려 준다(단일 출처).
+ */
+export const REGEX_FLAGS = "i";
 
 /**
  * 유효 양식 분류 — RegexCategory 6-enum 과 일치. 지시문(regex-strengthen-cycle.ts
@@ -73,11 +77,19 @@ export interface HarnessContext {
    * 생략하거나 빈 집합이면 기존 동작과 동일(하위 호환).
    */
   cycleLocalPatterns?: ReadonlySet<string>;
+  /**
+   * 이 제안을 만든 놓친 글 원문. 주면 (a) exampleInput 이 이 원문에 글자 그대로 있는지,
+   * (b) 정규식이 이 원문을 실제로 잡고 첫 캡처가 비어 있지 않은지 본다 — "주어진 예문을 실제로
+   * 잡는 규칙만" 을 모델 말이 아니라 원문으로 확인한다. 생략하면 이 검사를 건너뛴다(원문을 모르는
+   * 호출자 하위 호환).
+   */
+  sourceText?: string;
 }
 
 export type HarnessReason =
   | "compile"
   | "self_match"
+  | "source_match"
   | "overmatch"
   | "redundant"
   | "validity";
@@ -114,8 +126,8 @@ export function normalizePatternForDedup(
 
 /**
  * 제안 정규식 하나를 결정적으로 시험한다. 순서: 유효성 → 컴파일 → 자기예문 →
- * 중복(현재 양식) → 중복(사이클 로컬) → 과매치. 하나라도 떨어지면 reason 과
- * 함께 ok=false.
+ * 원문 매치(sourceText 를 줄 때만) → 중복(현재 양식) → 중복(사이클 로컬) → 과매치.
+ * 하나라도 떨어지면 reason 과 함께 ok=false.
  */
 export function testRegexProposal(
   p: ProposedPattern,
@@ -148,6 +160,20 @@ export function testRegexProposal(
   const captured = (m[1] ?? m[0]).trim();
   if (captured.length === 0) {
     return { ok: false, reason: "self_match", detail: "첫 캡처 빈 문자열" };
+  }
+
+  // 3b. 원문 매치 — 예문이 원문에서 베낀 글인지, 정규식이 원문 자체를 잡는지.
+  if (ctx.sourceText !== undefined) {
+    if (!ctx.sourceText.includes(p.exampleInput)) {
+      return { ok: false, reason: "source_match", detail: "예문이 원문에 글자 그대로 없음" };
+    }
+    const sm = new RegExp(p.pattern, REGEX_FLAGS).exec(ctx.sourceText);
+    if (sm === null) {
+      return { ok: false, reason: "source_match", detail: "원문 매치 0" };
+    }
+    if ((sm[1] ?? sm[0]).trim().length === 0) {
+      return { ok: false, reason: "source_match", detail: "원문 첫 캡처 빈 문자열" };
+    }
   }
 
   // 4. 중복 — 현재 양식 중 하나라도 예문을 이미 잡으면 안 놓친 것.

@@ -146,9 +146,9 @@ test("the reply a correct model would give parses back to each sentence's expect
   }
 });
 
-test("undecided must be the JSON null: the word, other casing, extra keys, fences and unknown kinds are all refused", () => {
+test("undecided must be the JSON null: the word, other casing, extra keys and unknown kinds are all refused", () => {
   expect(parseClassification('{"kind":null}', CAPTURE_KINDS)).toBeNull();
-  for (const reply of ['{"kind":"undecided"}', '{"kind":"Idea"}', '{"kind":"idea","reason":"x"}', '```json\n{"kind":"idea"}\n```', '{"kind":"habit"}', '{}', '[]']) {
+  for (const reply of ['{"kind":"undecided"}', '{"kind":"Idea"}', '{"kind":"idea","reason":"x"}', 'Sure: {"kind":"idea"}', '{"kind":"habit"}', '{}', '[]']) {
     expect(() => parseClassification(reply, CAPTURE_KINDS), reply).toThrow();
   }
   // A kind the server did not offer is refused even though this Pet knows it.

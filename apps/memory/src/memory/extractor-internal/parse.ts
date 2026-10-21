@@ -8,16 +8,24 @@
  *   - filterByImportance·dedupeWithinResponse — importance 하한·응답 내 중복 제거.
  *   - normalizeRestatementText·isTrivialSingleExtractionRestatement·
  *     filterTrivialSingleExtraction — 원문 재진술 1건 필터.
- *   - items_filtered_out — 필터로 버려진 갯수 계산(관측용).
+ *   - countFilteredOut — 필터로 버려진 갯수 계산(관측용).
  */
 
-import type { MemoryType } from "../types.ts";
+import { MEMORY_TYPES, type MemoryType } from "../types.ts";
+import { OPENAI_JSON_SCHEMA_ARRAY_WRAPPER_KEY } from "../../llm/openai-chat-core.ts";
 import {
   EXTRACTOR_MIN_IMPORTANCE,
   MIN_EXTRACTED_CONTENT_LENGTH,
 } from "../constants.ts";
 import type { ExtractedItem } from "./contract.ts";
 import { toNfc } from "../nfc.ts";
+
+/** parseExtractionResponseDetailed 결과 — 통과한 항목과 importance 가 없어 버린 항목 수. */
+export interface ParsedExtraction {
+  items: ExtractedItem[];
+  /** content 는 있었지만 importance 가 없거나 유한한 숫자가 아니어서 버린 항목 수. */
+  missingImportanceCount: number;
+}
 
 /**
  * LLM JSON 응답을 ExtractedItem 배열로 파싱.
@@ -27,25 +35,29 @@ import { toNfc } from "../nfc.ts";
  *   - 응답이 객체이면 그 객체의 첫 배열 필드 사용 (Ollama 일부 모델이
  *     `{"items": [...]}` 형태로 반환하기도 함)
  *   - 알 수 없는 memoryType → "fact" fallback
- *   - importance를 [0, 1]로 clamp
+ *   - importance 가 [0, 1] 밖의 숫자면 가까운 끝값으로 clamp(값은 있었으므로 빈 값이 아니다)
  *
+ * importance 가 없거나 숫자가 아닌 항목은 기본값으로 채우지 않고 버리고 그 수를 센다 —
+ * 빈 값을 0.5 로 채우면 모델이 중요도를 안 준 항목이 판단을 거친 것처럼 저장된다.
  * 파싱 실패·content 너무 짧음 등 모든 항목 제거 후 통과한 배열만 반환.
  */
-export function parseExtractionResponse(raw: string): ExtractedItem[] {
+export function parseExtractionResponseDetailed(raw: string): ParsedExtraction {
+  const empty: ParsedExtraction = { items: [], missingImportanceCount: 0 };
   const stripped = stripCodeFences(raw.trim());
-  if (!stripped) return [];
+  if (!stripped) return empty;
 
   let data: unknown;
   try {
     data = JSON.parse(stripped);
   } catch {
-    return [];
+    return empty;
   }
 
   const arr = coerceToArray(data);
-  if (!arr) return [];
+  if (!arr) return empty;
 
   const items: ExtractedItem[] = [];
+  let missingImportanceCount = 0;
   for (const entry of arr) {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
     const rec = entry as Record<string, unknown>;
@@ -54,16 +66,16 @@ export function parseExtractionResponse(raw: string): ExtractedItem[] {
       typeof rec.content === "string" ? rec.content.trim() : "";
     if (content.length < MIN_EXTRACTED_CONTENT_LENGTH) continue;
 
-    const memoryType = coerceMemoryType(rec.memoryType);
-    const importance = coerceImportance(rec.importance);
+    const importance = clampImportance(rec.importance);
+    if (importance === null) {
+      missingImportanceCount += 1;
+      continue;
+    }
 
     items.push({
       content,
-      memoryType,
+      memoryType: coerceMemoryType(rec.memoryType),
       importance,
-      subject: optionalString(rec.subject),
-      predicate: optionalString(rec.predicate),
-      object: optionalString(rec.object),
       // Phase 7 명시 메타 (Task 3) — 선택 칸. 모델이 안 내면 undefined (graceful).
       place: optionalString(rec.place),
       person: optionalStringArray(rec.person),
@@ -71,7 +83,12 @@ export function parseExtractionResponse(raw: string): ExtractedItem[] {
     });
   }
 
-  return items;
+  return { items, missingImportanceCount };
+}
+
+/** 통과한 항목만 — 버린 수가 필요 없는 호출처용. */
+export function parseExtractionResponse(raw: string): ExtractedItem[] {
+  return parseExtractionResponseDetailed(raw).items;
 }
 
 /**
@@ -183,7 +200,7 @@ function coerceToArray(data: unknown): unknown[] | null {
   // 일부 모델이 {"items": [...]} 또는 {"memories": [...]}로 감싸기도 함.
   if (data && typeof data === "object") {
     const rec = data as Record<string, unknown>;
-    for (const key of ["items", "memories", "extractions", "results"]) {
+    for (const key of [OPENAI_JSON_SCHEMA_ARRAY_WRAPPER_KEY, "memories", "extractions", "results"]) {
       const v = rec[key];
       if (Array.isArray(v)) return v;
     }
@@ -193,23 +210,18 @@ function coerceToArray(data: unknown): unknown[] | null {
   return null;
 }
 
-const VALID_MEMORY_TYPES: ReadonlySet<MemoryType> = new Set([
-  "fact",
-  "preference",
-  "triple",
-  "insight",
-  "episode",
-]);
+const VALID_MEMORY_TYPES: ReadonlySet<string> = new Set(MEMORY_TYPES);
 
 function coerceMemoryType(raw: unknown): MemoryType {
-  if (typeof raw === "string" && VALID_MEMORY_TYPES.has(raw as MemoryType)) {
+  if (typeof raw === "string" && VALID_MEMORY_TYPES.has(raw)) {
     return raw as MemoryType;
   }
   return "fact";
 }
 
-function coerceImportance(raw: unknown): number {
-  if (typeof raw !== "number" || !Number.isFinite(raw)) return 0.5;
+/** 유한한 숫자면 [0, 1] 로 clamp, 아니면(없음·문자열·NaN 등) null. */
+function clampImportance(raw: unknown): number | null {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return null;
   if (raw < 0) return 0;
   if (raw > 1) return 1;
   return raw;
@@ -245,11 +257,11 @@ function optionalStringArray(raw: unknown): string[] | undefined {
 }
 
 /**
- * "필터링으로 버려진 항목 갯수" 계산. parseExtractionResponse는 importance
- * 필터·dedup을 거치지 않은 원본 갯수를 알려주지 않으므로 raw 응답 다시
- * 파싱 — 한 번 더 비용이지만 디버깅·관측에 가치.
+ * "버려진 항목 갯수" 계산 — importance 가 없어 파싱에서 버린 항목 + importance 하한·응답 내
+ * 중복·원문 재진술 필터로 버린 항목. 저장 단계는 필터 뒤 항목만 받으므로 raw 응답을 다시
+ * 파싱한다 — 한 번 더 비용이지만 디버깅·관측에 가치.
  */
-export function items_filtered_out(raw: string, finalItems: readonly ExtractedItem[]): number {
-  const allParsed = parseExtractionResponse(raw);
-  return Math.max(0, allParsed.length - finalItems.length);
+export function countFilteredOut(raw: string, finalItems: readonly ExtractedItem[]): number {
+  const parsed = parseExtractionResponseDetailed(raw);
+  return Math.max(0, parsed.items.length + parsed.missingImportanceCount - finalItems.length);
 }

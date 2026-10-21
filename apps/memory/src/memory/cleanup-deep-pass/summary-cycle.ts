@@ -10,15 +10,16 @@
  *
  * 한 사이클 흐름:
  *   1. 후보 — findChunkSummaryCandidates(Task 4): atomic≥임계 · 청크요약 행 아직 없는
- *      document_chunk. groupRelationDiscoveryInput 로 *관계 미발굴* 문서 집합도 구한다.
- *   2-A. infer 가용 → 문서 단위로 한 번씩 통합 LLM 호출(청크요약 + 관계 발굴 두 갈래).
- *        parseSummaryResponse 로 JSON 파싱(실패는 그 문서 건너뜀 + loud warn).
+ *      document_chunk. planSummaryCallsUnderCap 으로 문서별·호출 크기(청크 수·입력 상한)별 묶음 + 묶음별 허용 개념 집합을 구한다.
+ *   2-A. infer 가용 → 묶음마다 한 번씩 통합 LLM 호출(청크요약 + 관계 발굴 두 갈래). 한 묶음은
+ *        한 문서의 청크 일부일 수 있다(후보 LIMIT·요약 없는 청크만·호출당 청크 수 상한).
+ *        parseSummaryResponse 로 JSON 파싱(실패는 그 묶음 건너뜀 + loud warn).
  *        - 청크요약: validateChunkSummary(ID 결정적 매치) 통과분만 generated_by='llm' 저장
  *          + 임베딩. 후보 멱등(청크 행 존재)이 재처리를 막는다.
- *        - 관계요약: 그 문서가 *관계 미발굴*일 때만 처리. validateRelationSummary(from·to
- *          개념 실재 검증) 통과분을 relation_summaries 에 개념 id·source_document_id·
- *          confidence 동반 저장 + 임베딩, gateRelationEdge(confidence 임계) 통과만
- *          addConceptEdge({relation:'llm_relation'}) — concept_edges 에 개념 쌍 엣지.
+ *        - 관계요약: 묶음 개념이 2건 이상일 때만. validateRelationSummary(from·to 가 *그 묶음
+ *          청크에서 나온* 개념인지) 통과분 중 그 문서에 아직 없는 개념 쌍만 relation_summaries 에
+ *          개념 id·source_document_id·confidence 동반 저장 + 임베딩, gateRelationEdge(confidence
+ *          임계) 통과만 addConceptEdge({relation:'llm_relation'}) — concept_edges 에 개념 쌍 엣지.
  *   2-B. infer=null(graceful) → 청크요약은 extractFirstParagraph 첫 문단 fallback 으로
  *        generated_by='first_paragraph_fallback' 저장 + 임베딩. 관계요약·엣지 둘 다 skip
  *        + 사유 로그(관계 발굴은 LLM 없이 불가 — 청크요약 한정 fallback). 자동 관계 0.
@@ -27,12 +28,12 @@
  * graceful: cleanup LLM 미가용(infer=null) → 첫 문단 fallback 만(관계·엣지 skip). 환각·
  * 파싱 실패·LLM throw 는 전부 식별자 담은 loud console.warn(silent 0건 위장 금지).
  *
- * cross-document 관계 멱등 정합(Task 14 개념 발굴 정정): 관계 발굴 입력을 *한 문서*로만
- * 주고, validateRelationSummary 의 allowedConceptIds 를 그 문서의 허용 개념 집합
- * (groupRelationDiscoveryInput 의 group.concepts — cpt_/psn_)으로 한정한다. from·to 가
- * 모두 그 문서 개념이어야 통과하므로 cross-document 관계는 만들어지지 않는다 — Task 12 의
- * 문서 단위 관계 멱등(source_document_id 행 존재)이 정확히 맞아떨어진다. 관계는 글 노드가
- * 아니라 개념끼리(concept_edges) 이어진다.
+ * cross-document 관계 차단(Task 14 개념 발굴 정정): 관계 발굴 입력을 *한 문서의 한 청크 묶음*
+ * 으로만 주고, validateRelationSummary 의 allowedConceptIds 를 그 묶음 청크의 허용 개념 집합
+ * (planSummaryCallsUnderCap 의 group.relationConcepts — cpt_/psn_)으로 한정한다. from·to 가 모두 그
+ * 묶음 개념이어야 통과하므로 cross-document 관계도, 모델이 본 적 없는 청크의 개념끼리 맺는 관계도
+ * 만들어지지 않는다. 관계 발굴 멱등은 청크 묶음 단위다(2026-10-19 — 옛 문서 단위 영구 마감 폐기,
+ * summary-candidate-query.ts 머리 주석). 관계는 글 노드가 아니라 개념끼리(concept_edges) 이어진다.
  */
 
 import type { Database } from "bun:sqlite";
@@ -40,11 +41,14 @@ import type { Embedder } from "../../embedding/types.ts";
 import { EVENT_TYPES, type EventPublisher } from "../events/event-contract.ts";
 import { extractFirstParagraph } from "./first-paragraph.ts";
 import {
+  collectChunkSetConcepts,
   findChunkSummaryCandidates,
-  groupRelationDiscoveryInput,
+  listRelationPairsForDocument,
+  planSummaryCallsUnderCap,
+  relationPairKey,
   type ChunkSummaryCandidate,
-  type DocumentConcept,
-  type RelationDiscoveryGroup,
+  type SummaryCallGroup,
+  type SummaryCallPlan,
 } from "./summary-candidate-query.ts";
 import {
   gateRelationEdge,
@@ -53,12 +57,7 @@ import {
   validateRelationSummary,
   type SummaryInferFn,
 } from "./summary-gates.ts";
-import type { CleanupLlmExecutor } from "./cleanup-llm-executor.ts";
-import {
-  CleanupConfigError,
-  runOutcomeToNonOk,
-  type StageInferResult,
-} from "./stage-execution.ts";
+import { CleanupConfigError } from "./stage-execution.ts";
 import {
   relationDiscoveryFingerprint,
   summaryFingerprint,
@@ -68,10 +67,16 @@ import {
   recordStageDeterministicFailure,
   recordStageRetryable,
   recordStageSuccess,
+  recordStageTerminal,
 } from "./stage-results-ledger.ts";
 import { DEFAULT_RETRY_REAPPEAR_DELAY_MS, nextRetryAt } from "./stage-retry.ts";
-import { CLEANUP_STAGE_TEMPERATURE, cleanupStageLlmLimitsOf } from "./stage-constants.ts";
+import { cleanupStageMaxItemsPerCall } from "./stage-constants.ts";
 import { estimateTextTokens } from "./input-estimate.ts";
+import {
+  renderDocumentForPrompt,
+  summaryCallFixedOverheadTokens,
+  summaryChunkTokens,
+} from "./summary-infer-prompt.ts";
 
 // ── 모듈 상수 (하드코딩 금지 — 한곳에 격리) ──────────────────────────────────
 
@@ -80,6 +85,15 @@ const GENERATED_BY_LLM = "llm";
 
 /** 청크요약 출처 — 첫 문단 fallback(LLM 미가용). */
 const GENERATED_BY_FALLBACK = "first_paragraph_fallback";
+
+/**
+ * 한 호출에 싣는 청크 최대 수 — 출력 한도 맵(stage-constants summary)에서 계산한 값. 첫 호출이
+ * 출력 상한에 닿지 않아 잘림 재호출 여지가 남는 개수다.
+ */
+const SUMMARY_MAX_CHUNKS_PER_CALL = cleanupStageMaxItemsPerCall("summary");
+
+/** 관계 발굴 원장 targetKey 의 문서 id·청크 id 목록 구분자(U+001F — 원장 targetKey 관례). */
+const RELATION_TARGET_KEY_SEPARATOR = String.fromCharCode(0x1f);
 
 /** 관계 발굴 정보성 알림 event type — 자동 적용이라 수락/거절 버튼 0(검토 게이트 아님).
  *  events/event-contract.ts `EVENT_TYPES` 카탈로그를 단일 출처로 따른다(Task 9 정합 — 문자열을 두
@@ -135,6 +149,11 @@ export interface SummaryCycleSummary {
   edgesWithheld: number;
   /** ID 검증(청크 id·관계 from/to 실재)에서 버린 환각 수. */
   rejectedHallucinations: number;
+  /**
+   * ID 검증은 통과했으나 같은 문서에 이미 관계요약이 있는 개념 쌍이라 저장하지 않은 수(앞선
+   * 청크 묶음이 만든 쌍의 중복 — 청크 묶음 단위 관계 멱등의 짝). silent 아님(집계·로그 표기).
+   */
+  relationDuplicatesSkipped: number;
   /** LLM 호출이 throw 하거나 JSON 파싱이 실패해 건너뛴 문서 수. */
   inferFailures: number;
 }
@@ -177,6 +196,12 @@ export interface SummaryCycleDeps {
   stageVersion: number;
   /** 결정적 실패 attempt 상한(reliability.maxAttemptsPerTarget, spec 4.A default 3). T5 전 상수. */
   maxAttemptsPerTarget: number;
+  /**
+   * 호출당 입력 상한(budget.maxEstimatedInputTokensPerCall, spec 4.A-6). 한 묶음 추정 입력이 이 값을
+   * 넘지 않게 청크 단위로 더 작은 호출로 나누고, 청크 하나만으로도 넘으면 그 청크는 호출 없이 원장
+   * terminal(input_over_cap) — 본문을 잘라 보내지 않는다(다른 단계와 같은 방식).
+   */
+  perCallInputCap: number;
   /** 로그 prefix. 기본 "[deep-pass:summary]". */
   logPrefix?: string;
 }
@@ -197,6 +222,7 @@ export async function runSummaryCycle(
     edgesCreated: 0,
     edgesWithheld: 0,
     rejectedHallucinations: 0,
+    relationDuplicatesSkipped: 0,
     inferFailures: 0,
   };
 
@@ -223,11 +249,11 @@ export async function runSummaryCycle(
     return summary;
   }
 
-  // ── 2-A. infer 가용 — 문서 단위 통합 호출 ─────────────────────────────────
+  // ── 2-A. infer 가용 — 호출 묶음 단위 통합 호출 ───────────────────────────
   // 결과 원장 2차 제외(summary stage) — chunk_summaries 존재 멱등(candidate query)에 더해,
   // completed_noop·terminal·재시도 대기 청크를 뺀다(spec 4.A-3 이중 안전벨트). 파싱·구조는
-  // 청크(summary) 대상 기준이라, relation_discovery stage 는 groupRelationDiscoveryInput 의
-  // relation_summaries 존재 멱등이 담당한다. fallback 경로(infer=null)는 이 원장을 안 탄다 —
+  // 청크(summary) 대상 기준이다. relation_discovery 는 그 청크 묶음 호출 안에서 함께 돌아 같은
+  // 청크 멱등을 따른다(같은 문서 기존 쌍 중복은 저장 직전 차단). fallback 경로(infer=null)는 이 원장을 안 탄다 —
   // 실행층을 소비하지 않는 첫 문단 fallback 은 그 자체 chunk_summaries 멱등으로 충분.
   const llmCandidates = filterCandidatesByLedger(
     deps.db,
@@ -243,22 +269,32 @@ export async function runSummaryCycle(
     logCycle(logPrefix, candidates.length, summary);
     return summary;
   }
-  // 후보를 문서별로 묶어 한 문서당 LLM 한 번 부른다(청크요약 + 관계 두 갈래 통합).
-  const byDocument = groupCandidatesByDocument(llmCandidates);
-  // 관계 *미발굴* 문서 묶음(Task 12 문서 단위 관계 멱등 + 허용 개념 집합). 여기 든 문서만
-  // 관계 저장·개념 엣지. documentId → group 으로 인덱싱해 그 문서 개념 집합(group.concepts)을
-  // allowedConceptIds·프롬프트에 쓴다.
-  const relationGroups = groupRelationDiscoveryInput(llmCandidates, deps.db);
-  const relationGroupByDoc = new Map(relationGroups.map((g) => [g.documentId, g]));
+  // 후보를 문서별로 모아 호출 크기(청크 수 상한 + 호출당 입력 상한)씩 자른다 — 묶음 하나당 LLM 한 번
+  // (청크요약 + 관계 두 갈래 통합). 각 묶음은 그 묶음 청크에서 나온 개념만 관계 허용 집합으로 갖는다.
+  const { groups: callGroups, overCap } = planSummaryCallsForCap(
+    llmCandidates,
+    deps.db,
+    deps.perCallInputCap,
+  );
+  // 청크 하나만으로도 호출당 입력 상한 초과 — 본문을 잘라 보내지 않고 호출 없이 terminal.
+  for (const c of overCap) {
+    recordStageTerminal(deps.db, {
+      stage: "summary",
+      targetKey: String(c.chunkId),
+      inputFingerprint: summaryFingerprint({ chunkContent: c.content, atomics: c.atomics }),
+      stageVersion: deps.stageVersion,
+      lastError: `input_over_cap — 청크 하나와 지시문 추정이 호출당 상한(${deps.perCallInputCap}) 초과`,
+    });
+    summary.inferFailures += 1;
+    console.warn(`${logPrefix} 입력 상한 초과 — 청크 ${c.chunkId} terminal(input_over_cap).`);
+  }
 
-  for (const [documentId, chunks] of byDocument) {
+  for (const { documentId, chunks, relationConcepts } of callGroups) {
     // 청크요약 ID 검증 집합 — 청크 노드 id(정수). 관계 발굴 개념 집합과 *분리*(spec §4.6).
     const allowedChunkIds = new Set(chunks.map((c) => c.chunkId));
-    // 이 문서의 관계 발굴 묶음(관계 이미 발굴됐거나 개념 2개 미만이면 undefined → 관계 skip).
-    const relationGroup = relationGroupByDoc.get(documentId);
-    const prompt = renderDocumentForPrompt(documentId, chunks, relationGroup?.concepts ?? []);
+    const prompt = renderDocumentForPrompt(documentId, chunks, relationConcepts ?? []);
 
-    // 이 문서의 원장 대상들(summary stage = 청크마다, relation_discovery = 문서). 실행층
+    // 이 묶음의 원장 대상들(summary stage = 청크마다, relation_discovery = 청크 묶음). 실행층
     // 비-ok 신호가 오면 이 대상 전부에 같은 실패 원장을 남긴다(대상별 재시도·attempt 누적).
     const chunkLedgerKeys = chunks.map((c) => ({
       stage: "summary" as const,
@@ -267,19 +303,19 @@ export async function runSummaryCycle(
       stageVersion: deps.stageVersion,
     }));
     const relationLedgerKey =
-      relationGroup !== undefined
+      relationConcepts !== null
         ? {
             stage: "relation_discovery" as const,
-            targetKey: documentId,
+            targetKey: relationDiscoveryTargetKey(documentId, chunks.map((c) => c.chunkId)),
             inputFingerprint: relationDiscoveryFingerprint({
               chunks: chunks.map((c) => ({ id: c.chunkId, content: c.content })),
-              allowedConceptIds: relationGroup.concepts.map((c) => c.conceptId),
+              allowedConceptIds: relationConcepts.map((c) => c.conceptId),
             }),
             stageVersion: deps.stageVersion,
           }
         : null;
 
-    const inferResult = await deps.infer(prompt);
+    const inferResult = await deps.infer(prompt, chunks.length);
 
     // ── 실행층 비-ok 신호 → 문서 대상 전부에 실패 원장(silent 0건 위장 금지) ────────
     if (inferResult.kind === "config") {
@@ -289,7 +325,7 @@ export async function runSummaryCycle(
     if (inferResult.kind === "budget") {
       // 예산 도달 — 원장 미기록, 남은 문서 이월(다음 사이클 재등장).
       console.log(
-        `${logPrefix} 예산 도달(${inferResult.dimension}: ${inferResult.detail}) — 남은 문서 이월.`,
+        `${logPrefix} 예산 도달(${inferResult.dimension}: ${inferResult.detail}) — 남은 묶음 이월.`,
       );
       break;
     }
@@ -366,18 +402,28 @@ export async function runSummaryCycle(
       recordStageSuccess(deps.db, { ...key, noop: !chunkSummarizedIds.has(chunkId) });
     }
 
-    // ── 관계요약 저장 + 개념 엣지 — *관계 미발굴* 문서만(Task 12 문서 단위 멱등). ──
-    // relationGroup 이 undefined 면 관계 이미 발굴됐거나 개념 2개 미만 — 관계 갈래 skip.
-    if (relationGroup === undefined || relationLedgerKey === null) continue;
+    // ── 관계요약 저장 + 개념 엣지 — 묶음 개념이 2건 이상일 때만. ──
+    // relationConcepts 가 null 이면 이 묶음 청크에서 나온 개념이 2개 미만 — 관계 갈래 skip.
+    if (relationConcepts === null || relationLedgerKey === null) continue;
     let relationCreatedForDoc = 0;
-    // 그 문서 허용 개념 id 집합(cpt_/psn_) — validateRelationSummary 가 from·to 를 이 안에서만
-    // 통과시킨다(환각·cross-document 차단). 청크요약 집합(정수)과 분리(spec §4.6).
-    const allowedConceptIds = new Set(relationGroup.concepts.map((c) => c.conceptId));
+    // 그 묶음 허용 개념 id 집합(cpt_/psn_) — validateRelationSummary 가 from·to 를 이 안에서만
+    // 통과시킨다(환각·cross-document·못 본 청크 개념 차단). 청크요약 집합(정수)과 분리(spec §4.6).
+    const allowedConceptIds = new Set(relationConcepts.map((c) => c.conceptId));
+    // 같은 문서의 앞선 묶음(이전 사이클 포함)이 이미 저장한 개념 쌍 — 이 호출 *전* 상태. 이 호출
+    // 안에서 같은 쌍에 관계가 여럿 나오는 것은 옛 동작대로 허용한다(한 호출이 본 같은 글의 결과).
+    const existingPairs = listRelationPairsForDocument(deps.db, documentId);
     for (const rs of parsed.relationSummaries) {
       if (
         !validateRelationSummary(rs.fromConceptId, rs.toConceptId, allowedConceptIds, logPrefix)
       ) {
         summary.rejectedHallucinations += 1;
+        continue;
+      }
+      if (existingPairs.has(relationPairKey(rs.fromConceptId, rs.toConceptId))) {
+        summary.relationDuplicatesSkipped += 1;
+        console.warn(
+          `${logPrefix} 관계 중복 건너뜀 — 문서 ${JSON.stringify(documentId)} 에 이미 ${rs.fromConceptId}↔${rs.toConceptId} 관계요약이 있음.`,
+        );
         continue;
       }
       // 요약 문장은 항상 저장(confidence·개념 id·source_document_id 동반 — 엣지 보류분도 /
@@ -424,8 +470,8 @@ export async function runSummaryCycle(
       }
     }
 
-    // ── relation_discovery(문서 단위) 원장 기록 — 관계 만들었으면 completed, 정상 회신인데
-    //   관계 0(환각 전건 탈락·빈 배열)이면 completed_noop. 무산출 문서 재과금을 끊는다. ──
+    // ── relation_discovery(청크 묶음 단위) 원장 기록 — 관계 만들었으면 completed, 정상 회신인데
+    //   관계 0(환각·중복 전건 탈락·빈 배열)이면 completed_noop. ──
     recordStageSuccess(deps.db, { ...relationLedgerKey, noop: relationCreatedForDoc === 0 });
   }
 
@@ -443,8 +489,8 @@ export async function runSummaryCycle(
 
 /**
  * dryRun 후보 검출(spec 5.B-1 / DCL-6 실측 도구). runSummaryCycle 의 LLM 경로 후보
- * 프롤로그(findChunkSummaryCandidates → 결과 원장 2차 제외 → 문서 단위 묶기)를 그대로
- * 재사용해, 이번 사이클에 실제로 LLM 을 부를 후보(청크) 수를 세고 문서별 프롬프트
+ * 프롤로그(findChunkSummaryCandidates → 결과 원장 2차 제외 → 호출 묶음 나누기)를 그대로
+ * 재사용해, 이번 사이클에 실제로 LLM 을 부를 후보(청크) 수를 세고 묶음별 프롬프트
  * (renderDocumentForPrompt)의 추정 입력 토큰 합을 낸다. LLM 은 절대 안 부른다.
  *
  * fallback(infer=null) 경로는 실행층을 안 타므로 dryRun 추정 대상이 아니다 — 여기서는
@@ -455,6 +501,8 @@ export function detectSummaryDryRun(deps: {
   atomicThreshold: number;
   batchSize: number;
   stageVersion: number;
+  /** 호출당 입력 상한 — 실제 사이클과 같은 묶음 나누기로 추정한다(상한 초과 청크는 호출 0 이라 뺀다). */
+  perCallInputCap: number;
 }): { candidatesFound: number; estimatedInputTokens: number } {
   const candidates = findChunkSummaryCandidates(
     deps.db,
@@ -480,14 +528,15 @@ export function detectSummaryDryRun(deps: {
   if (llmCandidates.length === 0) {
     return { candidatesFound: 0, estimatedInputTokens: 0 };
   }
-  const byDocument = groupCandidatesByDocument(llmCandidates);
-  const relationGroups = groupRelationDiscoveryInput(llmCandidates, deps.db);
-  const relationGroupByDoc = new Map(relationGroups.map((g) => [g.documentId, g]));
+  const { groups: callGroups } = planSummaryCallsForCap(
+    llmCandidates,
+    deps.db,
+    deps.perCallInputCap,
+  );
   let estimatedInputTokens = 0;
-  for (const [documentId, chunks] of byDocument) {
-    const relationGroup = relationGroupByDoc.get(documentId);
+  for (const { documentId, chunks, relationConcepts } of callGroups) {
     estimatedInputTokens += estimateTextTokens(
-      renderDocumentForPrompt(documentId, chunks, relationGroup?.concepts ?? []),
+      renderDocumentForPrompt(documentId, chunks, relationConcepts ?? []),
     );
   }
   return {
@@ -534,6 +583,24 @@ export function shouldRunSummaryStage(input: SummaryStageGateInput): boolean {
 // ── 내부 helper ──────────────────────────────────────────────────────────────
 
 /**
+ * 사이클·dryRun 이 같이 쓰는 호출 묶음 나누기 — 청크 수 상한(출력 한도) + 호출당 입력 상한. 청크 몫은
+ * 그 청크 블록 + 그 청크에서 닿는 개념 줄로 잰다(묶음 개념 목록은 청크별 개념의 합집합이라 이 합을
+ * 넘지 않는다). 개념 조회는 청크마다 한 번 더 들지만, 상한 판정이 실제 본문보다 작게 나오지 않게 한다.
+ */
+function planSummaryCallsForCap(
+  candidates: readonly ChunkSummaryCandidate[],
+  db: Database,
+  perCallInputCap: number,
+): SummaryCallPlan {
+  return planSummaryCallsUnderCap(candidates, db, {
+    maxChunksPerCall: SUMMARY_MAX_CHUNKS_PER_CALL,
+    perCallInputCap,
+    fixedOverheadTokens: summaryCallFixedOverheadTokens,
+    chunkTokens: (c) => summaryChunkTokens(c, collectChunkSetConcepts(db, [c.chunkId])),
+  });
+}
+
+/**
  * 첫 문단 fallback 청크요약 한 건을 저장한다(LLM 미가용 graceful). 첫 문단이 비어 있으면
  * (공백뿐 청크) 정직하게 건너뛴다 — 가짜 빈 문자열 요약을 만들지 않는다([[graceful-
  * degradation-principle-2026-05-22]]). 저장 시 generated_by='first_paragraph_fallback'.
@@ -557,21 +624,15 @@ async function saveFallbackChunkSummary(
 }
 
 /**
- * 후보 청크들을 부모 문서(parentId) 별로 묶는다 — 첫 등장 문서 순서 보존(Map insertion
- * order). 한 문서 = LLM 한 호출 단위(청크요약 + 관계 발굴 통합). 관계 멱등 필터(미발굴
- * 문서)는 별도 groupRelationDiscoveryInput 가 판정하므로 여기서는 *전체* 후보를 묶는다 —
- * 관계 이미 발굴된 문서라도 새 청크요약 후보가 있으면 청크요약은 만들어야 한다.
+ * 관계 발굴 원장 targetKey — 문서 id + 그 호출 청크 id 목록(오름차순). 관계 발굴 멱등이 청크 묶음
+ * 단위라 원장 행도 묶음마다 하나다(옛 문서 id 단독 키는 같은 문서의 묶음끼리 덮어썼다).
  */
-function groupCandidatesByDocument(
-  candidates: ChunkSummaryCandidate[],
-): Map<string, ChunkSummaryCandidate[]> {
-  const byDocument = new Map<string, ChunkSummaryCandidate[]>();
-  for (const c of candidates) {
-    const bucket = byDocument.get(c.parentId);
-    if (bucket) bucket.push(c);
-    else byDocument.set(c.parentId, [c]);
-  }
-  return byDocument;
+export function relationDiscoveryTargetKey(
+  documentId: string,
+  chunkIds: readonly number[],
+): string {
+  const ids = [...chunkIds].sort((a, b) => a - b);
+  return `${documentId}${RELATION_TARGET_KEY_SEPARATOR}${ids.join(",")}`;
 }
 
 /** 사이클 결과를 한 줄 로그(0 산출이면 침묵 — 잡음 줄임). */
@@ -584,119 +645,22 @@ function logCycle(
     s.chunkSummariesCreated > 0 ||
     s.relationSummariesCreated > 0 ||
     s.rejectedHallucinations > 0 ||
+    s.relationDuplicatesSkipped > 0 ||
     s.inferFailures > 0
   ) {
-    // 엣지 보류(관계 자동 반영 OFF)는 있을 때만 덧붙여 표기(정직한 게이트 표시).
+    // 엣지 보류(관계 자동 반영 OFF)·관계 중복은 있을 때만 덧붙여 표기(정직한 게이트 표시).
     const withheld = s.edgesWithheld > 0 ? `, 엣지보류 ${s.edgesWithheld}` : "";
+    const duplicates =
+      s.relationDuplicatesSkipped > 0 ? `, 관계중복 ${s.relationDuplicatesSkipped}` : "";
     console.log(
-      `${logPrefix} cycle: 후보 ${candidatesFound} → 청크요약 +${s.chunkSummariesCreated}, 관계요약 +${s.relationSummariesCreated}, 엣지 +${s.edgesCreated}${withheld}, 환각버림 ${s.rejectedHallucinations}, LLM실패 ${s.inferFailures}`,
+      `${logPrefix} cycle: 후보 ${candidatesFound} → 청크요약 +${s.chunkSummariesCreated}, 관계요약 +${s.relationSummariesCreated}, 엣지 +${s.edgesCreated}${withheld}${duplicates}, 환각버림 ${s.rejectedHallucinations}, LLM실패 ${s.inferFailures}`,
     );
   }
 }
 
-// ── 통합 LLM 호출 프롬프트 + infer fn(Task 7 wiring 이 활용) ──────────────────
+// ── 통합 LLM 호출 프롬프트 + infer fn — summary-infer-prompt.ts 로 옮겼다. 배선(run-cycle-runner)·
+//    테스트가 이 모듈에서 가져가던 이름은 그대로 다시 내보낸다. ──
+export { buildSummaryRunRequest, createSummaryInferFn } from "./summary-infer-prompt.ts";
 
-/**
- * LLM 출력 한도(정상 호출·잘림 재호출)·온도 — stage-constants.ts CLEANUP_STAGE_LLM_LIMITS
- * summary 항목이 단일 출처(spec 5.B-3, DCL-2 — 설정 승격 0).
- */
-const SUMMARY_STAGE_LIMITS = cleanupStageLlmLimitsOf("summary");
-const INFER_TEMPERATURE = CLEANUP_STAGE_TEMPERATURE;
-const INFER_MAX_OUTPUT_TOKENS = SUMMARY_STAGE_LIMITS.maxOutputTokens;
-const INFER_MAX_OUTPUT_TOKENS_CAP = SUMMARY_STAGE_LIMITS.maxOutputTokensCap;
-
-/**
- * 요약 단계 통합 LLM 프롬프트(한국어 보수형). 사용자가 ollama 에서 직접 시도하는 짧은
- * 한국어 톤([[user-feedback-llm-prompt-style]]) — 영어 장황한 RULE 톤 회피. spec §3.2·§4.5
- * 정합. 한 호출에 청크요약 + 관계 발굴 두 갈래를 함께 요청한다.
- *
- * 핵심 제약(환각·cross-document 차단):
- *   - 청크요약: 각 청크 핵심을 한 문장으로. 없는 내용 지어내지 마라. 확실하지 않으면 원문 짧게.
- *     chunk_id 는 *청크 목록의 node id*(정수)에서 고른다.
- *   - 관계 발굴: *개념 목록의 개념 id 끼리만* 관계를 만든다(다른 문서·새 id 지어내기 금지).
- *     from_concept_id·to_concept_id 둘 다 개념 목록 id 여야 ID 검증을 통과한다. 청크 노드
- *     id 가 아니라 개념 id(cpt_/psn_)에서 고른다 — 두 목록은 서로 다른 집합이다(spec §4.6).
- *   - 관계 이름은 무슨 관계인지(라이벌·소속·인과·대립 등) 구체적으로. "관련" 같은 빈 이름 금지.
- *   - 애매하면 빈 배열. 확실한 것만.
- */
-const INFER_SYSTEM_PROMPT = [
-  "너는 한 문서의 청크(조각) 묶음을 읽고 두 가지를 한 번에 만든다.",
-  "(1) 각 청크의 핵심을 한 문장으로 줄인 청크요약,",
-  "(2) 아래 개념 목록의 개념 쌍 사이의 이름 있는 관계를 찾아낸 관계요약.",
-  "",
-  "규칙:",
-  "- 청크요약은 그 청크에 실제로 있는 내용만 한 문장으로. 없는 내용 지어내지 마라.",
-  "- chunk_id 는 청크 목록의 node id(정수)에서 고른다.",
-  "- 관계는 아래 개념 목록에 있는 개념 id 끼리만 만든다. 목록에 없는 id 를 지어내지 마라.",
-  "- from_concept_id 와 to_concept_id 는 둘 다 개념 목록 id(cpt_/psn_ 로 시작)여야 한다.",
-  "  청크 node id(정수)가 아니라 개념 id 에서 고른다. 같은 개념끼리(자기 관계) 금지.",
-  "- 관계 이름은 무슨 관계인지 구체적으로(라이벌·소속·인과·대립 등). '관련' 같은 빈 이름 금지.",
-  "- confidence 는 0~1. 확실한 만큼만. 애매하면 관계를 만들지 마라.",
-  "",
-  '회신은 JSON 객체만. 양식: {"chunkSummaries":[{"chunk_id":숫자,"summary_text":"한 문장","confidence":0~1}],"relationSummaries":[{"from_concept_id":"개념 id","to_concept_id":"개념 id","relation_name":"관계 이름","summary_text":"관계 한 문장","confidence":0~1}]}.',
-  "관계가 없으면 relationSummaries 는 빈 배열 [] 로 둔다.",
-].join("\n");
-
-/**
- * 한 문서의 청크 묶음 + 허용 개념 목록을 통합 프롬프트 본문으로 렌더. 청크는 node id·원문·
- * atomic 닻을, 개념은 id(cpt_/psn_)·이름을 표시한다 — LLM 이 청크요약 chunk_id 는 청크 node
- * id 에서, 관계 from/to 는 *개념 id 집합에서만* 고르게(ID 검증 통과 가능) + atomic 으로 "이
- * 청크가 의미가 이만큼 쪼개졌다" 는 발굴 근거를 준다(Task 4·12 가 닻·개념을 후보에 단다).
- *
- * concepts 가 빈 배열이면(관계 이미 발굴됐거나 개념 2개 미만) 개념 목록 단락을 "(없음)" 으로
- * 둔다 — 그 문서는 관계 갈래가 글루에서 어차피 skip 되므로 LLM 이 관계를 내도 버려진다.
- */
-function renderDocumentForPrompt(
-  documentId: string,
-  chunks: ChunkSummaryCandidate[],
-  concepts: DocumentConcept[],
-): string {
-  const chunkLines = chunks.map((c) => {
-    const atomicLines =
-      c.atomics.length > 0
-        ? c.atomics.map((a) => `    - ${a}`).join("\n")
-        : "    (없음)";
-    return [`node ${c.chunkId}: "${c.content}"`, "  이 청크에서 추출된 의미:", atomicLines].join(
-      "\n",
-    );
-  });
-  const conceptLines =
-    concepts.length > 0
-      ? concepts.map((cpt) => `- ${cpt.conceptId}: ${cpt.name}`)
-      : ["(없음)"];
-  return [
-    `문서 ${documentId} 의 청크 묶음:`,
-    ...chunkLines,
-    "",
-    "이 문서의 개념 목록(관계는 이 개념 id 끼리만 만든다):",
-    ...conceptLines,
-  ].join("\n");
-}
-
-/**
- * CleanupLlmExecutor 를 받아 SummaryInferFn 을 만든다. cleanup 슬롯 LLM(강한 모델)은 실행층
- * 안에 있고(Task 4 배선), 이 함수는 프롬프트만 조립해 executor.run() 에 넘긴다 — 재시도·
- * 잘림 재호출·usage 누적·예산은 실행층이 맡는다. 출력은 StageInferResult<string> — ok.parsed
- * 가 raw 응답 문자열(파싱·환각 차단은 글루가 parseSummaryResponse 등으로 이어서 한다).
- *
- * 비-ok 신호(transient/deterministic/config/budget)는 실행층 신호를 그대로 실어, 글루가
- * 문서 대상 전부에 원장 상태를 가른다(옛 throw 계약 폐기 — 실패를 결과 값으로 실음).
- */
-export function createSummaryInferFn(executor: CleanupLlmExecutor): SummaryInferFn {
-  return async (prompt: string): Promise<StageInferResult<string>> => {
-    const outcome = await executor.run({
-      messages: [
-        { role: "system", content: INFER_SYSTEM_PROMPT },
-        { role: "user", content: prompt },
-      ],
-      maxOutputTokens: INFER_MAX_OUTPUT_TOKENS,
-      maxOutputTokensCap: INFER_MAX_OUTPUT_TOKENS_CAP,
-      temperature: INFER_TEMPERATURE,
-    });
-    if (outcome.kind !== "ok") return runOutcomeToNonOk<string>(outcome);
-    return { kind: "ok", parsed: outcome.text };
-  };
-}
-
-// RelationDiscoveryGroup 타입은 groupRelationDiscoveryInput 회신 — 명시 import 로 묶음.
-export type { RelationDiscoveryGroup };
+// SummaryCallGroup 타입은 planSummaryCalls 회신 — 명시 import 로 묶음.
+export type { SummaryCallGroup };

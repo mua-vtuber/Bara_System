@@ -184,6 +184,19 @@ test("읽기 전용 연결의 tools/list — 쓰기 도구는 목록에 아예 �
   }
 });
 
+test("읽기 전용 연결의 cleanup_list_candidates 문안 — 없는 제출 도구를 권하지 않는다", async () => {
+  const token = tokenStore.issueToken("reader-cleanup-desc", undefined, undefined, "read-only");
+  const client = new Client({ name: "reader-cleanup-desc", version: "1.0.0" });
+  await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`), {
+    requestInit: { headers: { authorization: `Bearer ${token}` } },
+  }));
+  clients.push(client);
+  const tool = (await client.listTools()).tools.find((t) => t.name === "cleanup_list_candidates");
+  expect(tool?.description).toContain("read-only");
+  expect(tool?.description).not.toContain("cleanup_submit_proposal");
+  expect(tool?.description).not.toContain("payload");
+});
+
 test("읽기 전용 연결의 instructions — 쓰기 절 대신 읽기 전용 안내(WP-B1-16 / SA-5)", async () => {
   const token = tokenStore.issueToken("reader-instructions", undefined, undefined, "read-only");
   const client = new Client({ name: "reader-instructions", version: "1.0.0" });

@@ -34,7 +34,7 @@ import { messageSourceInputProblem } from "../memory/node-sources/source-ref.ts"
 import { DuplicateMemoryError } from "../server-internal/write-guard/duplicate-check.ts";
 import { notifyMemoSaved } from "../server-internal/memo-saved-cleanup.ts";
 import { EVENT_TYPES } from "../server-internal/event-bus.ts";
-import type { MemoryType } from "../memory/types.ts";
+import { MEMORY_TYPES, POLARITIES, type MemoryType } from "../memory/types.ts";
 import { TOOL_DESCRIPTIONS } from "./descriptions.ts";
 import { TOOL_ANNOTATIONS } from "./annotations.ts";
 import {
@@ -45,31 +45,35 @@ import {
   type McpToolContext,
 } from "./server.ts";
 
-const MEMORY_TYPE_ENUM = z.enum(["fact", "preference", "triple", "insight", "episode"]);
+/** 허용값은 memory/types.ts 의 단일 출처(MEMORY_TYPES·POLARITIES)를 그대로 쓴다. */
+const MEMORY_TYPE_ENUM = z.enum(MEMORY_TYPES);
+const POLARITY_ENUM = z.enum(POLARITIES);
 
 /**
  * spec 5.1 칸 목록 그대로 — 전부 선택, memoryType 은 camelCase 한 칸만(별칭 이중 칸 금지).
- * 통과형 스키마(spec 5.1 D-5): 범위·enum 제약을 MCP 층에서 걸지 않는다 — 무효 값
- * (limit 0·polarity 오타·memoryType 미지원 등)은 runSearchPipeline 의 REST 공유 방어
- * 파싱이 조용히 미적용한다. query 검증(비어 있음·비문자열)도 SearchInputError 경유로
- * REST 와 같은 400 문구가 toolError 로 회신된다 — description 문안("invalid values are
- * ignored the same way the REST API ignores them")과 이 스키마는 한 몸이다.
+ * polarity·memoryType 은 허용값 enum 으로 호출 시점에 거른다(오타가 조용히 필터 미적용이
+ * 되면 AI 가 필터가 걸린 줄 안다). kind·since·until·filter 등 나머지 칸은 runSearchPipeline
+ * 의 REST 공유 방어 파싱이 적용 불가 값을 조용히 미적용하므로, 실제 적용 결과는 회신의
+ * appliedFilters 로 확인하게 describe 에 적는다. query 검증(비어 있음·비문자열)은
+ * SearchInputError 경유로 REST 와 같은 400 문구가 toolError 로 회신된다.
+ * 칸 .describe() 문구는 tools/list 의 inputSchema 에 그대로 실린다(server.test.ts 가 감시).
+ * 칸 하나에만 해당하는 안내는 여기 두고, descriptions.ts 도구 문안에 되풀이하지 않는다.
  */
 const SEARCH_MEMORY_SHAPE = {
   query: z.string(),
   limit: z.number().optional(),
-  contextBudget: z.number().optional(),
+  contextBudget: z.number().optional().describe("> 0 adds an assembled context block; ignored when responseMode is index."),
   project: z.string().optional(),
   scope: memoryReadScopeSchema.optional(),
   includeInactive: z.boolean().optional(),
-  polarity: z.string().optional(),
+  polarity: POLARITY_ENUM.optional().describe("Keep only memories with this polarity."),
   filter: z.record(z.string(), z.string()).optional(),
-  since: z.string().optional(),
-  until: z.string().optional(),
+  since: z.string().optional().describe("YYYY-MM-DD. Used only together with a valid until; otherwise dropped (see appliedFilters.dateRange)."),
+  until: z.string().optional().describe("YYYY-MM-DD. Used only together with a valid since; otherwise dropped (see appliedFilters.dateRange)."),
   place: z.string().optional(),
   withSummaries: z.boolean().optional(),
-  memoryType: z.string().optional(),
-  kind: z.string().optional(),
+  memoryType: MEMORY_TYPE_ENUM.optional().describe("Keep only this memory type."),
+  kind: z.string().optional().describe("Entity kind name to restrict results to (free text; see appliedFilters.kind)."),
   fieldFilters: z.array(z.object({ key: z.string(), value: z.string() })).optional(),
   imageSearch: z.boolean().optional(),
   relaxFilters: z.boolean().optional(),
@@ -126,7 +130,7 @@ export function registerMemoryTools(server: McpServer, ctx: McpToolContext): voi
         return toolJson(response);
       } catch (e) {
         if (e instanceof SearchInputError) return toolError("INVALID_INPUT", e.message);
-        return toolError("INTERNAL", `검색 실패: ${e instanceof Error ? e.message : String(e)}`);
+        return toolError("INTERNAL", `Search failed: ${e instanceof Error ? e.message : String(e)}`);
       }
     },
   );
@@ -261,7 +265,7 @@ export function registerMemoryTools(server: McpServer, ctx: McpToolContext): voi
         evidence: memoryEvidenceSchema.optional(),
         // T16(결정 D-A) — 유사-중복 차단 우회. 호출 AI 가 DUPLICATE 회신을 받고도
         // "따로 남길 기억이 맞다"고 판단했을 때만 켠다.
-        force: z.boolean().optional(),
+        force: z.boolean().optional().describe("true only to override a DUPLICATE refusal for a genuinely distinct memory."),
       },
     },
     async (args) => {
@@ -320,7 +324,7 @@ export function registerMemoryTools(server: McpServer, ctx: McpToolContext): voi
           });
         }
         if (saved.originNodeId === null) {
-          return toolError("INTERNAL", "메모리 저장 실패: origin node id 누락");
+          return toolError("INTERNAL", "Memory save failed: origin node id missing");
         }
         // memories-crud.ts:259 와 같은 조건·같은 이벤트(review Fix 1) — 저장 성공
         // 시점에서만 발행(에러 응답 경로는 여기 못 온다). eventBus 미주입이면 no-op.

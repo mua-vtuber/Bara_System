@@ -45,6 +45,7 @@ import {
   nextRetryAt,
 } from "./stage-retry.ts";
 import { splitIntoMicrobatches } from "./input-estimate.ts";
+import { cleanupStageMaxItemsPerCall } from "./stage-constants.ts";
 import type {
   LensApplyView,
   LensDraftValues,
@@ -67,6 +68,9 @@ import {
 
 export { LENS_DRAFT_KIND } from "./lens-draft-candidate-query.ts";
 export const CLEANUP_PROPOSALS_READY_EVENT = "cleanup_proposals_ready";
+
+/** 한 호출에 싣는 엔티티 최대 수 — 출력 한도 맵(stage-constants lens_draft)에서 계산한 값. */
+const LENS_DRAFT_MAX_ENTITIES_PER_CALL = cleanupStageMaxItemsPerCall("lens_draft");
 
 /** LLM 에 넘길 한 후보의 입력 컨텍스트(엔티티 + 렌즈 + 근거 원문). */
 export interface LensDraftEntityContext {
@@ -129,6 +133,8 @@ export interface LensDraftInferCycleSummary {
   completedNoop: number;
   /** 커버리지 미달 엔티티 수(입력에 실었는데 응답에 결정 없음 — 원장 미기록). */
   coverageMisses: number;
+  /** AI 가 지시를 어기고 relations·metadata 를 채워 와 그 두 칸만 버린 초안 수. */
+  droppedRelationsMetadata: number;
 }
 
 export async function runLensDraftCycle(
@@ -143,6 +149,7 @@ export async function runLensDraftCycle(
     completed: 0,
     completedNoop: 0,
     coverageMisses: 0,
+    droppedRelationsMetadata: 0,
   };
 
   if (deps.infer === null) {
@@ -200,11 +207,14 @@ export async function runLensDraftCycle(
   // ── 토큰 인지 microbatch(spec 4.A-6) — 엔티티를 고정 개수가 아니라 추정 입력 토큰 합이
   //   호출당 상한 안에 들도록 묶는다. 공유 오버헤드 = system 프롬프트. 엔티티별 비용 =
   //   렌즈 계약 + 근거 원문. 엔티티 하나 + 오버헤드로도 상한을 넘으면 호출 없이 terminal.
+  //   출력 한도는 엔티티 수에 비례하므로(stage-constants lens_draft) 한 호출 엔티티 수도
+  //   첫 호출이 출력 상한에 닿지 않는 개수(cleanupStageMaxItemsPerCall)로 자른다.
   const fixedOverhead = lensDraftFixedOverheadTokens();
   const { batches, oversized } = splitIntoMicrobatches(contexts, {
     fixedOverheadTokens: fixedOverhead,
     perCallCap: deps.perCallInputCap,
     tokensOf: (ctx) => estimateLensDraftCandidateTokens(ctx),
+    maxItemsPerBatch: LENS_DRAFT_MAX_ENTITIES_PER_CALL,
   });
   for (const ctx of oversized) {
     const key = ledgerKeyByEntity.get(ctx.entityId)!;
@@ -278,6 +288,11 @@ export async function runLensDraftCycle(
   if (summary.coverageMisses > 0) {
     console.warn(
       `${logPrefix} 커버리지 미달 ${summary.coverageMisses}건 — 응답에 결정 없는 엔티티는 완료 처리 안 함(다음 배치 후보 잔존).`,
+    );
+  }
+  if (summary.droppedRelationsMetadata > 0) {
+    console.warn(
+      `${logPrefix} 관계·부가정보 무시 ${summary.droppedRelationsMetadata}건 — 렌즈 초안은 관계·부가정보를 채우지 않아 그 두 칸만 버리고 나머지 칸은 그대로 썼습니다.`,
     );
   }
   if (summary.rejectedInvalid > 0) {

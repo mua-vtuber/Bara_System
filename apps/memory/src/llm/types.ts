@@ -56,11 +56,15 @@ export interface LlmChatOptions {
   signal?: AbortSignal;
 
   /**
-   * Ollama think 토글. false 면 모델 추론(thinking)을 제거한다.
-   * 미지정 시 송신 안 함 = 모델 기본 동작 (qwen instruct 계열은 추론 없음).
+   * 생각(thinking) 토글. false 면 공급자·모델이 끄는 방법을 지원할 때만 생각을 끄라고 보낸다.
+   * 미지정 시 아무것도 보내지 않는다 = 모델 기본 동작.
    *
-   * Ollama 전용 칸 — Anthropic 어댑터는 think 개념이 없어 무시한다.
-   * temperature·maxOutputTokens 와 같은 옵션 전달 패턴 (정의 시에만 body 송신).
+   *   - Ollama: body.think 로 그대로 보낸다(true/false).
+   *   - Anthropic: false 일 때만, anthropic-model-capabilities.ts 의 표에 끄는 방법이 있는 모델에
+   *     그 칸을 넣는다. 끌 수 없는 모델(생각이 항상 켜진 모델)·원래 꺼진 모델은 칸을 넣지 않는다.
+   *     true 는 무시한다(켜는 쪽 설정은 아직 쓰는 곳이 없다).
+   *   - Gemini·OpenAI·OpenAI 호환: 무시한다 — 모델마다 끄는 칸과 거절 규칙이 달라 확인된
+   *     규칙이 없다(보내면 거절하는 모델이 있다).
    */
   think?: boolean;
 }

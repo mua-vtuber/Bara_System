@@ -142,6 +142,32 @@ test("splitIntoMicrobatches — 단독으로도 상한 초과인 원소는 overs
   expect(batches).toEqual([[{ t: 3 }, { t: 3 }]]);
 });
 
+test("splitIntoMicrobatches — maxItemsPerBatch 를 주면 입력 상한 안이어도 원소 수 상한에서 그룹을 닫는다", () => {
+  // 입력 상한은 넉넉(100)하지만 원소 수 상한 2 → [1,2] [3,4] [5].
+  const items = [1, 2, 3, 4, 5].map((id) => ({ id, t: 1 }));
+  const { batches, oversized } = splitIntoMicrobatches(items, {
+    fixedOverheadTokens: 0,
+    perCallCap: 100,
+    tokensOf: (i) => i.t,
+    maxItemsPerBatch: 2,
+  });
+  expect(oversized).toEqual([]);
+  expect(batches.map((b) => b.map((i) => i.id))).toEqual([[1, 2], [3, 4], [5]]);
+});
+
+test("splitIntoMicrobatches — maxItemsPerBatch 가 1 이상 정수가 아니면 던진다", () => {
+  for (const bad of [0, -1, 1.5]) {
+    expect(() =>
+      splitIntoMicrobatches([{ t: 1 }], {
+        fixedOverheadTokens: 0,
+        perCallCap: 10,
+        tokensOf: (i) => i.t,
+        maxItemsPerBatch: bad,
+      }),
+    ).toThrow(/원소 수 상한/);
+  }
+});
+
 test("splitIntoMicrobatches — 빈 입력이면 그룹·oversized 둘 다 빈 목록", () => {
   const { batches, oversized } = splitIntoMicrobatches([], {
     fixedOverheadTokens: 2,

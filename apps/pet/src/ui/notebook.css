@@ -210,15 +210,16 @@
 .notebook-settings .backup-settings > .stack-actions .button { flex: 1; padding: 8px 7px; font-size: 12px; white-space: nowrap; }
 .notebook-settings .backup-settings > .stack-actions .primary { background: #ffffff28; color: var(--ink); border-color: #ada79b; }
 .notebook-settings .backup-help > summary { color: var(--muted); font-size: 12px; cursor: pointer; }
-.notebook-settings .license-heading { margin: 12px 0 4px; font-size: 14px; line-height: 1.5; }
+.notebook-settings .license-settings { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin-bottom: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.license-dialog .license-heading { margin: 12px 0 4px; font-size: 14px; line-height: 1.5; }
 /* Long license texts scroll inside their own box (focusable, so the keyboard scrolls it) and stay selectable. */
-.notebook-settings .license-text {
+.license-dialog .license-text {
   max-height: 220px; overflow: auto; margin: 6px 0 4px; padding: 8px 10px;
   border: 1px solid var(--line); border-radius: 6px; background: var(--paper-tint); color: var(--ink);
   font-family: Consolas, monospace; font-size: 11px; line-height: 1.5;
   white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; cursor: text;
 }
-.notebook-settings .license-text:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+.license-dialog .license-text:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
 .notebook-status {
   flex: none; min-width: 0; max-height: 64px; overflow: auto;
   margin-top: 6px; padding: 6px 0; font-size: 11px; line-height: 1.5; color: var(--muted);

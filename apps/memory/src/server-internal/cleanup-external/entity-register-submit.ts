@@ -29,10 +29,15 @@ export async function submitEntityRegisterExternal(
   args: { payload: unknown; candidate: ExternalCandidateRef; contract: ExternalStageContract; stage: ExternalCandidateStage },
 ): Promise<SubmitProposalOutcome> {
   const nodeId = Number(args.candidate.targetKey);
-  const p = args.payload as Record<string, unknown> | null;
-  if (!p || typeof p !== "object" || p.nodeId !== nodeId) {
+  const raw = args.payload as Record<string, unknown> | null;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: false, httpStatus: 400, message: "entity_register payload 가 객체가 아님" };
+  }
+  // 서버 지시문은 AI 에게 nodeId 칸 없이 답하라고 하므로, 없으면 후보 열쇠로 채운다. 있는데 다르면 거부한다.
+  if (raw.nodeId !== undefined && raw.nodeId !== nodeId) {
     return { ok: false, httpStatus: 400, message: `payload.nodeId 가 candidate.targetKey(${args.candidate.targetKey})와 다름` };
   }
+  const p = { ...raw, nodeId };
   let result: EntityRegisterAiResult;
   try {
     result = parseEntityRegisterSingle(p, nodeId);

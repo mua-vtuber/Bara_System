@@ -229,10 +229,22 @@ export function formatMemoryLine(
   // fence guard existed (store-path sanitize covers new saves; this covers
   // legacy data). Zero-match pass for the overwhelming majority of content
   // that never contained a literal fence tag.
-  const safeContent = sanitizeFenceBreakout(node.content);
+  // 줄바꿈 뒤 줄은 들여 쓴다(indentContinuationLines) — 본문 안 줄바꿈이 줄 맨 앞에서 시작하는
+  // 가짜 "- [#id …]" 기억 줄이나 "출처:" 줄을 만들지 못하게 한다. 여러 줄 메모는 읽기 그대로 남는다.
+  const safeContent = indentContinuationLines(sanitizeFenceBreakout(node.content));
   const prefix = `- ${marker}${sourceTag} ${safeContent}`;
 
   return tags.length === 0 ? prefix : `${prefix} ${tags.join(" ")}`;
+}
+
+/** 기억 본문의 둘째 줄부터 붙이는 들여쓰기 — 기억 줄("- [#")·출처 줄은 줄 맨 앞에서만 시작한다. */
+export const MEMORY_CONTINUATION_INDENT = "  ";
+
+/** 줄바꿈(\r\n·\r·\n·U+2028·U+2029)을 "\n + 들여쓰기"로 바꾼다. 본문은 데이터일 뿐 새 줄 구조를 못 만든다. */
+const LINE_BREAK_PATTERN = /\r\n|[\r\n\u2028\u2029]/g;
+
+function indentContinuationLines(content: string): string {
+  return content.replace(LINE_BREAK_PATTERN, `\n${MEMORY_CONTINUATION_INDENT}`);
 }
 
 /** Format the Source List trailer line, e.g. "출처: #482 #517 #603". */

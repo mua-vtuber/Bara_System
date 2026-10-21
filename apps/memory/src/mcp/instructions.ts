@@ -63,7 +63,7 @@ const READ_ONLY_NOTICE = `This connection is read-only: no memory can be written
 
 /** 모든 scope 가 공유하는 뒷부분 — get_profile·FORBIDDEN 안내. */
 const SHARED_SUFFIX = `HOW THIS USER WORKS
-Use get_profile for working preferences, including directives and anti_preferences. Default is global; specify project scope for project exceptions. Token counts are estimates. FORBIDDEN means this client's token lacks permission, not a reason to bypass it through REST.`;
+Use get_profile for working preferences, including directives and anti_preferences. Default is global; specify project scope for project exceptions. FORBIDDEN means this client's token lacks permission, not a reason to bypass it through REST.`;
 
 /** 쓰기 가능 scope 의 기존 문안 — server.test.ts 가 이 상수를 그대로 참조한다(하위 호환). */
 export const MCP_INSTRUCTIONS = [SHARED_PREFIX, WRITE_CAPABLE_SECTIONS, SHARED_SUFFIX].join("\n\n");

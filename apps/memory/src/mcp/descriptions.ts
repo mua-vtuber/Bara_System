@@ -16,22 +16,21 @@
  */
 export const TOOL_DESCRIPTIONS = {
   update_memory:
-    "Correct an existing text memory when the user changes its wording. Read it first: expectedRevision must match sharedMemory.revision. Supply a unique requestId and reuse it only for an identical retry. Existing hashtags are preserved; pass body text without hashtags. CONFLICT returns the current revision: reread before deciding. Derived memories are invalidated. Use supersede_memory for a changed fact and retract_memory to withdraw it. A disputed memory is a conflict candidate: confirm with the user, then adopt it with supersede_memory or discard it with retract_memory.",
+    "Correct an existing text memory when the user changes its wording. Read it first: expectedRevision must match sharedMemory.revision. Supply a unique requestId (retry and conflict rules: see CORRECTING in the server instructions). Existing hashtags are preserved; pass body text without hashtags. CONFLICT returns the current revision. Derived memories are invalidated. Use supersede_memory for a changed fact and retract_memory to withdraw it.",
   supersede_memory:
-    "Record an explicit change of fact, not mere similarity. Save the replacement first, then provide its replacementId and the old memory id, expectedRevision and requestId. Both must be in the same project. The old memory becomes superseded and is excluded from ordinary recall; its history remains available. A disputed replacement is accepted only as a conflict candidate of the old memory; after the user confirms it, this one call makes it active. Check the response's openConflicts for others still unresolved. CONFLICT requires rereading. Use update_memory for wording corrections.",
+    "Record an explicit change of fact, not mere similarity. Save the replacement first, then provide its replacementId and the old memory id, expectedRevision and requestId. Both must be in the same project. The old memory becomes superseded and is excluded from ordinary recall; its history remains available. A disputed replacement is accepted only as a conflict candidate of the old memory; after the user confirms it, this one call makes it active. Check the response's openConflicts for others still unresolved. Use update_memory for wording corrections.",
   retract_memory:
-    "Withdraw a memory the user says is wrong or should no longer be used. Provide id, expectedRevision and a unique requestId. Retraction excludes the memory and invalidates dependent derived memories without permanently deleting history or backups. Reuse requestId only for an identical retry. Read get_memory first; do not retract merely because a search missed it.",
+    "Withdraw a memory the user says is wrong or should no longer be used. Provide id, expectedRevision and a unique requestId. Retraction excludes the memory and invalidates dependent derived memories without permanently deleting history or backups. Do not retract merely because a search missed it.",
   recall_context:
     "At session start or before work on a project, retrieve current preferences plus relevant memories within an estimated token budget. Default scope is global; a project scope includes global preferences unless includeGlobal is false. query is optional. The returned context identifies sources and inference status. Missing information is not evidence; report uncertainty. Use get_memory to inspect individual sources, including their history state.",
   search_memory:
-    "You have no memory of previous sessions with this user; their decisions are " +
-    "invisible unless you search. Search before starting substantive work, or " +
+    "You have no memory of previous sessions with this user. Search before " +
+    "starting substantive work, or " +
     "whenever a request resembles something already settled. Skip it and you will " +
-    "contradict decisions the user already made. Not for codebase or " +
-    "file-structure questions — use your code search tools — nor for information " +
-    "already present in this conversation. Only `query` is required; invalid " +
-    "values are ignored the same way the REST API ignores them. Set " +
-    "`contextBudget` > 0 to also receive an assembled context block.",
+    "contradict decisions the user already made. When not to search: see DO NOT " +
+    "SEARCH in the server instructions. Only `query` is required. A filter that " +
+    "cannot be applied is dropped without error: check `appliedFilters` in the " +
+    "response.",
   get_memory:
     "Search results and context blocks cite memories by id but carry only an " +
     "excerpt, so the full stored content and its metadata are not in front of you. " +
@@ -53,8 +52,7 @@ export const TOOL_DESCRIPTIONS = {
     "use it for user preferences: call save_preference; for decisions, ideas, or " +
     "open questions the typed save_* tools route those. Exact repeats are " +
     "absorbed; a near-duplicate is refused with code DUPLICATE plus that " +
-    "memory's id and excerpt — update it, or resend with force true. Author comes " +
-    "from the caller's adapter id; author is never client-supplied.",
+    "memory's id and excerpt (handling: see WRITING in the server instructions).",
   save_decision:
     "Decisions the user makes in conversation vanish with the session, and their " +
     "rationale vanishes first. Call this the moment a decision is settled, while " +
@@ -62,7 +60,7 @@ export const TOOL_DESCRIPTIONS = {
     "relitigating it. A decision is a choice in force; an idea is a " +
     "possibility not chosen (save_idea); an open question is save_question; a " +
     "standing rule is save_preference. A near-duplicate is refused with code " +
-    "DUPLICATE; resend with force true only if it stands apart. If it is " +
+    "DUPLICATE (see WRITING in the server instructions). If it is " +
     "ambiguous, ask the user first.",
   save_idea:
     "Ideas raised in passing are lost at session end and rarely resurface on their " +
@@ -70,8 +68,8 @@ export const TOOL_DESCRIPTIONS = {
     "feature, an approach, a direction — though nothing is committed yet. Unlike " +
     "save_decision, this records something not chosen; unlike save_question, it " +
     "asserts rather than asks; unlike save_preference, it is about what to build. " +
-    "A near-duplicate is refused with code DUPLICATE; resend with force true only " +
-    "if it stands apart. If it is ambiguous, ask the user first.",
+    "A near-duplicate is refused with code DUPLICATE (see WRITING in the server " +
+    "instructions). If it is ambiguous, ask the user first.",
   save_question:
     "Open questions raised mid-conversation are lost at session end. Call this " +
     "when something is asked but left unresolved and it should surface again for " +
@@ -79,13 +77,12 @@ export const TOOL_DESCRIPTIONS = {
     "later, and nobody notices it went missing. It records " +
     "what is still unknown — save_decision records what was settled, save_idea a " +
     "proposal, save_preference a standing rule. A near-duplicate is refused with " +
-    "code DUPLICATE; resend with force true only if it stands apart. If it is " +
+    "code DUPLICATE (see WRITING in the server instructions). If it is " +
     "ambiguous, ask the user first.",
   save_preference:
     "You do not know how this user wants work done, and they should not have to " +
     "restate it every session. Call this the moment a standing preference is " +
-    "stated — style, tone, tooling, things to avoid — so later sessions apply it " +
-    "unprompted. Preferences persist across topics; save_decision settles one " +
+    "stated — style, tone, tooling, things to avoid. Preferences persist across topics; save_decision settles one " +
     "matter, save_idea is an unchosen possibility, save_question is unresolved. " +
     "Miss it and you keep working in a way the user already asked you not to. " +
     "Call only for a clear preference. If it is ambiguous, ask the user first.",
@@ -100,15 +97,14 @@ export const TOOL_DESCRIPTIONS = {
     "regexStrengthen, answer each candidate exactly as shared.instruction says and " +
     "submit that object as the payload (kind entity_register or regex_pattern_add).",
   cleanup_submit_proposal:
-    "Curation you reason out is lost unless it is filed against the candidate it " +
-    "came from. Call this with an improvement for a candidate obtained from " +
+    "Curation is lost unless it is filed against its candidate. " +
+    "Call this with an improvement for a candidate obtained from " +
     "cleanup_list_candidates, echoing its targetKey, inputFingerprint and " +
-    "stageVersion verbatim. The proposal enters the pending review queue; " +
-    "approval happens only in the dashboard. Exception: for entity_register the " +
-    "server judges your answer, applies what is certain (autoApplied) and queues " +
-    "the rest; a regex_pattern_add failing the server's checks returns status " +
-    "rejected. If you found nothing worth proposing, call " +
-    "cleanup_report_no_finding instead — an unanswered candidate is served again.",
+    "stageVersion verbatim; the payload shape depends on candidate.stage. " +
+    "The proposal enters the pending review queue; approval happens " +
+    "only in the dashboard (entity_register is judged by the server; a failing " +
+    "regex_pattern_add returns status rejected). If nothing is worth proposing, " +
+    "call cleanup_report_no_finding instead.",
   cleanup_report_no_finding:
     "A candidate you examined and dismissed looks identical to one never examined, " +
     "so it is handed out again and again. Call this when a candidate was reviewed " +
@@ -118,8 +114,8 @@ export const TOOL_DESCRIPTIONS = {
     "concrete improvement.",
   cleanup_run_status:
     "A cleanup deep-pass run proceeds on the server where you cannot observe it. " +
-    "Call this with a runId to read that run's status and aggregates before " +
-    "reporting progress or deciding whether more work remains. Without it you " +
+    "Call this only when the user gives you a runId " +
+    "to read that run's status and aggregates before reporting progress. Without it you " +
     "would be guessing at whether a run finished, stalled, or failed.",
   bara_doctor:
     "An empty search result looks identical whether nothing was stored on this " +
@@ -141,3 +137,15 @@ export const TOOL_DESCRIPTIONS = {
     "unclassified, never guessed into a category. Zero preferences is a " +
     "normal empty state, not an error.",
 } as const;
+
+/**
+ * cleanup_list_candidates 의 read-only 문안. read-only 토큰은 cleanup_submit_proposal 이
+ * tools/list 에서 빠지므로(access.ts) 제출을 권하는 TOOL_DESCRIPTIONS 문안 대신 이것을 쓴다.
+ * 등록부(tools-cleanup.ts)가 scope 로 고른다. TOOL_DESCRIPTIONS 키 집합(14종)에는 넣지 않는다.
+ */
+export const CLEANUP_LIST_CANDIDATES_READ_ONLY =
+  "The memory store accumulates entries needing curation, and you cannot see " +
+  "that backlog from the conversation. Call this to inspect work items for one " +
+  "stage (regexStrengthen | personLink | lensDraft | entityRegister). This " +
+  "connection is read-only, so you cannot submit proposals; report what you " +
+  "find to the user. nodeIds narrows personLink or entityRegister to those memos.";

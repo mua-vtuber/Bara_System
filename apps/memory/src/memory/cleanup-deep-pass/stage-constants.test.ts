@@ -10,37 +10,56 @@ import {
   CLEANUP_STAGE_LLM_LIMITS,
   CLEANUP_STAGE_TEMPERATURE,
   cleanupStageLlmLimitsOf,
+  cleanupStageMaxItemsPerCall,
   cleanupStageMaxOutputTokensFor,
   ENTITY_REGISTER_BATCH_SIZE_MAX,
 } from "./stage-constants.ts";
 
-test("regex_strengthen — 등록 상수 조회(spec 5.B-3 표 그대로)", () => {
+test("regex_strengthen — 생각 몫 2048 + 답 글 768 = 2816, 상한은 그 2배(한도만 바꿔 stageVersion 그대로)", () => {
   const limits = cleanupStageLlmLimitsOf("regex_strengthen");
-  expect(limits.maxOutputTokens).toBe(768);
-  expect(limits.maxOutputTokensCap).toBe(3072);
+  expect(limits.maxOutputTokens).toBe(2816);
+  expect(limits.maxOutputTokensCap).toBe(5632);
+  expect(limits.outputTokensPerItem).toBeUndefined();
   expect(limits.stageVersion).toBe(1);
 });
 
-test("summary — 등록 상수 조회(spec 5.B-3 표 그대로)", () => {
+test("regex_strengthen 한도는 생각 실측 최대(1512) + 옛 답 글 한도(768)를 담고, 잘림 재호출이 2배로 올릴 여지가 남는다", () => {
+  const limits = cleanupStageLlmLimitsOf("regex_strengthen");
+  expect(limits.maxOutputTokens).toBeGreaterThan(1512 + 768);
+  expect(limits.maxOutputTokensCap).toBe(limits.maxOutputTokens * 2);
+});
+
+test("summary — 기본 몫 2048 + 청크당 256, 상한 6144, 지시문 변경으로 stageVersion 2", () => {
   const limits = cleanupStageLlmLimitsOf("summary");
-  expect(limits.maxOutputTokens).toBe(1536);
+  expect(limits.maxOutputTokens).toBe(2048);
+  expect(limits.outputTokensPerItem).toBe(256);
+  expect(limits.maxOutputTokensCap).toBe(6144);
+  expect(limits.stageVersion).toBe(2);
+});
+
+test("person_link — 기본 몫 2048(생각) + 메모당 256, 상한 6144, prefilterTopK 5, stageVersion 1 그대로(재처리 안 함)", () => {
+  const limits = cleanupStageLlmLimitsOf("person_link");
+  expect(limits.maxOutputTokens).toBe(2048);
+  expect(limits.outputTokensPerItem).toBe(256);
   expect(limits.maxOutputTokensCap).toBe(6144);
   expect(limits.stageVersion).toBe(1);
+  expect(limits.prefilterTopK).toBe(5);
 });
 
-test("person_link — 등록 상수 조회 + prefilterTopK 포함(spec 5.B-3 표 그대로)", () => {
-  const limits = cleanupStageLlmLimitsOf("person_link");
-  expect(limits.maxOutputTokens).toBe(768);
-  expect(limits.maxOutputTokensCap).toBe(3072);
-  expect(limits.stageVersion).toBe(1);
-  expect(limits.prefilterTopK).toBe(5);
+test("person_link 출력 한도는 묶음 메모 수에 비례하고, 호출당 15개면 상한 아래에 머문다", () => {
+  expect(cleanupStageMaxOutputTokensFor("person_link", 1)).toBe(2048 + 256);
+  expect(cleanupStageMaxOutputTokensFor("person_link", 4)).toBe(2048 + 4 * 256);
+  const max = cleanupStageMaxItemsPerCall("person_link");
+  expect(max).toBe(15);
+  expect(cleanupStageMaxOutputTokensFor("person_link", max)).toBe(5888);
+  expect(cleanupStageMaxOutputTokensFor("person_link", max + 1)).toBe(6144);
 });
 
 test("relation_discovery — summary 사이클 안 소속 stage 라 이 맵에서도 summary 값과 같은 stageVersion 을 공유(별도 항목 없음)", () => {
   // relation_discovery 는 summary-cycle.ts 안에서 summary 와 같은 STAGE_VERSION 을
   // 쓰는 사이클 내부 stage 다(plan Task 9 지시 — summary 항목 재사용, 별도 맵 항목 없음).
   const summaryLimits = cleanupStageLlmLimitsOf("summary");
-  expect(summaryLimits.stageVersion).toBe(1);
+  expect(summaryLimits.stageVersion).toBe(2);
 });
 
 test("미등록 stage 조회 — loud throw(EMBEDDING_* 선례 정합, silent fallback 금지)", () => {
@@ -49,11 +68,36 @@ test("미등록 stage 조회 — loud throw(EMBEDDING_* 선례 정합, silent fa
   ).toThrow(/unknown_stage/);
 });
 
-test("lens_draft 조회 — 등록 완료(C-2b, maxOutputTokens 1024 / cap 4096)", () => {
+test("lens_draft — 기본 몫 2048 + 엔티티당 256, 상한 6144, 관계 요청 폐기로 stageVersion 2", () => {
   const lens = cleanupStageLlmLimitsOf("lens_draft");
-  expect(lens.maxOutputTokens).toBe(1024);
-  expect(lens.maxOutputTokensCap).toBe(4096);
-  expect(lens.stageVersion).toBe(1);
+  expect(lens.maxOutputTokens).toBe(2048);
+  expect(lens.outputTokensPerItem).toBe(256);
+  expect(lens.maxOutputTokensCap).toBe(6144);
+  expect(lens.stageVersion).toBe(2);
+});
+
+test("호출당 대상 상한 — lens_draft·summary 는 15개(2048 + 15 × 256 = 5888 < 6144), 한 개 더 실으면 상한에 닿는다", () => {
+  for (const stage of ["lens_draft", "summary"] as const) {
+    const max = cleanupStageMaxItemsPerCall(stage);
+    const cap = cleanupStageLlmLimitsOf(stage).maxOutputTokensCap;
+    expect(max).toBe(15);
+    expect(cleanupStageMaxOutputTokensFor(stage, max)).toBe(5888);
+    expect(cleanupStageMaxOutputTokensFor(stage, max)).toBeLessThan(cap);
+    expect(cleanupStageMaxOutputTokensFor(stage, max + 1)).toBe(cap);
+  }
+});
+
+test("lens_draft 기본 batchSize(20)는 호출 2번으로 나뉜다 — 옛 상한 4096 이면 7개씩 3번이었다", () => {
+  const max = cleanupStageMaxItemsPerCall("lens_draft");
+  expect(Math.ceil(20 / max)).toBe(2);
+});
+
+test("호출당 대상 상한 — entity_register 계산값은 설정 상한(ENTITY_REGISTER_BATCH_SIZE_MAX) 이상이라 설정 최대 묶음도 상한 아래", () => {
+  expect(cleanupStageMaxItemsPerCall("entity_register")).toBeGreaterThanOrEqual(ENTITY_REGISTER_BATCH_SIZE_MAX);
+});
+
+test("호출당 대상 상한 — 대상 몫이 없는 단계(호출당 하나)는 던진다(조용한 기본값 금지)", () => {
+  expect(() => cleanupStageMaxItemsPerCall("regex_strengthen")).toThrow(/outputTokensPerItem/);
 });
 
 test("CLEANUP_STAGE_TEMPERATURE — 단일 출처 상수(spec 5.B-3, 4단계 공유 0.1)", () => {

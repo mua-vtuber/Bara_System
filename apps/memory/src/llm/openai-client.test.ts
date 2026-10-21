@@ -49,6 +49,26 @@ describe("OpenAiClient — 요청 모양", () => {
     });
   });
 
+  test("최상위가 배열인 JSON 스키마는 {items: 배열} 객체로 감싸 보낸다(Structured Outputs 는 최상위 객체만)", async () => {
+    standIn.reply = okReply('{"items":[]}');
+    const arraySchema = { type: "array", items: { type: "object" } };
+    await client("gpt-4o").chat([{ role: "user", content: "ping" }], { jsonSchema: arraySchema });
+    const body = standIn.requests[0]!.body as { response_format: { json_schema: { schema: unknown } } };
+    expect(body.response_format.json_schema.schema).toEqual({
+      type: "object",
+      properties: { items: arraySchema },
+      required: ["items"],
+      additionalProperties: false,
+    });
+  });
+
+  test("think:false 는 OpenAI 요청에 아무 칸도 더하지 않는다(끄는 규칙 미확인 — 지금 동작 그대로)", async () => {
+    standIn.reply = okReply("응답");
+    await client("gpt-5").chat([{ role: "user", content: "ping" }], { think: false });
+    const body = standIn.requests[0]!.body as Record<string, unknown>;
+    expect(Object.keys(body).sort()).toEqual(["messages", "model", "stream"]);
+  });
+
   test("temperature 를 받지 않는 모델(gpt-5)에는 칸을 빼고 보낸다", async () => {
     standIn.reply = okReply("응답");
     await client("gpt-5").chat([{ role: "user", content: "ping" }], { temperature: 0.2, maxOutputTokens: 10 });

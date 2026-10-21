@@ -22,6 +22,7 @@ import { TOOL_DESCRIPTIONS } from "./descriptions.ts";
 import { TOOL_ANNOTATIONS } from "./annotations.ts";
 import { MCP_INSTRUCTIONS } from "./instructions.ts";
 import { CAPTURE_TOOLS } from "./tools-capture.ts";
+import { PROPOSAL_PAYLOAD_DESCRIPTION } from "./tools-cleanup.ts";
 import { CAPTURE_TAG_SET } from "../memory/context-assembler.ts";
 
 let tmpDir: string;
@@ -117,10 +118,15 @@ test("유효 토큰으로 SDK initialize 성공 + 서버 이름 회신", async (
   await client.close();
 });
 
+type ListedTool = {
+  name: string;
+  description?: string;
+  annotations?: Record<string, unknown>;
+  inputSchema: { properties?: Record<string, { description?: string }> };
+};
+
 /** tools/list 를 SDK 로 조회한다(도구 등록은 deps 를 안 건드려 {} cast 로 충분). */
-async function listTools(): Promise<
-  Array<{ name: string; description?: string; annotations?: Record<string, unknown> }>
-> {
+async function listTools(): Promise<ListedTool[]> {
   const client = new Client({ name: "test-client", version: "0.0.1" });
   const transport = new StreamableHTTPClientTransport(mcpUrl(), {
     requestInit: { headers: { authorization: `Bearer ${token}` } },
@@ -201,10 +207,10 @@ const DESCRIPTION_PINS: Record<keyof typeof TOOL_DESCRIPTIONS, string[]> = {
     "no memory of previous sessions", // deficit
     "before starting substantive work", // trigger
     "contradict decisions the user already made", // consequence
-    "use your code search tools", // routing(코드 질문은 이 도구 아님)
-    "already present in this conversation", // routing(이미 아는 것 재검색 금지)
+    "DO NOT SEARCH in the server instructions", // routing(검색 금지 규칙은 instructions 가 단일 보유)
     "Only `query` is required", // 기존 사실 계약
-    "`contextBudget` > 0", // 기존 사실 계약
+    "`appliedFilters`", // 기존 사실 계약(적용 불가 필터는 조용히 빠지므로 확인 지시)
+    // contextBudget·since/until 계약은 칸 설명이 보유한다 — FIELD_DESCRIPTION_PINS 참조.
   ],
   get_memory: [
     "carry only an excerpt", // deficit
@@ -225,10 +231,8 @@ const DESCRIPTION_PINS: Record<keyof typeof TOOL_DESCRIPTIONS, string[]> = {
     // 유사 중복은 DUPLICATE 거부 + force 우회. 문안이 두 갈래를 다 말해야 한다.
     "Exact repeats are absorbed", // consequence(정확 중복 = 흡수)
     "near-duplicate is refused with code DUPLICATE", // consequence(유사 중복 = 거부)
-    "resend with force true", // consequence(우회 통로)
     "Do NOT use it for user preferences: call save_preference", // routing
     "the typed save_* tools route those", // routing
-    "author is never client-supplied", // 기존 사실 계약
   ],
   save_decision: [
     "rationale vanishes first", // deficit
@@ -236,7 +240,6 @@ const DESCRIPTION_PINS: Record<keyof typeof TOOL_DESCRIPTIONS, string[]> = {
     "relitigating it", // consequence
     "an idea is a possibility not chosen", // routing(4종 경계)
     "refused with code DUPLICATE", // consequence(T16 유사 중복 거부)
-    "force true", // consequence(우회 통로)
     "If it is ambiguous, ask the user first", // 기존 사실 계약
   ],
   save_idea: [
@@ -245,7 +248,6 @@ const DESCRIPTION_PINS: Record<keyof typeof TOOL_DESCRIPTIONS, string[]> = {
     "records something not chosen", // routing(vs save_decision)
     "asserts rather than asks", // routing(vs save_question)
     "refused with code DUPLICATE", // consequence(T16 유사 중복 거부)
-    "force true", // consequence(우회 통로)
     "If it is ambiguous, ask the user first",
   ],
   save_question: [
@@ -254,7 +256,6 @@ const DESCRIPTION_PINS: Record<keyof typeof TOOL_DESCRIPTIONS, string[]> = {
     "silently dropped rather than answered later", // consequence
     "records what is still unknown", // routing
     "refused with code DUPLICATE", // consequence(T16 유사 중복 거부)
-    "force true", // consequence(우회 통로)
     "If it is ambiguous, ask the user first",
   ],
   save_preference: [
@@ -262,6 +263,7 @@ const DESCRIPTION_PINS: Record<keyof typeof TOOL_DESCRIPTIONS, string[]> = {
     "the moment a standing preference is stated", // trigger
     "already asked you not to", // consequence
     "Preferences persist across topics", // routing(4종 경계)
+    // facet 채움 시점은 facet 칸 설명이 보유한다 — FIELD_DESCRIPTION_PINS 참조.
     "If it is ambiguous, ask the user first",
   ],
   cleanup_list_candidates: [
@@ -286,7 +288,7 @@ const DESCRIPTION_PINS: Record<keyof typeof TOOL_DESCRIPTIONS, string[]> = {
   ],
   cleanup_run_status: [
     "where you cannot observe it", // deficit
-    "with a runId", // trigger
+    "gives you a runId", // trigger
     "guessing at whether a run finished", // consequence
   ],
   bara_doctor: [
@@ -383,6 +385,31 @@ test("tools/list annotations — 14종 전부 title 노출 + 단일 출처 맵�
     const expected = TOOL_ANNOTATIONS[tool.name as keyof typeof TOOL_ANNOTATIONS];
     expect(`${tool.name}: ${tool.annotations?.title}`).toBe(`${tool.name}: ${expected.title}`);
   }
+});
+
+// ── 칸 설명(.describe) — tools/list inputSchema 에 실제로 실리는지 ─────────────────
+//
+// SDK 가 앱과 다른 zod 사본을 쓰면 .describe() 는 SDK 쪽 레지스트리에 없어 조용히 빠진다
+// (enum 은 그대로 실려 겉보기엔 멀쩡하다). bun.lock 이 SDK 에 따로 zod 3.25 를 묶었던
+// 2026-10 사건의 재발 감시다. 도구 문안에서 덜어낸 안내가 칸 설명으로 남아 있는지도 함께 잡는다.
+
+const FIELD_DESCRIPTION_PINS: Array<[tool: string, field: string, pin: string]> = [
+  ["search_memory", "since", "YYYY-MM-DD"],
+  ["search_memory", "until", "YYYY-MM-DD"],
+  ["search_memory", "contextBudget", "ignored when responseMode is index"],
+  ["search_memory", "responseMode", "call get_memory with the ids you need"],
+  ["save_preference", "facet", "Set it when the category is clear"],
+  ["cleanup_run_status", "runId", "no tool returns one"],
+];
+
+test("tools/list inputSchema — 칸 .describe() 문구가 클라이언트에 실린다", async () => {
+  const byName = new Map((await listTools()).map((t) => [t.name, t]));
+  for (const [tool, field, pin] of FIELD_DESCRIPTION_PINS) {
+    const text = byName.get(tool)?.inputSchema.properties?.[field]?.description ?? "";
+    expect(`${tool}.${field}: ${text.includes(pin)}`).toBe(`${tool}.${field}: true`);
+  }
+  const payload = byName.get("cleanup_submit_proposal")?.inputSchema.properties?.payload;
+  expect(payload?.description).toBe(PROPOSAL_PAYLOAD_DESCRIPTION);
 });
 
 test("tools/list description — 등록부가 descriptions.ts 단일 출처를 그대로 노출", async () => {

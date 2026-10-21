@@ -112,6 +112,21 @@ describe("OpenAiCompatibleClient", () => {
   });
 });
 
+describe("OpenAiCompatibleClient — 최상위 배열 JSON 스키마", () => {
+  test("호환 서버에는 최상위 배열 스키마를 감싸지 않고 그대로 보낸다", async () => {
+    captured = [];
+    const client = new OpenAiCompatibleClient({
+      baseUrl: `http://127.0.0.1:${server.port}/v1`,
+      model: "local-model",
+      timeoutMs: 5000,
+    });
+    const arraySchema = { type: "array", items: { type: "object" } };
+    await client.chat([{ role: "user", content: "ping" }], { jsonSchema: arraySchema });
+    const format = captured[0]!.body.response_format as { json_schema: { schema: unknown } };
+    expect(format.json_schema.schema).toEqual(arraySchema);
+  });
+});
+
 describe("OpenAiCompatibleClient.chatDetailed() — stopReason·usage 정규화 (A-1)", () => {
   test("finish_reason=stop + usage → stopReason='stop', usage 매핑(캐시 읽기는 입력에서 뺀다)", async () => {
     nextResponseOverride = {

@@ -227,19 +227,41 @@ describe("parseSummaryResponse — 통합 JSON 파싱(코드펜스·잡담 허�
     expect(out.relationSummaries[0]?.relationName).toBe("정상관계");
   });
 
-  it("confidence 가 비숫자거나 0~1 밖이면 그 원소를 거른다", () => {
+  it("청크요약 confidence 는 선택 — 빠지거나 비숫자·0~1 밖이어도 요약은 남기고 값만 뺀다(2026-10-20)", () => {
     const raw = JSON.stringify({
       chunkSummaries: [
         { chunk_id: 1, summary_text: "범위 밖.", confidence: 1.5 },
         { chunk_id: 2, summary_text: "음수.", confidence: -0.1 },
         { chunk_id: 3, summary_text: "비숫자.", confidence: "높음" },
         { chunk_id: 4, summary_text: "정상.", confidence: 0.5 },
+        { chunk_id: 5, summary_text: "confidence 없음." },
       ],
       relationSummaries: [],
     });
     const out = parseSummaryResponse(raw);
-    expect(out.chunkSummaries.length).toBe(1);
-    expect(out.chunkSummaries[0]?.chunkId).toBe(4);
+    expect(out.chunkSummaries.map((c) => c.chunkId)).toEqual([1, 2, 3, 4, 5]);
+    expect(out.chunkSummaries.find((c) => c.chunkId === 4)?.confidence).toBe(0.5);
+    for (const id of [1, 2, 3, 5]) {
+      expect(out.chunkSummaries.find((c) => c.chunkId === id)?.confidence).toBeUndefined();
+    }
+  });
+
+  it("관계요약 confidence 는 그대로 필수 — 빠지거나 0~1 밖이면 그 관계를 거른다", () => {
+    const raw = JSON.stringify({
+      chunkSummaries: [],
+      relationSummaries: [
+        { from_concept_id: "cpt_a", to_concept_id: "cpt_b", relation_name: "라이벌", summary_text: "s" },
+        { from_concept_id: "cpt_a", to_concept_id: "cpt_b", relation_name: "라이벌", summary_text: "s", confidence: 2 },
+        { from_concept_id: "cpt_a", to_concept_id: "cpt_b", relation_name: "라이벌", summary_text: "s", confidence: 0.7 },
+      ],
+    });
+    expect(parseSummaryResponse(raw).relationSummaries.map((r) => r.confidence)).toEqual([0.7]);
+  });
+
+  it("코드 울타리 밖 설명 글에 중괄호가 섞여도 울타리 안 객체를 읽는다", () => {
+    const obj = JSON.stringify({ chunkSummaries: [{ chunk_id: 9, summary_text: "한 문장." }], relationSummaries: [] });
+    const raw = ["양식 {예시} 대로 냅니다:", "```json", obj, "```", "끝 {완료}"].join("\n");
+    expect(parseSummaryResponse(raw).chunkSummaries.map((c) => c.chunkId)).toEqual([9]);
   });
 
   it("{ 를 못 찾으면 throw 한다(글루가 그 문서 loud warn 으로 건너뜀 — silent 0건 위장 금지)", () => {

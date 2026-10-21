@@ -152,6 +152,8 @@ describe("파이프라인 산출물 격리 고정 — knowledge_nodes 재유입 
         firstParagraphMaxChars: 300,
         stageVersion: 1,
         maxAttemptsPerTarget: 3,
+        // fallback 경로(infer=null)는 실행층을 안 타 상한을 쓰지 않는다 — 넉넉한 값.
+        perCallInputCap: 1_000_000,
       };
       const summary = await runSummaryCycle(deps);
       expect(summary.chunkSummariesCreated).toBe(1);

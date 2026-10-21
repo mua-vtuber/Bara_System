@@ -616,6 +616,16 @@ test("(f) cleanup_list_candidates 입력 스키마: stage 열거에 entityRegist
   const submit = tools.find((t) => t.name === "cleanup_submit_proposal")!;
   const kindEnum = (submit.inputSchema.properties as Record<string, { enum?: string[] }>).kind!.enum;
   expect(kindEnum).toContain("entity_register");
+  // metadata_fill 은 외부 통로가 없어 항상 400 이므로 열거하지 않는다.
+  expect(kindEnum).not.toContain("metadata_fill");
+  // payload 모양은 payload 칸 설명으로 알린다(도구 문안에는 되풀이하지 않는다).
+  const payloadDesc = (submit.inputSchema.properties as Record<string, { description?: string }>).payload!.description ?? "";
+  for (const needle of ["personLink: {nodeId, personId}", "lensDraft: {typeName, entityId, values", "entityRegister / regexStrengthen"]) {
+    expect(payloadDesc).toContain(needle);
+  }
+  expect(submit.description).toContain("depends on candidate.stage");
+  // 서버가 제출 도구를 쓰라고 안내하는 쓰기 가능 scope 에서는 제출 안내가 그대로 있다.
+  expect(list.description).toContain("shared.instruction");
 });
 
 test("(f2) cleanup_list_candidates entityRegister + nodeIds → 그 메모만, 메모 단위 아닌 단계 + nodeIds → INVALID_INPUT", async () => {

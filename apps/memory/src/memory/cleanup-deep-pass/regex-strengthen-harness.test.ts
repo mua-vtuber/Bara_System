@@ -160,3 +160,35 @@ test("통과: cycleLocalPatterns 이 비어 있으면(또는 미전달) 기존 �
   expect(r1.ok).toBe(true);
   expect(r2.ok).toBe(true);
 });
+
+// ── 원문 매치(sourceText) — "주어진 예문을 실제로 잡는 규칙만" 을 원문으로 확인 ──────────
+
+test("원문 매치: 예문이 원문에서 베낀 글이고 정규식이 원문을 잡으면 통과", () => {
+  const r = testRegexProposal(base, { ...ctx, sourceText: "아까 말한 거 이거 진짜 몰랐어. 다음엔 알아둘게" });
+  expect(r.ok).toBe(true);
+});
+
+test("reject(source_match): 예문은 스스로 잡지만 원문에 글자 그대로 없음(예문을 지어냄)", () => {
+  const r = testRegexProposal(
+    { ...base, exampleInput: "그거 정말 몰랐다" },
+    { ...ctx, sourceText: "이거 진짜 몰랐어" },
+  );
+  expect(r.ok).toBe(false);
+  expect(r.reason).toBe("source_match");
+  expect(r.detail).toContain("원문에 글자 그대로 없음");
+});
+
+test("reject(source_match): 정규식이 원문 전체에서는 매치 0(앞머리 닻 ^ 로 원문 시작이 다름)", () => {
+  const r = testRegexProposal(
+    { ...base, pattern: "^(.{2,40})\\s+몰랐[어다]" },
+    { ...ctx, sourceText: "첫 줄은 다른 이야기\n이거 진짜 몰랐어" },
+  );
+  expect(r.ok).toBe(false);
+  expect(r.reason).toBe("source_match");
+  expect(r.detail).toBe("원문 매치 0");
+});
+
+test("sourceText 를 주지 않으면 원문 검사를 건너뛴다(원문을 모르는 호출자 하위 호환)", () => {
+  const r = testRegexProposal({ ...base, exampleInput: "그거 정말 몰랐다" }, ctx);
+  expect(r.ok).toBe(true);
+});

@@ -23,27 +23,32 @@
  *       + 임베딩 / 관계요약 0 + 엣지 0 + emit 0.
  *   (c) from_concept_id 환각 → 그 관계 버림 + warn(rejectedHallucinations++) / 정상 관계는 살아남음.
  *   (d) LLM throw → 그 문서 건너뜀 + warn(inferFailures++) — 사이클 중단 0.
- *   (e) 멱등 — 같은 사이클 두 번 돌려도 재처리 0(청크요약 + source_document_id 관계 멱등).
+ *   (e) 멱등 — 같은 사이클 두 번 돌려도 재처리 0(청크요약 행 존재 → 후보 0).
+ *   부분 문서 관계 발굴(2026-10-19)은 summary-cycle-partial-document.test.ts, 공용 fixture 헬퍼는
+ *   summary-cycle.test-helpers.ts.
  */
 
 import { afterAll, beforeAll, describe, expect, it, spyOn } from "bun:test";
-import { Database } from "bun:sqlite";
-import { openMemoryDatabase } from "../../db/migrations.ts";
 import { Bgem3Embedder } from "../../embedding/bge-m3.ts";
-import { SqliteMemoryStore } from "../../db/store.ts";
 import { EventBus } from "../../server-internal/event-bus.ts";
 import { EventRepository } from "../../db/store-internal/event-repository.ts";
-import { runSummaryCycle, type SummaryCycleDeps } from "./summary-cycle.ts";
+import { relationDiscoveryTargetKey, runSummaryCycle } from "./summary-cycle.ts";
 import type { SummaryInferFn } from "./summary-gates.ts";
-import type { StageInferResult } from "./stage-execution.ts";
 import { getStageResult } from "./stage-results-ledger.ts";
-
-/** 요약 raw 응답을 ok StageInferResult 로 감싸는 fixture 헬퍼(실행층 경유 계약). */
-function ok(json: string): StageInferResult<string> {
-  return { kind: "ok", parsed: json };
-}
-
-const MODEL_LOAD_TIMEOUT_MS = 180_000;
+import {
+  MODEL_LOAD_TIMEOUT_MS,
+  attachAtomics,
+  baseDeps,
+  insertChunk,
+  insertConcept,
+  insertDocument,
+  insertPerson,
+  linkConcept,
+  linkPerson,
+  makeFixture as makeFixtureWith,
+  ok,
+  type SummaryCycleFixture,
+} from "./summary-cycle.test-helpers.ts";
 
 let embedder: Bgem3Embedder;
 
@@ -56,121 +61,8 @@ afterAll(() => {
   // embedder 는 프로세스 단위 — 별도 해제 없음.
 });
 
-/** 실 기준 스키마 + 실 embedder 로 store + raw db + eventBus 한 묶음. */
-function makeFixture(): {
-  db: Database;
-  store: SqliteMemoryStore;
-  eventBus: EventBus;
-} {
-  // bge-m3 1024 차원에 맞춘 vec0(요약 임베딩 테이블).
-  // 가 깔려 임베딩 INSERT 가 차원 불일치로 throw 한다.
-  const db = openMemoryDatabase(":memory:", { embeddingDim: 1024 });
-  const store = new SqliteMemoryStore(db, embedder);
-  const eventBus = new EventBus(new EventRepository(db));
-  return { db, store, eventBus };
-}
-
-/** documents 행 한 개 삽입(FK 사슬 asset_files → documents). */
-function insertDocument(db: Database, docId: string): void {
-  const sha = `sha_${docId}`;
-  db.prepare(
-    `INSERT INTO asset_files (sha256, asset_type, asset_path, byte_size, first_imported_at)
-     VALUES (?, 'text', ?, 10, 0)`,
-  ).run(sha, `/tmp/${sha}.md`);
-  db.prepare(
-    `INSERT INTO documents (document_id, asset_sha256, title, document_type, chunk_count, created_at, updated_at)
-     VALUES (?, ?, ?, 'text', 0, 0, 0)`,
-  ).run(docId, sha, `doc ${docId}`);
-}
-
-/** document_chunk 노드 한 개 삽입(metadata.parentId + chunkIndex). */
-function insertChunk(
-  db: Database,
-  content: string,
-  parentDocId: string,
-  chunkIndex: number,
-  createdAt = "2026-06-05 10:00:00",
-): number {
-  const meta = JSON.stringify({ parentId: parentDocId, chunkIndex });
-  const info = db
-    .prepare(
-      "INSERT INTO knowledge_nodes (content, source_type, metadata_json, created_at) VALUES (?, 'document_chunk', ?, ?)",
-    )
-    .run(content, meta, createdAt);
-  return Number(info.lastInsertRowid);
-}
-
-/**
- * 청크에 atomic 자식 N건 + merged_into 엣지(child→chunk) 삽입(임계 충족). 회신은 만든
- * atomic 노드 id 목록 — 호출자가 이 atomic 에 개념·사람 엣지를 달아 허용 개념 집합을
- * 만든다(extractor 가 atomic 에 개념을 붙이는 실 흐름 정합).
- */
-function attachAtomics(db: Database, chunkId: number, count: number): number[] {
-  const atomicIds: number[] = [];
-  for (let i = 0; i < count; i++) {
-    const info = db
-      .prepare(
-        "INSERT INTO knowledge_nodes (content, source_type, created_at) VALUES (?, 'llm_extract', '2026-06-05 10:00:01')",
-      )
-      .run(`atomic-${chunkId}-${i}`);
-    const atomicId = Number(info.lastInsertRowid);
-    db.prepare(
-      "INSERT INTO knowledge_edges (source_id, target_id, relation, provenance, source_node_id) VALUES (?, ?, 'merged_into', 'user_input', NULL)",
-    ).run(atomicId, chunkId);
-    atomicIds.push(atomicId);
-  }
-  return atomicIds;
-}
-
-/** 개념 노드(cpt_) 한 개 삽입 후 그 concept_id 회신. */
-function insertConcept(db: Database, conceptId: string, name: string): string {
-  db.prepare(
-    "INSERT INTO concept_nodes (concept_id, name) VALUES (?, ?)",
-  ).run(conceptId, name);
-  return conceptId;
-}
-
-/** atomic 노드 → 개념(node_concept_edges, role='mention'). */
-function linkConcept(db: Database, atomicId: number, conceptId: string): void {
-  db.prepare(
-    "INSERT OR IGNORE INTO node_concept_edges (node_id, concept_id, role, provenance, source_node_id) VALUES (?, ?, 'mention', 'user_input', NULL)",
-  ).run(atomicId, conceptId);
-}
-
-/** 사람 노드(psn_) 한 개 삽입 후 person_id 회신. */
-function insertPerson(db: Database, personId: string, displayName: string): string {
-  db.prepare(
-    "INSERT INTO persons (person_id, display_name) VALUES (?, ?)",
-  ).run(personId, displayName);
-  return personId;
-}
-
-/** atomic 노드 → 사람(node_person_edges, relation='mentions'). collectDocumentConcepts 의
- *  node_person_edges UNION 갈래로 그 문서 허용 개념 집합에 psn_ 가 들어간다. */
-function linkPerson(db: Database, atomicId: number, personId: string): void {
-  db.prepare(
-    "INSERT OR IGNORE INTO node_person_edges (node_id, person_id, relation, provenance, source_node_id) VALUES (?, ?, 'mentions', 'user_input', NULL)",
-  ).run(atomicId, personId);
-}
-
-/** atomicThreshold=4·batchSize=50·임계 0.6·firstParagraphMaxChars=300 기본 deps. */
-function baseDeps(
-  fx: ReturnType<typeof makeFixture>,
-  infer: SummaryInferFn | null,
-): SummaryCycleDeps {
-  return {
-    db: fx.db,
-    store: fx.store,
-    embedder,
-    infer,
-    eventBus: fx.eventBus,
-    atomicThreshold: 4,
-    batchSize: 50,
-    relationConfidenceThreshold: 0.6,
-    firstParagraphMaxChars: 300,
-    stageVersion: 1,
-    maxAttemptsPerTarget: 3,
-  };
+function makeFixture(): SummaryCycleFixture {
+  return makeFixtureWith(embedder, (db) => new EventBus(new EventRepository(db)));
 }
 
 describe("runSummaryCycle — infer 가용(통합 호출 → 게이트 → 저장·임베딩·개념 엣지)", () => {
@@ -229,7 +121,9 @@ describe("runSummaryCycle — infer 가용(통합 호출 → 게이트 → 저�
       expect(getStageResult(fx.db, "summary", String(a0))!.status).toBe("completed");
       expect(getStageResult(fx.db, "summary", String(a1))!.status).toBe("completed");
       // 문서 관계 발굴 → relation_discovery 원장 completed(관계 산출 있음).
-      expect(getStageResult(fx.db, "relation_discovery", "doc-a")!.status).toBe("completed");
+      expect(
+        getStageResult(fx.db, "relation_discovery", relationDiscoveryTargetKey("doc-a", [a0, a1]))!.status,
+      ).toBe("completed");
 
       // chunk_summaries 2행 generated_by='llm' + has_embedding=1.
       const chunkRows = fx.db
@@ -300,7 +194,7 @@ describe("runSummaryCycle — infer 가용(통합 호출 → 게이트 → 저�
       const a1Atomics = attachAtomics(fx.db, a1, 4);
 
       // 허용 개념 집합에 개념 cptA(cpt_) + 사람 psnB·psnC(psn_) 셋이 들게 한다. cptA 는
-      // node_concept_edges, 사람 둘은 node_person_edges — collectDocumentConcepts 의 UNION
+      // node_concept_edges, 사람 둘은 node_person_edges — collectChunkSetConcepts 의 UNION
       // 두 갈래가 모두 allowedConceptIds 에 들어가는지를 실 SQLite 로 확인한다.
       const cptA = insertConcept(fx.db, "cpt_A", "주인공A");
       const psnB = insertPerson(fx.db, "psn_B", "라이벌B");
@@ -530,7 +424,9 @@ describe("runSummaryCycle — infer 가용(통합 호출 → 게이트 → 저�
         .get() as { n: number };
       expect(edgeCount.n).toBe(0);
       // relation_discovery 원장은 관계요약 산출 있음 → completed(재과금 끊김 — 엣지 보류와 무관).
-      expect(getStageResult(fx.db, "relation_discovery", "doc-a")!.status).toBe("completed");
+      expect(
+        getStageResult(fx.db, "relation_discovery", relationDiscoveryTargetKey("doc-a", [a0, a1]))!.status,
+      ).toBe("completed");
       fx.db.close();
     },
     MODEL_LOAD_TIMEOUT_MS,

@@ -11,7 +11,7 @@ import {
   type PlacementTypeName,
 } from "./concept-type-vocabulary.ts";
 import { extractEventDateTime } from "./event-date.ts";
-import { SCHEDULE_OCCURRENCE_KEY, SCHEDULE_SOURCE_NODE_KEY } from "./cleanup-deep-pass/entity-register/constants.ts";
+import { SCHEDULE_HIDDEN_KEY, SCHEDULE_OCCURRENCE_KEY, SCHEDULE_SOURCE_NODE_KEY } from "./cleanup-deep-pass/entity-register/constants.ts";
 
 export type DateOccurrenceKind = "event" | "birthday" | "column_date";
 export type DateOccurrenceRole = "event" | "birthday" | "expiration" | "generic";
@@ -352,6 +352,8 @@ export async function buildDateOccurrences(
     for (const node of nodes) {
       if (!node.eventAt) continue;
       if (scheduledSources.has(node.id)) continue;
+      // 사용자가 "일정 아님" 으로 표시한 메모 — 일정 목록에서만 뺀다(event_at 은 시간 검색을 위해 그대로 둔다).
+      if (node.metadata[SCHEDULE_HIDDEN_KEY] === true) continue;
       const parsed = parseDateColumnValue(node.eventAt, now);
       if (!parsed) continue;
       const title = truncate(node.content);

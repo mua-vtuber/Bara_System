@@ -175,6 +175,9 @@ export interface MicrobatchResult<T> {
  * @param opts.fixedOverheadTokens 그룹마다 붙는 본문 밖 몫(system 프롬프트·공유 명단 등).
  * @param opts.perCallCap budget.maxEstimatedInputTokensPerCall.
  * @param opts.tokensOf 한 원소의 추정 입력 토큰(글루가 원소별 프롬프트 조각을 추정해 준다).
+ * @param opts.maxItemsPerBatch 한 그룹 최대 원소 수(선택). 출력이 원소 수에 비례하는 단계가
+ *   출력 한도 상한(stage-constants cleanupStageMaxItemsPerCall)을 넘지 않게 함께 건다. 없으면
+ *   입력 토큰만 본다. 1 이상 정수가 아니면 던진다.
  */
 export function splitIntoMicrobatches<T>(
   items: readonly T[],
@@ -182,9 +185,18 @@ export function splitIntoMicrobatches<T>(
     fixedOverheadTokens: number;
     perCallCap: number;
     tokensOf: (item: T) => number;
+    maxItemsPerBatch?: number;
   },
 ): MicrobatchResult<T> {
-  const { fixedOverheadTokens, perCallCap, tokensOf } = opts;
+  const { fixedOverheadTokens, perCallCap, tokensOf, maxItemsPerBatch } = opts;
+  if (
+    maxItemsPerBatch !== undefined &&
+    (!Number.isInteger(maxItemsPerBatch) || maxItemsPerBatch < 1)
+  ) {
+    throw new Error(
+      `microbatch 원소 수 상한은 1 이상 정수여야 함 (받은 값: ${maxItemsPerBatch})`,
+    );
+  }
   const batches: T[][] = [];
   const oversized: T[] = [];
   let current: T[] = [];
@@ -197,8 +209,10 @@ export function splitIntoMicrobatches<T>(
       oversized.push(item);
       continue;
     }
-    // 현재 그룹에 더하면 넘치면 그룹을 닫고 새로 연다.
-    if (current.length > 0 && currentTokens + itemTokens > perCallCap) {
+    // 현재 그룹에 더하면 입력 상한을 넘거나 원소 수 상한에 닿았으면 그룹을 닫고 새로 연다.
+    const full =
+      maxItemsPerBatch !== undefined && current.length >= maxItemsPerBatch;
+    if (current.length > 0 && (full || currentTokens + itemTokens > perCallCap)) {
       batches.push(current);
       current = [];
       currentTokens = fixedOverheadTokens;

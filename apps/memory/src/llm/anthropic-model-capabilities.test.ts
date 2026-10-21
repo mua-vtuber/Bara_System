@@ -7,7 +7,9 @@ import { describe, expect, test } from "bun:test";
 import {
   anthropicModelAcceptsSampling,
   anthropicSamplingParams,
+  anthropicThinkingParams,
   normalizeAnthropicModelId,
+  type AnthropicThinkingOffParam,
 } from "./anthropic-model-capabilities.ts";
 import { buildAnthropicChatRequest } from "./anthropic-client.ts";
 
@@ -124,6 +126,56 @@ describe("buildAnthropicChatRequest — 요청 본문 조립", () => {
       model: "claude-haiku-4-5",
     });
     expect("system" in body).toBe(false);
+  });
+});
+
+describe("anthropicThinkingParams — 생각 끄기 칸", () => {
+  test("think 가 false 가 아니면 어느 모델에도 칸을 넣지 않는다", () => {
+    expect(anthropicThinkingParams("claude-haiku-5-5", undefined)).toEqual({});
+    expect(anthropicThinkingParams("claude-haiku-5-5", true)).toEqual({});
+  });
+
+  test.each<[string, AnthropicThinkingOffParam]>([
+    ["claude-opus-5", { type: "disabled" }],
+    ["claude-sonnet-5", { type: "disabled" }],
+    ["claude-haiku-5-5", { type: "disabled" }],
+    ["anthropic.claude-haiku-5-5-v1:0", { type: "disabled" }],
+    ["claude-sonnet-5-5", { type: "between_tools" }],
+  ])("%p 는 think:false 에 끄는 칸을 받는다", (model, thinking) => {
+    expect(anthropicThinkingParams(model, false)).toEqual({ thinking });
+  });
+
+  test.each([
+    "claude-opus-5-5", // 끌 수 없음("disabled" 400)
+    "claude-fable-5-1", // 생각 항상 켜짐
+    "claude-mythos-5-1",
+    "claude-opus-4-8", // 칸을 빼면 원래 생각하지 않음
+    "claude-sonnet-4-6",
+    "claude-haiku-4-5",
+    "unparseable-model-x1", // 모르는 이름 — 넣으면 400 이 날 수 있다
+  ])("%p 는 think:false 여도 칸을 넣지 않는다", (model) => {
+    expect(anthropicThinkingParams(model, false)).toEqual({});
+  });
+
+  test("buildAnthropicChatRequest 가 think:false 를 thinking 칸으로 옮긴다", () => {
+    const body = buildAnthropicChatRequest({
+      model: "claude-haiku-5-5",
+      maxTokens: 512,
+      temperature: 0.1,
+      think: false,
+      system: undefined,
+      messages: [{ role: "user", content: "안녕" }],
+    });
+    expect(body.thinking).toEqual({ type: "disabled" });
+    const unchanged = buildAnthropicChatRequest({
+      model: "claude-opus-5-5",
+      maxTokens: 512,
+      temperature: 0.1,
+      think: false,
+      system: undefined,
+      messages: [{ role: "user", content: "안녕" }],
+    });
+    expect("thinking" in unchanged).toBe(false);
   });
 });
 

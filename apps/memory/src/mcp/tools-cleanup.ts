@@ -18,13 +18,28 @@ import {
   submitExternalProposal,
 } from "../server-internal/cleanup-external/proposals.ts";
 import { ENTITY_REGISTER_KIND } from "../memory/cleanup-deep-pass/entity-register/constants.ts";
-import { TOOL_DESCRIPTIONS } from "./descriptions.ts";
+import { TOOL_DESCRIPTIONS, CLEANUP_LIST_CANDIDATES_READ_ONLY } from "./descriptions.ts";
 import { TOOL_ANNOTATIONS } from "./annotations.ts";
 import { toolError, toolJson, type McpToolContext } from "./server.ts";
 import type { BaraToolErrorCode } from "./errors.ts";
 import { canUseMcpTool } from "./access.ts";
 
 const STAGE_ENUM = z.enum(EXTERNAL_CANDIDATE_STAGES);
+
+/**
+ * payload 모양 안내 — 단계(candidate.stage)별로 한 줄씩. 서버 검사는
+ * cleanup-external/proposals.ts(validateProposalPayload·6단 정합)가 권위다.
+ * 이 문구는 tools/list 의 payload 칸 설명으로 실린다 — 도구 문안(descriptions.ts)에는
+ * 되풀이하지 않는다(server.test.ts 가 실제 회신으로 감시).
+ */
+export const PROPOSAL_PAYLOAD_DESCRIPTION =
+  "Shape depends on candidate.stage. " +
+  "entityRegister / regexStrengthen: the object shared.instruction asks for " +
+  "(nodeId / sourceNodeId is filled from targetKey when absent; a different value is rejected). " +
+  "personLink: {nodeId, personId} - nodeId must equal targetKey, personId an existing person id. " +
+  "lensDraft: {typeName, entityId, values: {columns, labels, relations, metadata}} - " +
+  "typeName and entityId must match targetKey, each values part an object; " +
+  "the server ignores relations and metadata.";
 
 /**
  * SubmitProposalOutcome / NoFindingOutcome 의 httpStatus(REST 라우트 계약) 를 도구
@@ -46,7 +61,10 @@ export function registerCleanupTools(server: McpServer, ctx: McpToolContext): vo
   server.registerTool(
     "cleanup_list_candidates",
     {
-      description: TOOL_DESCRIPTIONS.cleanup_list_candidates,
+      // read-only 토큰은 제출 도구가 tools/list 에서 빠지므로(access.ts) 제출을 권하는 문안을 쓰지 않는다.
+      description: canUseMcpTool(ctx.scope, "cleanup_submit_proposal")
+        ? TOOL_DESCRIPTIONS.cleanup_list_candidates
+        : CLEANUP_LIST_CANDIDATES_READ_ONLY,
       annotations: TOOL_ANNOTATIONS.cleanup_list_candidates,
       inputSchema: {
         stage: STAGE_ENUM,
@@ -66,7 +84,7 @@ export function registerCleanupTools(server: McpServer, ctx: McpToolContext): vo
         if (e instanceof CleanupExternalDisabledError) return toolError("DISABLED", e.message);
         return toolError(
           "INTERNAL",
-          `후보 조회 실패: ${e instanceof Error ? e.message : String(e)}`,
+          `Candidate lookup failed: ${e instanceof Error ? e.message : String(e)}`,
         );
       }
     },
@@ -78,8 +96,9 @@ export function registerCleanupTools(server: McpServer, ctx: McpToolContext): vo
       description: TOOL_DESCRIPTIONS.cleanup_submit_proposal,
       annotations: TOOL_ANNOTATIONS.cleanup_submit_proposal,
       inputSchema: {
-        kind: z.enum(["metadata_fill", "person_link", "regex_pattern_add", "lens_draft", ENTITY_REGISTER_KIND]),
-        payload: z.record(z.string(), z.unknown()),
+        // metadata_fill 은 외부 통로가 없어(stage-map.ts 대응 stage 부재) 항상 400 이라 열거하지 않는다.
+        kind: z.enum(["person_link", "regex_pattern_add", "lens_draft", ENTITY_REGISTER_KIND]),
+        payload: z.record(z.string(), z.unknown()).describe(PROPOSAL_PAYLOAD_DESCRIPTION),
         candidate: z.object({
           stage: STAGE_ENUM,
           targetKey: z.string(),
@@ -159,7 +178,7 @@ export function registerCleanupTools(server: McpServer, ctx: McpToolContext): vo
     {
       description: TOOL_DESCRIPTIONS.cleanup_run_status,
       annotations: TOOL_ANNOTATIONS.cleanup_run_status,
-      inputSchema: { runId: z.string().min(1) },
+      inputSchema: { runId: z.string().min(1).describe("Run id the user gave you; no tool returns one.") },
     },
     async (args) => {
       if (!canUseMcpTool(ctx.scope, "cleanup_run_status")) return toolError("FORBIDDEN", "cleanup_run_status is not allowed by this token");

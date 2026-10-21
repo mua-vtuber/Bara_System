@@ -69,6 +69,7 @@
  *   안 들고 오는 게 확실해지는 시점. 그때 caller 와 함께 한 묶음으로 들어낸다.
  */
 
+import { migrateExtractorOutputLimitDefault } from "./migrate-extractor-output-limit";
 import { migrateEntityRegisterAllocation, migrateEntityRegisterBatchSizeCap, migrateEntityRegisterEnabledForCleanupOn } from "./migrate-entity-register-keys";
 import { migrateDocumentOcrApiProvider, type SecretCopy } from "./migrate-document-ocr-api";
 
@@ -212,6 +213,9 @@ export function migrateLegacyKeys(
   migrateEntityRegisterAllocation(migrated, warnings);
   migrateEntityRegisterEnabledForCleanupOn(migrated, warnings);
   migrateEntityRegisterBatchSizeCap(migrated, warnings);
+
+  // 추출 출력 한도 기본값 상향(2026-10-20) — 저장된 옛 기본값 1024 를 새 기본값으로 올린다.
+  migrateExtractorOutputLimitDefault(migrated, warnings);
 
   // 문서 OCR(2026-10-11) — 옛 openai_compatible_vision 갈래를 업체별 칸으로 옮긴다.
   const secretCopies = migrateDocumentOcrApiProvider(migrated, warnings);

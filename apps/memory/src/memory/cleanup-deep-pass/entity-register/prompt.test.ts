@@ -5,6 +5,8 @@ import {
   buildEntityRegisterInstruction, createEntityRegisterInferFn, parseEntityRegisterResponse, parseEntityRegisterSingle,
   renderEntityRegisterMemoLine,
 } from "./prompt.ts";
+import { splitHonorific } from "./name-match.ts";
+import { ENTITY_REGISTER_LIMITS } from "./constants.ts";
 
 test("the single-memo instruction asks for one object without nodeId", () => {
   const text = buildEntityRegisterInstruction(["person"], "single");
@@ -56,6 +58,51 @@ test("a missing date/title key is a loud format error, null is allowed", () => {
 
 test("the title length in the instruction comes from the limits constant", () => {
   expect(buildEntityRegisterInstruction(["person"])).toContain("15자 이내");
+});
+
+// ── 2026-10-20 instruction review ─────────────────────────────────────────────
+
+/** Same shape as lang/ko.yaml entity_register (data fixture, as in name-match.test.ts). */
+const KO_SUFFIX_PROFILE = {
+  honorificSuffixes: ["오빠", "누나", "언니", "선배", "형", "씨", "님", "쌤", "이"],
+  finalConsonantSuffixes: ["이"],
+};
+
+test("one honorific rule: every suffix stays attached, and the example names are the ones the judge splits", () => {
+  const text = buildEntityRegisterInstruction(["person"]);
+  expect(text).toContain("이름 끝 호칭(형·씨·님·선배 같은 것)은 떼지 않고 본문에 붙은 그대로 쓴다");
+  expect(text).not.toContain('"~님", "~씨" 같은 존칭은 떼고');
+  for (const [memo, name] of [["민수가", "민수"], ["지은이랑", "지은이"], ["민수형한테", "민수형"], ["김철수님께", "김철수님"]] as const) {
+    expect(text).toContain(`"${memo}" -> "${name}"`);
+  }
+  // The kept-suffix examples are exactly what splitHonorific turns into a "base + suffix" proposal.
+  for (const name of ["지은이", "민수형", "김철수님"]) {
+    expect(splitHonorific(name, KO_SUFFIX_PROFILE, ENTITY_REGISTER_LIMITS.minSimilarNameChars)).not.toBeNull();
+  }
+  expect(splitHonorific("민수", KO_SUFFIX_PROFILE, ENTITY_REGISTER_LIMITS.minSimilarNameChars)).toBeNull();
+});
+
+test("several dates in one memo: pick the one main event so date text, date and title point at the same thing", () => {
+  const text = buildEntityRegisterInstruction(["person"]);
+  expect(text).toContain("10. 날짜가 여러 개면 메모가 가장 중심으로 말하는 일 하나의 날짜만 고른다.");
+  expect(text).toContain("11. JSON 배열 하나만 출력한다.");
+  expect(buildEntityRegisterInstruction(["person"], "single")).toContain("11. JSON 객체 하나만 출력한다");
+});
+
+test("intake and creature hints draw the line against the rule-3 generic words, only when the type is offered", () => {
+  const text = buildEntityRegisterInstruction(["intake", "creature"]);
+  expect(text).toContain("- intake: 먹거나 마시는 것 중 상품·메뉴처럼 하나를 콕 집는 이름. 우유·보리밥 같은 음식 일반 이름은 3번대로 뽑지 않는다");
+  expect(text).toContain("- creature: 이름이 있는 동물·식물");
+  // 식물 품종(몬스테라)은 creature 로 뽑고, 동물 종류 이름(고양이)만 3번대로 제외한다.
+  expect(text).toContain("키우는 식물 이름이나 품종 예: 몬스테라");
+  expect(text).toContain("고양이·강아지 같은 동물 종류 이름은 3번대로 뽑지 않는다");
+  expect(buildEntityRegisterInstruction(["person"])).not.toContain("음식 일반 이름");
+});
+
+test("a batch answer wrapped in a code fence with bracketed chatter outside is still read", () => {
+  const arr = '[{"nodeId":4,"entities":[],"eventDateText":null,"eventDate":null,"scheduleTitle":null}]';
+  const raw = ["결과 [요약]:", "```json", arr, "```", "참고 [끝]"].join("\n");
+  expect(parseEntityRegisterResponse(raw).map((r) => r.nodeId)).toEqual([4]);
 });
 
 test("an unparsable model answer becomes a deterministic failure with the reason", async () => {

@@ -48,7 +48,8 @@ export function renderRecentAnswers(host: HTMLElement, notice: Notice): () => vo
       const summary = element("summary", "recent-summary");
       summary.append(element("span", "recent-question", entry.question), element("span", "recent-time", timeFormat.format(new Date(entry.at))));
       record.append(summary, element("p", "answer", entry.answer));
-      if (!entry.generated) record.append(element("p", "hint", messages.feedback.searchOnly));
+      // "search results only" is true only when there are results to show; a not-found answer has none.
+      if (!entry.generated && entry.sources.length) record.append(element("p", "hint", messages.feedback.searchOnly));
       if (entry.sources.length && entry.audience) {
         record.append(element("h3", "sources-heading", messages.feedback.sourceHeading));
         const sources = element("div", "results");

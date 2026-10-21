@@ -93,7 +93,40 @@ test("OpenAI-compatible classification keeps Ollama-only thinking options out of
   });
 });
 
-test("Ollama answer and cleanup retain the model's default thinking behavior", async () => {
+test("a reply wrapped entirely in one markdown fence is parsed; other text around JSON is not", () => {
+  expect(parseClassification('```json\n{"kind":"idea"}\n```', ["idea"])).toBe("idea");
+  expect(parseClassification('```\n{"kind":"idea"}```\n', ["idea"])).toBe("idea");
+  expect(parseGroundedAnswer('```json\r\n{"answer":"a","sourceIds":[1]}\r\n```', [1])).toEqual({ text: "a", sourceIds: [1] });
+  for (const bad of ['Here you go: {"kind":"idea"}', '```json\n{"kind":"idea"}\n``` thanks', 'sure\n```json\n{"kind":"idea"}\n```', '```json\n{"kind":"idea"}\n```\n```json\n{"kind":"idea"}\n```', '```json\nnot json\n```'])
+    expect(() => parseClassification(bad, ["idea"])).toThrow(messages.aiService.responseFormat);
+});
+
+test("an OpenAI-compatible cleanup decision in a code fence is read; garbage is refused", async () => {
+  await withChatFixture("openai-compatible", () => ({ choices: [{ message: { role: "assistant", content: '```json\n{"finding":false,"payload":{}}\n```' } }] }), async (ai) => {
+    expect(await ai.cleanupDecision("personLink", {}, {}, "openai-compatible", "cleanup-model", requestContext())).toEqual({ finding: false, payload: {} });
+  });
+  await withChatFixture("openai-compatible", () => ({ choices: [{ message: { role: "assistant", content: 'finding: false' } }] }), async (ai) => {
+    const error = await ai.cleanupDecision("personLink", {}, {}, "openai-compatible", "cleanup-model", requestContext()).then(() => null, (thrown: unknown) => thrown);
+    expect(error).toMatchObject({ code: "AI_RESPONSE" });
+  });
+});
+
+test("both chat paths state the same lens draft shape and limits", async () => {
+  const { ownStageInstruction, PROPOSAL_JSON_MAX_CHARS } = await import("../src/service/cleanup-instruction.ts");
+  let system = "";
+  await withChatFixture("ollama", (body) => {
+    system = (body.messages as { content: string }[])[0]!.content;
+    return { message: { role: "assistant", content: '{"finding":false,"payload":{}}' }, done: true, done_reason: "stop" };
+  }, async (ai) => { await ai.cleanupDecision("lensDraft", {}, {}, "ollama", "cleanup-model", requestContext()); });
+  expect(system).toBe(ownStageInstruction("chat"));
+  for (const format of ["chat", "cli"] as const) {
+    const text = ownStageInstruction(format);
+    expect(text).toContain(format === "cli" ? `payloadJson, the whole payload including the {"values":...} wrapper, stays under ${PROPOSAL_JSON_MAX_CHARS} characters` : `values encoded as JSON stays under ${PROPOSAL_JSON_MAX_CHARS} characters`);
+    for (const part of ["emptyColumnKeys", "non-empty", "string, number or boolean", "labels, relations and metadata stay empty", String(PROPOSAL_JSON_MAX_CHARS), "topKPersonIds"]) expect(text).toContain(part);
+  }
+});
+
+test("Ollama answer and cleanup turn thinking off so the reply budget produces final JSON", async () => {
   const sent: Record<string, unknown>[] = [];
   await withChatFixture("ollama", (body) => {
     sent.push(body);
@@ -104,7 +137,7 @@ test("Ollama answer and cleanup retain the model's default thinking behavior", a
     expect(sent).toHaveLength(2);
     expect(sent[0]).toMatchObject({ model: MODEL, options: { num_predict: 700 } });
     expect(sent[1]).toMatchObject({ model: "cleanup-model", options: { num_predict: 800 } });
-    for (const body of sent) expect(body).not.toHaveProperty("think");
+    for (const body of sent) expect(body).toMatchObject({ think: false });
   });
 });
 

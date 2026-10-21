@@ -11,6 +11,15 @@ export function searchOnlyAnswer(memories: Memory[], audience?: string): Answer 
     outcome: memories.length ? "found" : "notFound", ...(audience ? { audience } : {}) };
 }
 
+/** The answer for a parsed model reply. No source id means the model found nothing in the memories that answers
+ * the question: that is not an error, and its free text (possibly ungrounded) is not shown; a fixed message is. */
+export function groundedAnswerResult(generated: { text: string; sourceIds: number[] }, memories: Memory[], audience?: string): Answer {
+  const audienceField = audience ? { audience } : {};
+  if (generated.sourceIds.length === 0) return { text: messages.assistant.noGroundedAnswer, sources: [], generated: false, outcome: "notFound", ...audienceField };
+  const sourceIds = new Set(generated.sourceIds);
+  return { text: generated.text, sources: memories.filter((memory) => sourceIds.has(memory.id)), generated: true, outcome: "found", ...audienceField };
+}
+
 export class Assistant {
   private readonly ai: AiClient;
   constructor(private readonly config: ConfigStore, private readonly client: MemoryClient) { this.ai = new AiClient(config); }
@@ -26,8 +35,7 @@ export class Assistant {
     ctx.progress("answer");
     try {
       const generated = await this.ai.answer(query, memories, ctx);
-      const sourceIds = new Set(generated.sourceIds);
-      return { text: generated.text, sources: memories.filter((memory) => sourceIds.has(memory.id)), generated: true, outcome: "found", audience: found.audience };
+      return groundedAnswerResult(generated, memories, found.audience);
     } catch (error) {
       if (ctx.signal.aborted) throw error;
       const code = error instanceof ServiceError ? error.code : undefined;

@@ -111,6 +111,16 @@ function relationValueList(value: unknown): unknown[] {
  */
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+/**
+ * 칸 값 형식 안내(렌즈 초안 지시문용) — validateColumnDataType 이 통과시키는 형식을 사람 말로 옮긴
+ * 것이다. 검사를 바꾸면 이 문장도 같이 고친다(한 파일 안에 나란히 둔다).
+ */
+export const COLUMN_DATA_TYPE_FORMAT_HINTS: Readonly<Record<ColumnDataType, string>> = {
+  date: "YYYY-MM-DD 모양만(예: 2026-03-05). 연·월·일 중 하나라도 모르면 비운다",
+  number: "숫자만(단위·쉼표 없이)",
+  text: "자유 글",
+};
+
 export function validateColumnDataType(
   key: string,
   dataType: ColumnDataType,

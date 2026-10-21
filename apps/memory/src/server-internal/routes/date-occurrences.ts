@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { MemoryApiDeps } from "../types.ts";
 import { err } from "../http-helpers.ts";
+import { registerScheduleVisibilityRoutes } from "./schedule-visibility.ts";
 import {
   buildDateOccurrences,
   type DateOccurrenceKind,
@@ -43,6 +44,8 @@ function parseKinds(raw: string | undefined): { ok: true; value: Set<DateOccurre
 }
 
 export function registerDateOccurrencesRoutes(app: Hono, deps: MemoryApiDeps): void {
+  // 일정 목록에서 글을 빼는 "일정 아님" 표시 — 같은 일정 목록의 짝이라 여기서 함께 등록한다(server.ts 줄 수 유지).
+  registerScheduleVisibilityRoutes(app, deps);
   const api = new Hono({ strict: false });
 
   api.get("/date-occurrences", async (c) => {

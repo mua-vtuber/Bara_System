@@ -62,6 +62,8 @@ export const ENTITY_REGISTER_EDGE_PROVENANCE: Readonly<Record<RecordDecidedBy, P
 export const SCHEDULE_OCCURRENCE_KEY = "scheduleOccurrence";
 /** 일정 노드가 어느 원본 메모에서 나왔는지 — 달력 중복 제거(buildDateOccurrences)가 읽는다. */
 export const SCHEDULE_SOURCE_NODE_KEY = "scheduleSourceNodeId";
+/** 사용자가 "일정 아님" 으로 표시한 메모 — true 면 일정 목록(buildDateOccurrences)에서만 빠진다. 메모·event_at 은 그대로. */
+export const SCHEDULE_HIDDEN_KEY = "scheduleHidden";
 /** 일정 노드 metadata 의 이 단계 기록 칸({ runId, decidedBy }). */
 export const ENTITY_REGISTER_METADATA_KEY = "entityRegister";
 

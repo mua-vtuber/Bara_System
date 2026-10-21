@@ -44,6 +44,8 @@ import {
   lensToApplyView,
   listEvidenceNodeIds,
 } from "../../memory/cleanup-deep-pass/lens-draft-candidate-query.ts";
+import { stripLensDraftRelationsAndMetadata } from "../../memory/cleanup-deep-pass/lens-draft-batch.ts";
+import type { LensDraftValues } from "../../memory/cleanup-deep-pass/lens-apply.ts";
 import { buildEntityLens } from "../../memory/cleanup-deep-pass/entity-lens.ts";
 import { isPlacementType } from "../../memory/concept-type-vocabulary.ts";
 import { ENTITY_REGISTER_KIND } from "../../memory/cleanup-deep-pass/entity-register/constants.ts";
@@ -312,11 +314,13 @@ export async function submitExternalProposal(
   if (!payloadCheck.ok) {
     return { ok: false, httpStatus: 400, message: payloadCheck.message };
   }
-  const pl = (payload ?? {}) as Record<string, unknown>;
+  const pl = { ...((payload ?? {}) as Record<string, unknown>) };
 
   // 6단 — payload↔candidate 정합(엉뚱한 후보의 원장 소거 차단).
   if (kind === "regex_pattern_add") {
     // sourceNodeId 는 내부 생산자와 같은 멱등 SQL 열쇠 — 정수 필수.
+    // 지시문의 칸 목록에 sourceNodeId 가 없으므로, 없으면 후보 열쇠로 채운다. 있는데 다르면 아래에서 거부한다.
+    if (pl.sourceNodeId === undefined && /^[0-9]+$/.test(candidate.targetKey)) pl.sourceNodeId = Number(candidate.targetKey);
     const sourceNodeId = pl.sourceNodeId;
     if (
       typeof sourceNodeId !== "number" ||
@@ -354,6 +358,15 @@ export async function submitExternalProposal(
         message: `payload↔candidate 불일치 — lens_draft (typeName·entityId) 가 candidate.targetKey 와 어긋남`,
       };
     }
+    // 렌즈 초안은 relations·metadata 를 채우지 않는다(서버 사이클과 같은 규칙). 채워 와도 그 두 칸만
+    // 비우고 제안은 그대로 받는다 — 이 경로의 제출만 해당, 다른 출처 제안의 적용은 건드리지 않는다.
+    const stripped = stripLensDraftRelationsAndMetadata(pl.values as LensDraftValues);
+    if (stripped.dropped) {
+      console.warn(
+        `[cleanup-external] lens_draft 제출의 관계·부가정보 무시 — ${candidate.targetKey}: 그 두 칸만 버리고 나머지 칸은 그대로 받았습니다.`,
+      );
+    }
+    pl.values = stripped.values;
   }
 
   // 7~9단 — stageVersion·원장 재제출·서버 지문 재계산(candidate-freshness.ts 공유 — 문구·상태 그대로).

@@ -24,6 +24,7 @@
  */
 
 import type { StageInferResult } from "./stage-execution.ts";
+import { extractLlmJson } from "./llm-json-response.ts";
 
 // ── 결과 타입 ────────────────────────────────────────────────────────────────
 
@@ -33,8 +34,11 @@ export interface ParsedChunkSummary {
   chunkId: number;
   /** 청크 한 문장 요약. */
   summaryText: string;
-  /** LLM 자가 평가 신뢰도(0~1). 청크요약은 게이트 0 — 관측·기록용. */
-  confidence: number;
+  /**
+   * LLM 자가 평가 신뢰도(0~1) — 있을 때만. 청크요약은 이 값을 쓰는 곳이 없어 지시문이 요청하지 않는다.
+   * 빠지거나 범위 밖이어도 요약은 버리지 않는다(옛 동작은 요약을 버려 그 청크가 영영 무산출로 굳었다).
+   */
+  confidence?: number;
 }
 
 /** 게이트 통과 후보 관계요약 한 원소(camelCase 정규화 결과). */
@@ -60,11 +64,15 @@ export interface ParsedSummaryResponse {
 /**
  * 통합 호출 응답 함수 타입(mock 0 — 함수 주입). Task 4 글루가 createSummaryInferFn(executor)
  * 으로 실행층을 감싸 주입하고, 테스트는 데이터 fixture 를 회신하는 함수를 넣는다.
- * 입력은 한 문서(청크 묶음)의 프롬프트 본문, 출력은 StageInferResult<string> — ok.parsed 는
+ * 입력은 한 호출 묶음(한 문서의 청크 일부 또는 전부)의 프롬프트 본문 + 그 묶음 청크 수(출력
+ * 한도가 청크 수에 비례 — stage-constants summary), 출력은 StageInferResult<string> — ok.parsed 는
  * raw 응답 문자열(파싱은 호출자가 parseSummaryResponse 로 한다). 비-ok 는 실행층 신호를
  * 실어 글루가 원장 상태를 가른다(옛 throw 계약 폐기 — 실패를 결과 값으로 실음).
  */
-export type SummaryInferFn = (prompt: string) => Promise<StageInferResult<string>>;
+export type SummaryInferFn = (
+  prompt: string,
+  chunkCount: number,
+) => Promise<StageInferResult<string>>;
 
 // ── 게이트 (1) 청크요약 ID 검증 ───────────────────────────────────────────────
 
@@ -150,21 +158,7 @@ export function gateRelationEdge(confidence: number, threshold: number): boolean
  * (silent 0건 위장 금지). 두 키가 부재하면 빈 배열로 채운다(정직한 "발굴 0건").
  */
 export function parseSummaryResponse(raw: string): ParsedSummaryResponse {
-  const start = raw.indexOf("{");
-  const end = raw.lastIndexOf("}");
-  if (start < 0 || end < start) {
-    throw new Error(
-      `LLM 응답에서 JSON 객체를 못 찾음 (앞 80자: ${JSON.stringify(raw.slice(0, 80))})`,
-    );
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw.slice(start, end + 1));
-  } catch (e) {
-    throw new Error(
-      `LLM 응답 JSON 파싱 실패: ${e instanceof Error ? e.message : String(e)}`,
-    );
-  }
+  const parsed = extractLlmJson(raw, "object");
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     throw new Error("LLM 응답이 객체가 아님(두 갈래 배열을 담은 객체여야 함)");
   }
@@ -193,8 +187,8 @@ export function parseSummaryResponse(raw: string): ParsedSummaryResponse {
 }
 
 /**
- * 한 청크요약 원소를 정규화. chunk_id(정수)·summary_text(비어있지 않은 문자열)·
- * confidence(0~1 숫자) 가 갖춰져야 통과, 아니면 null(거름). snake_case·camelCase 둘 다.
+ * 한 청크요약 원소를 정규화. chunk_id(정수)·summary_text(비어있지 않은 문자열)가 갖춰져야 통과,
+ * 아니면 null(거름). confidence 는 선택 — 0~1 숫자일 때만 싣는다. snake_case·camelCase 둘 다.
  */
 function normalizeChunkSummary(el: unknown): ParsedChunkSummary | null {
   if (typeof el !== "object" || el === null) return null;
@@ -204,8 +198,8 @@ function normalizeChunkSummary(el: unknown): ParsedChunkSummary | null {
   const summaryText = pickString(o, "summary_text", "summaryText");
   const confidence = pickConfidence(o, "confidence");
 
-  if (chunkId === null || summaryText === null || confidence === null) return null;
-  return { chunkId, summaryText, confidence };
+  if (chunkId === null || summaryText === null) return null;
+  return confidence === null ? { chunkId, summaryText } : { chunkId, summaryText, confidence };
 }
 
 /**

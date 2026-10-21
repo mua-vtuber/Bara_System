@@ -32,7 +32,7 @@ import type {
   ObservableLlmClient,
 } from "./types.ts";
 import { LlmRequestError, parseRetryAfterMs } from "./errors.ts";
-import { anthropicSamplingParams } from "./anthropic-model-capabilities.ts";
+import { anthropicSamplingParams, anthropicThinkingParams } from "./anthropic-model-capabilities.ts";
 import { ANTHROPIC_SDK_FETCH_OPTIONS } from "./bun-fetch.ts";
 
 /** Anthropic stop_reason 원문 → LlmChatResult.stopReason 3값 정규화. */
@@ -55,23 +55,33 @@ const DEFAULT_MAX_OUTPUT_TOKENS = 2048;
  *
  * temperature 는 `anthropicSamplingParams` 가 모델별로 넣을지 정한다. 최신 모델
  * (Haiku 5.5·Sonnet 5·Opus 4.7 이상 등)은 표본 조절값을 받으면 400 으로 거절하므로
- * 그 모델에는 칸 자체를 넣지 않는다. 판정 표는 `anthropic-model-capabilities.ts` 하나.
+ * 그 모델에는 칸 자체를 넣지 않는다. think === false 면 `anthropicThinkingParams` 가 생각을 끄는
+ * 칸을 모델별로 정한다(끌 수 없거나 원래 꺼진 모델은 칸 없음). 판정 표는 `anthropic-model-capabilities.ts` 하나.
+ *
+ * 돌려주는 타입은 SDK 요청 타입에 thinking 칸만 넓힌 것이다 — SDK 0.96 타입에 없는
+ * {type:"between_tools"} 를 담기 위해서다(SDK 는 본문을 그대로 보낸다).
  */
 export function buildAnthropicChatRequest(params: {
   model: string;
   maxTokens: number;
   temperature: number | undefined;
+  think?: boolean;
   system: string | Anthropic.TextBlockParam[] | undefined;
   messages: Array<{ role: "user" | "assistant"; content: string }>;
-}): Anthropic.MessageCreateParamsNonStreaming {
+}): AnthropicChatRequest {
   return {
     model: params.model,
     max_tokens: params.maxTokens,
     ...anthropicSamplingParams(params.model, { temperature: params.temperature }),
+    ...anthropicThinkingParams(params.model, params.think),
     ...(params.system !== undefined ? { system: params.system } : {}),
     messages: params.messages,
   };
 }
+
+/** Messages API 요청 본문 — SDK 타입에서 thinking 칸만 이 모듈이 아는 값까지 넓힌다. */
+export type AnthropicChatRequest = Omit<Anthropic.MessageCreateParamsNonStreaming, "thinking"> &
+  ReturnType<typeof anthropicThinkingParams>;
 
 export interface AnthropicClientOptions {
   /** API 키. caller (createMemoryApi) 가 settings.llm.anthropicApiKey 전달. */
@@ -183,9 +193,10 @@ export class AnthropicClient implements ObservableLlmClient {
           model: this.model,
           maxTokens: options.maxOutputTokens ?? this.defaultMaxOutputTokens,
           temperature: options.temperature,
+          think: options.think,
           system: systemParam,
           messages: turns,
-        }),
+        }) as Anthropic.MessageCreateParamsNonStreaming,
         options.signal ? { signal: options.signal } : undefined,
       );
     } catch (error) {

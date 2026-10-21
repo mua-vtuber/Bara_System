@@ -25,6 +25,8 @@ import {
   nextRetryAt,
 } from "./cleanup-deep-pass/stage-retry.ts";
 import { splitIntoMicrobatches } from "./cleanup-deep-pass/input-estimate.ts";
+import { cleanupStageMaxItemsPerCall } from "./cleanup-deep-pass/stage-constants.ts";
+import { resolveNodePersonLinks } from "./person-link-resolve.ts";
 // 후보 프롤로그(사람 로드·SQL 후보·언급 필터·top-K·지문·원장 제외·existingPersonIds)는
 // person-link-candidate-query.ts 로 추출됐다(사이클·dryRun·외부 표면 공유 / spec 6.1).
 // 옛 공개 이름은 이 파일 하단에서 re-export 한다(import 경로 무변경 — prompt 분리 선례).
@@ -46,6 +48,12 @@ import {
 export const CLEANUP_PROPOSALS_READY_EVENT = "cleanup_proposals_ready";
 export const PERSON_LINK_AUTO_CONFIDENCE = 0.9;
 export const PERSON_LINK_PROPOSAL_CONFIDENCE = 0.6;
+/**
+ * 한 호출에 싣는 노드 수 상한 — 출력 한도(기본 몫 + 노드 수 × 노드 몫)가 첫 호출부터 상한에
+ * 닿지 않는 개수(stage-constants cleanupStageMaxItemsPerCall 단일 출처). 설정 batchSize 는 한
+ * 사이클에 줍는 후보 수라 이보다 클 수 있다 — microbatch 가 이 개수씩 나눠 부른다.
+ */
+export const PERSON_LINK_MAX_NODES_PER_CALL = cleanupStageMaxItemsPerCall("person_link");
 
 export interface PersonLinkInferInput {
   nodes: PersonLinkNodeContext[];
@@ -60,6 +68,10 @@ export interface PersonLinkDecision {
   candidateText?: string;
   evidence?: string;
   reason?: string;
+  /** 모델이 "이 언급이 누구인지 확실하지 않다" 고 표시한 연결(자동 연결 안 함, 검토 제안). */
+  uncertain?: boolean;
+  /** 회신 모양이 계약과 어긋난 결정(파서가 단다) — 노드는 답한 것으로 세되 결정은 버린다. */
+  invalidReason?: string;
 }
 
 export type PersonLinkInferFn = (
@@ -118,8 +130,9 @@ export interface PersonLinkInferCycleSummary {
   /** 원장 completed_noop 기록 수(정상 회신인데 그 노드 산출 0 — 빈 값 결정). */
   completedNoop: number;
   /**
-   * 커버리지 미달 노드 수(spec 4.A-7) — 입력에 실었는데 응답에 그 노드 결정이 하나도 없어
-   * 완료 처리하지 않은 노드. 원장 미기록이라 다음 배치 후보로 잔존한다.
+   * 커버리지 미달 노드 수(spec 4.A-7) — 입력에 실었는데 응답에 그 노드 결정이 하나도 없고,
+   * 노드 하나만 실은 단독 재호출에서도 또 없었던 노드. 결정적 실패(attempt++)로 원장에
+   * 기록된다(여러 노드 배치에서 빠졌다가 단독 재호출에서 답을 받은 노드는 세지 않는다).
    */
   coverageMisses: number;
 }
@@ -195,6 +208,8 @@ export async function runPersonLinkInferCycle(
     fixedOverheadTokens: fixedOverhead,
     perCallCap: deps.perCallInputCap,
     tokensOf: (node) => estimatePersonLinkNodeTokens(node),
+    // 출력이 노드 수에 비례 — 첫 호출이 출력 상한에 닿지 않는 개수로도 자른다.
+    maxItemsPerBatch: PERSON_LINK_MAX_NODES_PER_CALL,
   });
   for (const node of oversized) {
     const key = ledgerKeyByNode.get(node.id)!;
@@ -218,7 +233,13 @@ export async function runPersonLinkInferCycle(
   //   한 배치의 노드는 그 배치 응답으로만 커버 판정한다 — 배치 1 노드를 배치 2 응답이
   //   안 가리켰다고 커버리지 미달로 몰지 않는다. config 는 사이클 통째 중단, budget 은
   //   남은 배치 이월(원장 미기록 → 다음 사이클 재등장).
-  for (const batch of batches) {
+  //   응답에서 통째 누락된 노드는 여러 노드 배치였다면 노드 하나짜리 배치로 다시 큐 앞에
+  //   넣어 재호출하고(entity_register 단계와 같은 방식), 하나짜리 호출에서도 누락이면 결정적
+  //   실패(attempt++ → 상한에서 terminal)로 기록한다 — 원장 미기록으로 매 사이클 유료 모델에
+  //   재전송되는 무한 재과금을 막는다.
+  const queue: PersonLinkNodeContext[][] = [...batches];
+  while (queue.length > 0) {
+    const batch = queue.shift()!;
     const batchLedgerKeys = new Map(
       batch.map((n) => [n.id, ledgerKeyByNode.get(n.id)!]),
     );
@@ -260,7 +281,7 @@ export async function runPersonLinkInferCycle(
       continue;
     }
 
-    await processPersonLinkBatch({
+    const missing = await processPersonLinkBatch({
       deps,
       logPrefix,
       batch,
@@ -273,11 +294,24 @@ export async function runPersonLinkInferCycle(
       autoApply: deps.autoApply ?? true,
       summary,
     });
+    if (missing.length === 0) continue;
+    if (batch.length > 1) {
+      queue.unshift(...missing.map((n) => [n]));
+      continue;
+    }
+    // 하나만 보냈는데도 답이 없다 — 결정적 실패 기록(재전송 무한 반복 차단).
+    const node = missing[0]!;
+    summary.coverageMisses += 1;
+    recordStageDeterministicFailure(deps.db, {
+      ...ledgerKeyByNode.get(node.id)!,
+      maxAttemptsPerTarget: deps.maxAttemptsPerTarget,
+      lastError: "person_link 응답에 이 메모의 결정이 없음(단독 재호출에서도 누락)",
+    });
   }
 
   if (summary.coverageMisses > 0) {
     console.warn(
-      `${logPrefix} 커버리지 미달 ${summary.coverageMisses}건 — 응답에 결정 없는 노드는 완료 처리 안 함(다음 배치 후보 잔존).`,
+      `${logPrefix} 커버리지 미달 ${summary.coverageMisses}건 — 단독 재호출에서도 결정이 없는 노드는 결정적 실패로 원장 기록.`,
     );
   }
 
@@ -375,9 +409,11 @@ interface ProcessBatchInput {
 /**
  * 한 microbatch 의 결정을 처리한다 — 검증 → 자동 연결/제안 → 노드 단위 커버리지 원장 기록.
  * 커버리지(spec 4.A-7)는 *이 배치 노드* 안에서만 판정한다: 응답에 그 노드 결정이 있으면
- * 커버됨, 통째 누락이면 원장 미기록(다음 사이클 후보 잔존). 배치 밖 nodeId(환각)는 무시한다.
+ * 커버됨, 통째 누락이면 원장에 쓰지 않고 호출자에 돌려준다(재호출/실패 기록은 호출자). 배치 밖 nodeId(환각)는 무시한다.
  */
-async function processPersonLinkBatch(args: ProcessBatchInput): Promise<void> {
+async function processPersonLinkBatch(
+  args: ProcessBatchInput,
+): Promise<PersonLinkNodeContext[]> {
   const {
     deps,
     logPrefix,
@@ -412,17 +448,19 @@ async function processPersonLinkBatch(args: ProcessBatchInput): Promise<void> {
     if (validation !== "unknown-node") {
       coveredNodeIds.add(decision.nodeId);
     }
-    if (validation === "empty" || validation === "already-linked") {
+    if (validation === "empty") {
       nonInvalidNodeIds.add(decision.nodeId);
       continue;
     }
-    if (validation !== "valid") {
+    if (validation !== "valid" && validation !== "already-linked") {
       summary.rejectedInvalid += 1;
       console.warn(
         `${logPrefix} 잘못된 person_link 결정 버림 — ${validation}: ${JSON.stringify(decision)}`,
       );
       continue;
     }
+    // valid·already-linked 둘 다 담는다 — 이미 연결된 사람도 "같은 언급이 여러 사람으로
+    // 갈렸는가" 판정에는 들어가야 한다(쓰기는 아래에서 이미 연결된 사람을 건너뛴다).
     nonInvalidNodeIds.add(decision.nodeId);
     const bucket = byNode.get(decision.nodeId) ?? [];
     bucket.push({
@@ -438,49 +476,53 @@ async function processPersonLinkBatch(args: ProcessBatchInput): Promise<void> {
   // 산출을 낸 노드(자동 연결·제안). 나머지 커버 노드는 completed_noop.
   const producedByNode = new Set<number>();
   for (const [nodeId, group] of byNode) {
-    const proposalEligible = group.filter((d) => d.confidence >= proposalThreshold);
-    // conf>=0.9 단일 확실 연결 — autoApply=true 면 자동 mentions 엣지, false 면 확실한
-    // 연결도 검토 제안으로 보낸다(spec 5.B-2 적용 게이트 위치 선택 — 산출은 유지, 자동
-    // 쓰기만 skip). 낮은 확신(0.6~0.9)은 autoApply 와 무관하게 늘 제안 경유.
-    if (group.length === 1 && group[0]!.confidence >= autoThreshold) {
-      const decision = group[0]!;
-      if (autoApply) {
-        const added = await deps.store.addNodePersonEdge(
-          nodeId,
-          decision.personId!,
-          "mentions",
-          "llm_extract",
-          nodeId,
-        );
-        if (added) {
-          summary.autoLinked += 1;
-          producedByNode.add(nodeId);
+    const existing = existingByNode.get(nodeId)!;
+    // 사람마다 연결 하나로 합치고 애매함을 정한다(person-link-resolve.ts). 한 메모의 서로 다른
+    // 사람은 각자 연결 대상이고, 애매함은 같은 언급이 여러 사람으로 갈렸거나 모델이 불확실을
+    // 표시한 연결에만 붙는다.
+    for (const { decision, ambiguous } of resolveNodePersonLinks(group)) {
+      if (existing.has(decision.personId!)) continue; // 이미 연결됨 — 판정에만 쓰고 쓰기 없음.
+      // conf>=0.9 + 애매하지 않은 연결 — autoApply=true 면 자동 mentions 엣지, false 면 확실한
+      // 연결도 검토 제안으로 보낸다(spec 5.B-2 적용 게이트 위치 선택 — 산출은 유지, 자동
+      // 쓰기만 skip). 낮은 확신(0.6~0.9)·애매한 연결은 autoApply 와 무관하게 늘 제안 경유.
+      if (!ambiguous && decision.confidence >= autoThreshold) {
+        if (autoApply) {
+          const added = await deps.store.addNodePersonEdge(
+            nodeId,
+            decision.personId!,
+            "mentions",
+            "llm_extract",
+            nodeId,
+          );
+          if (added) {
+            summary.autoLinked += 1;
+            producedByNode.add(nodeId);
+          }
+          continue;
         }
+        // autoApply=false — 확실한 연결을 제안으로. autoApplyWithheld 로 표기해 카드가
+        // "자동 연결 대상이었으나 검토 대기" 임을 드러낸다(정직한 게이트 표시).
+        insertPersonLinkProposal(deps.db, {
+          nodeId,
+          personId: decision.personId!,
+          confidence: decision.confidence,
+          candidateText: decision.candidateText,
+          evidence: decision.evidence ?? decision.reason,
+          ambiguous: false,
+          autoApplyWithheld: true,
+        });
+        summary.proposalsInserted += 1;
+        producedByNode.add(nodeId);
         continue;
       }
-      // autoApply=false — 확실한 연결을 제안으로. autoApplied=false 로 표기해 카드가
-      // "자동 연결 대상이었으나 검토 대기" 임을 드러낸다(정직한 게이트 표시).
+      if (decision.confidence < proposalThreshold) continue;
       insertPersonLinkProposal(deps.db, {
         nodeId,
         personId: decision.personId!,
         confidence: decision.confidence,
         candidateText: decision.candidateText,
         evidence: decision.evidence ?? decision.reason,
-        ambiguous: false,
-        autoApplyWithheld: true,
-      });
-      summary.proposalsInserted += 1;
-      producedByNode.add(nodeId);
-      continue;
-    }
-    for (const decision of proposalEligible) {
-      insertPersonLinkProposal(deps.db, {
-        nodeId,
-        personId: decision.personId!,
-        confidence: decision.confidence,
-        candidateText: decision.candidateText,
-        evidence: decision.evidence ?? decision.reason,
-        ambiguous: group.length > 1,
+        ambiguous,
       });
       summary.proposalsInserted += 1;
       producedByNode.add(nodeId);
@@ -491,9 +533,11 @@ async function processPersonLinkBatch(args: ProcessBatchInput): Promise<void> {
   //     산출 낸 노드 → completed / 빈 값·이미 연결됨 → completed_noop /
   //     전건 검증 탈락 → 결정적 실패(attempt++, 상한 시 terminal).
   //   통째 누락 노드는 원장 미기록 → 다음 사이클 후보 잔존(영구 미처리 제거).
+  const missing: PersonLinkNodeContext[] = [];
   for (const [nodeId, key] of batchLedgerKeys) {
     if (!coveredNodeIds.has(nodeId)) {
-      summary.coverageMisses += 1;
+      // 통째 누락 — 원장 기록은 호출자가 한다(배치면 단독 재호출, 단독이면 결정적 실패).
+      missing.push(batch.find((n) => n.id === nodeId)!);
       continue;
     }
     if (producedByNode.has(nodeId)) {
@@ -506,10 +550,11 @@ async function processPersonLinkBatch(args: ProcessBatchInput): Promise<void> {
       recordStageDeterministicFailure(deps.db, {
         ...key,
         maxAttemptsPerTarget: deps.maxAttemptsPerTarget,
-        lastError: "person_link 결정 전건 검증 탈락(unknown-person/bad-confidence)",
+        lastError: "person_link 결정 전건 검증 탈락(unknown-person/bad-confidence/malformed)",
       });
     }
   }
+  return missing;
 }
 
 type DecisionValidation =
@@ -517,6 +562,7 @@ type DecisionValidation =
   | "empty"
   | "already-linked"
   | "unknown-node"
+  | "malformed"
   | "unknown-person"
   | "bad-confidence";
 
@@ -528,6 +574,9 @@ function validateDecision(
 ): DecisionValidation {
   if (!Number.isInteger(decision.nodeId) || !allowedNodeIds.has(decision.nodeId)) {
     return "unknown-node";
+  }
+  if (decision.invalidReason !== undefined) {
+    return "malformed";
   }
   const personId =
     typeof decision.personId === "string" ? decision.personId.trim() : "";

@@ -225,6 +225,7 @@ async function detectDryRunStages(
       atomicThreshold: deps.summaryStage.atomicThreshold,
       batchSize: deps.summaryStage.batchSize,
       stageVersion: cleanupStageLlmLimitsOf("summary").stageVersion,
+      perCallInputCap: deps.budgetConfig.maxEstimatedInputTokensPerCall,
     });
     out.push({ stage: "summary", ...s });
   }
@@ -394,6 +395,7 @@ export function createRunCycle(
           firstParagraphMaxChars: deps.summaryStage.firstParagraphMaxChars,
           stageVersion: cleanupStageLlmLimitsOf("summary").stageVersion,
           maxAttemptsPerTarget: deps.reliability.maxAttemptsPerTarget,
+          perCallInputCap: budgetConfig.maxEstimatedInputTokensPerCall,
           relationAutoApply: deps.relationAutoApply,
         });
         stageRecords.push({

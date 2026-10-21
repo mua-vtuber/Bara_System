@@ -10,24 +10,15 @@
  * 동작 보존: 함수 본체·정규식·trim 규칙은 옛 search.ts 와 byte 동일하다(이동만).
  */
 
-import type { Polarity, MemoryType } from "../../memory/types.ts";
+import { MEMORY_TYPES, POLARITIES, type Polarity, type MemoryType } from "../../memory/types.ts";
 import { eventDateRange, type EventDateRange } from "../../memory/event-date.ts";
 
 /** body.polarity 가 유효한 Polarity enum 문자열일 때만 그 값, 아니면 undefined. */
 export function parsePolarity(raw: unknown): Polarity | undefined {
-  return raw === "positive" || raw === "negative" || raw === "neutral"
-    ? raw
+  return typeof raw === "string" && (POLARITIES as readonly string[]).includes(raw)
+    ? (raw as Polarity)
     : undefined;
 }
-
-/** MemoryType enum 멤버 — parseMemoryType 의 단일 출처(검색 입구 검증용). */
-const MEMORY_TYPES: readonly MemoryType[] = [
-  "fact",
-  "preference",
-  "triple",
-  "insight",
-  "episode",
-];
 
 /**
  * memory_type 한정 필터 파싱(공통 인프라 1.2 / 통일 원칙). 유효한 MemoryType enum

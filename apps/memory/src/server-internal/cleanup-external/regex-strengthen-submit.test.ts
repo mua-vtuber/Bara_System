@@ -138,6 +138,17 @@ describe("regex_pattern_add 외부 제출 — 서버 하네스 판정", () => {
     expect(getStageResult(db, "regex_strengthen", String(nodeId))?.status).toBe("completed");
   });
 
+  test("sourceNodeId 칸이 없어도(지시문의 칸 목록 그대로) 후보 열쇠로 채워 통과, 다른 값이면 400", async () => {
+    const { nodeId, candidate } = seed(ZOMBIE);
+    const { sourceNodeId: _omitted, ...withoutSource } = zombiePayload(nodeId);
+    const r = await submit(withoutSource, candidate);
+    if (!r.ok || r.proposalId === null) throw new Error(`expected a proposal, got ${JSON.stringify(r)}`);
+    const row = db.prepare("SELECT payload_json FROM cleanup_proposals WHERE id = ?").get(r.proposalId) as { payload_json: string };
+    expect(JSON.parse(row.payload_json).sourceNodeId).toBe(nodeId);
+    const wrong = await submit(zombiePayload(nodeId + 1), candidate);
+    expect(wrong).toMatchObject({ ok: false, httpStatus: 400, message: expect.stringContaining("sourceNodeId") });
+  });
+
   test("옛 4칸 payload(polarity·예문·설명 없음) → 400, 빠진 칸 이름을 댄다(기본값 채우기 없음)", async () => {
     const { nodeId, candidate } = seed(ZOMBIE);
     const r = await submit({ pattern: "좀비고양이출현", score: 3, category: "decision", sourceNodeId: nodeId }, candidate);
@@ -171,6 +182,13 @@ describe("regex_pattern_add 외부 제출 — 서버 하네스 판정", () => {
     });
     expect(proposalCount()).toBe(0);
     expect(getStageResult(db, "regex_strengthen", String(nodeId))?.status).toBe("completed_noop");
+  });
+
+  test("예문이 그 메모 원문에 없으면 → rejected(source_match) + 제안 0 (서버 사이클과 같은 원문 매치 검사)", async () => {
+    const { nodeId, candidate } = seed(ZOMBIE);
+    const r = await submit(zombiePayload(nodeId, { exampleInput: "좀비고양이출현 사건이 어제 또 있었다" }), candidate);
+    expect(r.ok && r.rejected?.reason).toBe("source_match");
+    expect(proposalCount()).toBe(0);
   });
 
   test("과매치 임계는 설정값을 따른다(임계 1 이면 같은 표본에서도 통과)", async () => {
@@ -260,7 +278,7 @@ describe("regex_pattern_add 외부 제출 — 서버 하네스 판정", () => {
     expect(r1.ok && r1.proposalId !== null).toBe(true);
     // 둘째 메모는 첫 제출 뒤에 심는다 — 먼저 심으면 첫 제출의 과매치 표본에 들어가 첫 제출이 떨어진다.
     const second = seed("좀비고양이출현 사건이 또 있었다");
-    const r2 = await submit(zombiePayload(second.nodeId), second.candidate);
+    const r2 = await submit(zombiePayload(second.nodeId, { exampleInput: "좀비고양이출현 사건이 또 있었다" }), second.candidate);
     expect(r2).toEqual({
       ok: true,
       proposalId: null,
@@ -277,7 +295,7 @@ describe("regex_pattern_add 외부 제출 — 서버 하네스 판정", () => {
     // 첫 메모가 과매치 표본에 들어가 같은 규칙이 그 글을 잡으므로, 이 시험은 과매치 게이트를 연다.
     settings.cleanupDeepPass.regexStrengthen.overmatchThreshold = 1;
     const second = seed("좀비고양이출현 사건이 또 있었다");
-    const r2 = await submit(zombiePayload(second.nodeId), second.candidate);
+    const r2 = await submit(zombiePayload(second.nodeId, { exampleInput: "좀비고양이출현 사건이 또 있었다" }), second.candidate);
     expect(r2.ok && r2.proposalId !== null).toBe(true);
   });
 

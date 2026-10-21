@@ -15,18 +15,6 @@
     "verbatimModuleSyntax": true,
     "noEmit": true,
     "baseUrl": ".",
-    // MCP T4 — @modelcontextprotocol/sdk 는 zod 를 peer(^3.25||^4.0)뿐 아니라 자신의
-    // dependencies 에도 선언해, bun 이 SDK 전용 zod@3.25.x 사본을 별도로 링크한다.
-    // apps/memory 가 쓰는 zod@4.4.3 과 물리적으로 다른 인스턴스라 SDK 의 zod-compat
-    // 타입과 registerTool 스키마 타입이 dual-package 로 어긋난다(런타임은 SDK 의
-    // 버전 감지로 정상 — 이건 순수 타입체크 전용 교정). 이 별칭으로 SDK 의 bare
-    // specifier import 를 apps/memory 가 실제로 쓰는 zod 인스턴스로 고정한다.
-    // 제거 조건: SDK 가 zod 를 peer 로만 선언하거나, bun 이 zod 를 단일 인스턴스로
-    // dedup 하게 되면 삭제 가능.
-    "paths": {
-      "zod": ["node_modules/zod"],
-      "zod/*": ["node_modules/zod/*"]
-    },
 
     // Best practices
     "strict": true,

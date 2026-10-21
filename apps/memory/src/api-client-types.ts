@@ -91,9 +91,6 @@ export interface ExtractFromTextResult {
     content: string;
     memoryType: string;
     importance: number;
-    subject?: string;
-    predicate?: string;
-    object?: string;
   }>;
   /**
    * 원문 보존 노드. preserveRaw=true 요청 시 채워짐. LLM이 압축하거나

@@ -1,9 +1,0 @@
-# apps/memory/src/memory/prompts/extractor.yaml
-# 프롬프트 레지스트리 시드. ⚠️ 권위 추출 프롬프트(현 extractor.ts 8규칙)는
-# Phase 6 추출기 재작성 시 이 파일로 이전 — 1.0a는 레지스트리 동작 증명용 초기 엔트리.
-extractor_ko_default: |
-  다음 글에서 atomic 단위 사실 / 결정 / 선호를 JSON 배열로 추출한다.
-  각 항목은 한 문장으로 마침표 종결, 주어 명시, 접속사·수동태 회피.
-extractor_en_default: |
-  Extract atomic facts/decisions/preferences from the input as a JSON array.
-  One sentence per item, explicit subject, no conjunctions or passive voice.

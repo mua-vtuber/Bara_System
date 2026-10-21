@@ -72,11 +72,11 @@ export function registerCaptureTools(server: McpServer, ctx: McpToolContext): vo
           evidence: memoryEvidenceSchema.optional(),
           // force 칸은 검사를 도는 3종에만 노출한다 — save_preference 는 검사
           // 자체를 안 돌아 우회할 것이 없으므로 칸을 두면 거짓 손잡이가 된다.
-          ...(tool.duplicateCheck ? { force: z.boolean().optional() } : {}),
+          ...(tool.duplicateCheck ? { force: z.boolean().optional().describe("true only to override a DUPLICATE refusal for a genuinely distinct memory.") } : {}),
           // T25(spec H) — facet 은 save_preference 한 종에만 노출한다(닫힌 zod
           // enum — get_profile 조회 입력과 같은 PROFILE_FACETS 단일 출처를 공유).
           // 나머지 3종은 preference 트랙이 아니므로 이 칸을 둘 이유가 없다.
-          ...(tool.name === "save_preference" ? { facet: z.enum(PROFILE_FACETS).optional() } : {}),
+          ...(tool.name === "save_preference" ? { facet: z.enum(PROFILE_FACETS).optional().describe(`Preference category (${PROFILE_FACETS.join(" | ")}). Set it when the category is clear; omit it when unsure.`) } : {}),
         },
       },
       async (args) => {

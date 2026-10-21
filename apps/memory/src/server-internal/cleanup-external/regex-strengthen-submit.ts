@@ -122,7 +122,15 @@ export function finishRegexStrengthenExternal(
   };
 
   const db = deps.store.getRawDb();
+  // 서버 사이클과 같은 원문 매치 검사 — 신선도 검사가 이 글로 지문을 맞췄으므로 AI 가 본 글과 같다.
+  const source = db
+    .prepare("SELECT content FROM knowledge_nodes WHERE id = ?")
+    .get(sourceNodeId) as { content: string } | null;
+  if (!source) {
+    return { ok: false, httpStatus: 404, message: `sourceNodeId ${sourceNodeId} 의 글이 없음 — 원문 매치 검사를 할 수 없음` };
+  }
   const result = testRegexProposal(proposal, {
+    sourceText: source.content,
     overmatchSample: loadOvermatchSample(db, overmatchSampleSize, [sourceNodeId]),
     overmatchThreshold,
     currentPatterns: deps.regexL0.activePatterns().map((p) => p.regex),

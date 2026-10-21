@@ -84,6 +84,15 @@ export function processLensDraftBatch(args: ProcessBatchInput): void {
     const lens = lensByEntity.get(decision.entityId);
     if (!lens) continue; // 방어(도달 불가 — 배치 안이면 map 에 있다).
 
+    // ── 렌즈 초안 AI 는 relations·metadata 를 채우지 않는다(지시문: 항상 {}). 어기고 채워 와도
+    //   그 두 칸만 버리고 columns·labels 는 살린다(엔티티 통째 거부는 유료 호출 낭비). 버린 수는
+    //   요약에 세고 사이클 끝에 한 줄로 알린다. ──
+    const stripped = stripLensDraftRelationsAndMetadata(decision.values);
+    if (stripped.dropped) {
+      summary.droppedRelationsMetadata += 1;
+      decision.values = stripped.values;
+    }
+
     // ── 생성 직후 적용 측 사전 필터(spec 6.C-2) — 렌즈 밖 키·person columns·관계값 모양·
     //   dataType 을 적용 전에 판정한다. 탈락은 completed_noop 이 아니라 결정적 실패로
     //   원장에 사유 기록 + loud(결함 초안을 조용히 삼키지 않는다). ──
@@ -138,6 +147,21 @@ export function processLensDraftBatch(args: ProcessBatchInput): void {
       summary.completedNoop += 1;
     }
   }
+}
+
+/**
+ * 렌즈 초안 AI 출력에서 relations·metadata 를 비운다(순수 함수). 둘 중 하나라도 비어 있지
+ * 않았으면 dropped=true. 내부 사이클과 외부 AI 제출 경로가 같은 규칙을 쓰도록 공유한다.
+ * 다른 출처 제안(승인 시 적용 경로)의 relations·metadata 처리에는 관여하지 않는다.
+ */
+export function stripLensDraftRelationsAndMetadata(values: LensDraftValues): {
+  values: LensDraftValues;
+  dropped: boolean;
+} {
+  const dropped =
+    (values.relations !== undefined && Object.keys(values.relations).length > 0) ||
+    (values.metadata !== undefined && Object.keys(values.metadata).length > 0);
+  return { values: { ...values, relations: {}, metadata: {} }, dropped };
 }
 
 /** 초안에 채울 값이 하나도 없으면 true(빈 columns·labels·relations·metadata). */

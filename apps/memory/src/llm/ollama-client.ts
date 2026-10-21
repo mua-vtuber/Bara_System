@@ -49,10 +49,10 @@ export interface OllamaClientOptions {
   /**
    * Ollama 모델 컨텍스트 윈도우 (토큰). 기본 8192.
    *
-   * 본 시스템은 system prompt + 5 few-shot user/assistant pairs +
-   * 실제 입력 = 약 2500~3500 토큰 보냄. Ollama 모델별 기본 num_ctx가
-   * 2048~4096이라 잘릴 수 있음. 8192면 여유. 더 길게 잡고 싶으면 매뉴얼
-   * 입력(긴 일기) 지원 시점에 16384로.
+   * 추출은 system prompt + few-shot user/assistant 쌍(memory/extractor-internal/prompt.ts
+   * FEW_SHOT_EXAMPLES) + 실제 입력 + 출력 한도를 이 창 하나에 담는다. 입력 몫·출력 한도의
+   * 계산은 memory/extractor-output-limit.ts. Ollama 모델별 기본 num_ctx가 2048~4096이라
+   * 잘릴 수 있어 8192 로 둔다.
    *
    * env `OLLAMA_NUM_CTX` 로 덮어쓸 수 있음 — settings UI 비노출 튜닝 노브 (S10 부트스트랩 예외). 양의 정수가 아니면 추출기가 ollama 일 때 시작이 멈추고, 다른 슬롯은 슬롯별 초기화 실패로 남는다.
    */
@@ -177,8 +177,8 @@ export class OllamaClient implements ObservableLlmClient {
       body.think = options.think;
     }
 
-    // num_ctx는 항상 명시 — Ollama 모델별 기본값(2048~4096)이 우리의 5-shot
-    // few-shot 흐름을 잘라낼 수 있어 안정성 위해 강제로 박는다.
+    // num_ctx는 항상 명시 — Ollama 모델별 기본값(2048~4096)이 추출의 few-shot 흐름
+    // (시스템 지시 + 예시 쌍 + 본문 + 출력 한도)을 잘라낼 수 있어 안정성 위해 강제로 박는다.
     body.options = { num_ctx: this.numCtx };
     if (options.temperature !== undefined) {
       body.options.temperature = options.temperature;

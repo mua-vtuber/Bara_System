@@ -29,6 +29,8 @@ import {
   searchMemories,
 } from "./home/dashboard-api.ts";
 import { detailTrashControl } from "./home/detail-trash-control.ts";
+import { detailScheduleControl } from "./home/detail-schedule-control.ts";
+import type { ScheduleVisibilityResult } from "./home/dashboard-api.ts";
 import { removeTrashedFromSearch } from "./home/search-result-filter.ts";
 import { memoryIdFromSearch, pageFromLocation } from "./home/memory-link.ts";
 import { renderArchiveList } from "./home/archive-list.ts";
@@ -694,6 +696,23 @@ async function handleMemoryTrashed(
   await refreshCoreData();
 }
 
+async function handleScheduleVisibilityChanged(memoryId: number, result: ScheduleVisibilityResult): Promise<void> {
+  const current = state.selected;
+  if (current.kind === "memory" && current.memoryId === memoryId) {
+    if (result.action === "reverted_schedule") {
+      // 선택한 일정 노드가 휴지통으로 갔다.
+      state.selected = { kind: "none" };
+    } else {
+      // 표시 칸만 바뀐 같은 기억 — 상세의 metadata 를 맞춰 버튼 문구가 바뀌게 한다.
+      const metadata = { ...(current.metadata ?? {}) };
+      if (result.hidden) metadata["scheduleHidden"] = true;
+      else delete metadata["scheduleHidden"];
+      state.selected = { ...current, metadata, memory: current.memory ? { ...current.memory, metadata } : current.memory };
+    }
+  }
+  await refreshCoreData();
+}
+
 /** 상세 패널에 마지막으로 그린 항목 — 다른 항목으로 바뀔 때만 스크롤을 맨 위로 돌리는 기준. */
 let lastRenderedDetailNodeId: string | null = null;
 
@@ -745,6 +764,13 @@ function renderDetail(): void {
       if (edit) actions.append(edit);
       else children.push(el("p", {}, "문서·이미지 원본은 직접 수정할 수 없습니다. 검색 가능한 텍스트나 파생 기억을 수정하세요."));
     }
+    const scheduleControl = detailScheduleControl({
+      memoryId,
+      eventAt: selected.memory?.eventAt,
+      metadata: selected.metadata,
+      onChanged: (result) => handleScheduleVisibilityChanged(memoryId, result),
+    });
+    if (scheduleControl) actions.append(scheduleControl);
     actions.append(detailTrashControl({
       memoryId,
       metadata: state.selected.metadata,

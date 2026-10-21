@@ -165,5 +165,6 @@ export const serviceCoreMessages = {
   assistant: {
     foundMemories: "관련 기억을 찾았습니다. 내용을 확인해 주세요.",
     noMemories: "관련 기억을 찾지 못했습니다.",
+    noGroundedAnswer: "저장된 기억에서 답을 찾지 못했어요.",
   },
 };

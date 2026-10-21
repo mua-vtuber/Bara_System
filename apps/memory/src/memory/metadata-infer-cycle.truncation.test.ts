@@ -318,7 +318,7 @@ describe("createOllamaInferFn — 지시문·메모 목록 양식", () => {
     expect(result).toEqual([]);
     const system = seen.find((m) => m.role === "system")!.content;
     const user = seen.find((m) => m.role === "user")!.content;
-    expect(user).toContain('[97] "에버랜드 왔다" (장소=에버랜드, 시각=없음)');
+    expect(user).toContain('[97] "에버랜드 왔다" (장소="에버랜드", 시각=없음)');
     expect(user).not.toContain("node");
     expect(system).toContain("메모 번호는 쓰지 말고");
   });

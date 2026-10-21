@@ -70,9 +70,6 @@ export interface ExtractedItem {
   content: string;
   memoryType: MemoryType;
   importance: number;
-  subject?: string;
-  predicate?: string;
-  object?: string;
   /**
    * Phase 7 명시 메타 (Task 3) — atomic 별로 문장에 *명시된* 장소·사람·시간 표현.
    * per-atomic: "병원 갔다가 약국 들렀다" 처럼 한 메시지가 여러 장소로 갈리면
@@ -103,7 +100,10 @@ export interface ExtractionStoreResult {
    * 보고 돌렸다. 같은 원문은 한 번만 담는다. 계보(lineage) 없이 저장하면 늘 빈 배열이다.
    */
   selfClaimNodeIds: number[];
-  /** LLM이 후보로 뽑았지만 importance 하한 미달로 버린 갯수. */
+  /**
+   * LLM 이 후보로 냈지만 버린 갯수 — importance 하한 미달, importance 값이 없거나 숫자가
+   * 아닌 항목(빈 값을 기본값으로 채우지 않고 버린다), 응답 안 중복, 원문 재진술 1건.
+   */
   filteredOutCount: number;
   /** 생성된 supersedes 엣지 수 (conflict 검출). */
   conflictsDetected: number;
@@ -128,10 +128,9 @@ export interface ExtractorOptions {
   /** AbortSignal 전달용. */
   signal?: AbortSignal;
   /**
-   * Phase 7 Task 4 — 등록 기준점(노드 생성 시각). 두 곳에 쓰인다:
-   *  (1) LLM 추출 호출 시 "오늘 날짜" 단서로 주입 — 애매 표현 환산 기준.
-   *  (2) extractAndStore 가 추출 메타(이벤트 날짜)를 ISO 로 환산할 때 기준.
-   * 미주입이면 호출 시점의 new Date() — 운영 default. 테스트는 결정성 위해 주입.
+   * Phase 7 Task 4 — 등록 기준점(노드 생성 시각). extractAndStore 가 추출 메타(이벤트 날짜)를
+   * ISO 로 환산할 때 기준이다. LLM 에는 보내지 않는다 — 모델은 날짜 표현을 글자 그대로 옮기고
+   * 환산은 코드(metadata-apply.ts)가 한다. 미주입이면 호출 시점의 new Date() — 운영 default. 테스트는 결정성 위해 주입.
    */
   now?: Date;
 }

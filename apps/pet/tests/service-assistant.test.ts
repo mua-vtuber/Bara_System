@@ -184,18 +184,18 @@ test("an AI answer grounded in a found memory is found", async () => {
   } finally { memory.server.stop(true); ai.server.stop(true); rmSync(dir, { recursive: true, force: true }); }
 });
 
-// An AI answer exists only with at least one citation: `parseGroundedAnswer` rejects an empty `sourceIds`
-// as AI_RESPONSE, so a zero-citation response is a failed AI answer, not a `found` one.
-test("an AI response citing no memory is rejected and answers aiFailed with every found memory as a source", async () => {
+// An empty `sourceIds` means the AI found no supporting memory: the model's own text is dropped (it could be
+// ungrounded) and the fixed not-found message is shown with no sources, neither as `found` nor as a failure.
+test("an AI response citing no memory answers notFound with the fixed message and no sources", async () => {
   const memory = memoryFixture({ search: () => Response.json({ results: [{ id: 1, content: "테스트용 기억 본문" }, { id: 2, content: "두 번째 테스트용 기억" }] }) });
   const ai = aiFixture(() => Response.json({ message: { content: '{"answer":"근거를 대지 못한 답입니다.","sourceIds":[]}' } }));
   const { config, dir, audience } = await realConfig(memory.baseUrl, { baseUrl: ai.baseUrl, model: "authored-fixture" });
   try {
     const assistant = new Assistant(config, new MemoryClient(config, new CredentialRoutes(new LocalServer())));
     const answer = await assistant.ask("AI가 아무 기억도 인용하지 않는 질문", context, audience);
-    expect(answer).toMatchObject({ generated: false, outcome: "aiFailed", text: messages.feedback.answerFailed("AI_RESPONSE") });
-    expect(answer.sources.map((source) => source.id)).toEqual([1, 2]);
-    expect(ai.state.calls).toBe(1); // the rejection came from a real AI response, not from skipping the AI
+    expect(answer).toMatchObject({ generated: false, outcome: "notFound", text: messages.assistant.noGroundedAnswer });
+    expect(answer.sources).toEqual([]);
+    expect(ai.state.calls).toBe(1); // the not-found answer came from a real AI response, not from skipping the AI
   } finally { memory.server.stop(true); ai.server.stop(true); rmSync(dir, { recursive: true, force: true }); }
 });
 

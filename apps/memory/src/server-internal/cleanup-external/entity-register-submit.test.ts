@@ -51,6 +51,17 @@ async function refOf(nodeId: number) {
   return { stage: "entityRegister", targetKey: cand.targetKey, inputFingerprint: cand.inputFingerprint, stageVersion: cand.stageVersion };
 }
 
+test("an answer without a nodeId field (as the server instruction asks) takes it from the candidate; a different nodeId stays refused", async () => {
+  const memo = await store.addNode({ content: MONGRYONG, sourceType: "auto_capture" });
+  const ref = await refOf(memo);
+  const out = await submitExternalProposal(deps, { kind: "entity_register", payload: { ...MONGRYONG_ANSWER }, candidate: ref });
+  expect(out).toMatchObject({ ok: true });
+  expect(getStageResult(db, "entity_register", String(memo))!.status).toBe("completed");
+  const other = await store.addNode({ content: MONGRYONG_OTHER, sourceType: "auto_capture" });
+  expect(await submitExternalProposal(deps, { kind: "entity_register", payload: { nodeId: other + 1, ...MONGRYONG_ANSWER }, candidate: await refOf(other) }))
+    .toMatchObject({ ok: false, httpStatus: 400, message: expect.stringContaining("nodeId") });
+});
+
 test("a pet submission is judged by the same code as the server cycle (D7)", async () => {
   // 서버 단계 스위치(enabled)는 기본값 false 그대로 — 외부 표면은 이 스위치를 보지 않는다.
   expect(settings.cleanupDeepPass.entityRegister.enabled).toBe(false);

@@ -197,7 +197,7 @@ export interface SaveResult {
 }
 /** How an answer came out, named by `assistant.ts` where the answer is built so no screen has to guess it
  * from the text or the sources: `found` = the search returned at least one memory (whether or not an AI
- * wrote the answer), `notFound` = the search returned none, `aiFailed` = memories were found but the
+ * wrote the answer), `notFound` = the search returned none or the answer AI found no memory that answers it, `aiFailed` = memories were found but the
  * answer AI could not produce an answer. The same list is `src/shared/native-host.json`
  * `contract.answerOutcomes`, which the host checks an `answer` feedback against. */
 export const ANSWER_OUTCOMES = ["found", "notFound", "aiFailed"] as const;

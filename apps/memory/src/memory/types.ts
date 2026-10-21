@@ -2,26 +2,32 @@
  * Shared memory domain types.
  *
  * Ports of the relevant parts of:
- *   - backend/app/models/memory.py (MemoryType, ExtractionItem, ...)
+ *   - backend/app/models/memory.py (MemoryType, ...)
  *
  * Only the surface used by ported modules is included here. Other fields
  * (subject/predicate/object for triples, etc.) are added when the modules
  * that need them are ported.
  */
 
-/** Types of knowledge stored in the graph. */
-export type MemoryType =
-  | "fact"
-  | "preference"
-  | "triple"
-  | "insight"
-  | "episode";
+/**
+ * Types of knowledge stored in the graph — 허용값의 단일 출처. MemoryType 은 이 목록에서
+ * 파생되므로 값을 추가·삭제하면 검색 입구·MCP 도구·추출 파서·추출 지시문이 한꺼번에 따라온다.
+ */
+export const MEMORY_TYPES = [
+  "fact",
+  "preference",
+  "triple",
+  "insight",
+  "episode",
+] as const;
+export type MemoryType = (typeof MEMORY_TYPES)[number];
 
 /**
  * D7 — 감정 극성 라벨. knowledge_nodes.polarity 칸 값(기준 스키마).
  * NULL = 라벨 없음. 1.1c polarity 필터(spec 5.5)가 이 값을 읽어 후보를 거른다.
  */
-export type Polarity = "positive" | "negative" | "neutral";
+export const POLARITIES = ["positive", "negative", "neutral"] as const;
+export type Polarity = (typeof POLARITIES)[number];
 
 /** How a knowledge node was created. */
 export type SourceType =
@@ -43,16 +49,6 @@ export type SourceType =
    * 한 줄. graceful — VLM 호출 실패 시 본 노드 생성 안 함 (자산 저장 흐름 차단 X).
    */
   | "image_caption";
-
-/** A single fact extracted by the LLM or regex extractor. */
-export interface ExtractionItem {
-  content: string;
-  memoryType: MemoryType;
-  importance: number;
-  subject?: string;
-  predicate?: string;
-  object?: string;
-}
 
 /** Conversation turn shape consumed by extractors. */
 export interface ConversationTurn {

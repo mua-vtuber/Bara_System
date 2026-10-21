@@ -31,6 +31,26 @@ export interface OpenAiChatDialect {
   acceptsSampling(model: string): boolean;
   /** 키가 반드시 있어야 하는지. */
   apiKeyRequired: boolean;
+  /**
+   * response_format.json_schema 의 최상위가 객체여야 하는지. true 면 최상위가 배열인 schema 를
+   * {"items": <배열 schema>} 객체로 감싸 보낸다(wrapArrayRootSchema) — 모델은 {"items":[...]} 로
+   * 답한다. 추출 응답 파서(memory/extractor-internal/parse.ts coerceToArray)는 "items" 감싸기를 받는다.
+   */
+  jsonSchemaObjectRootOnly: boolean;
+}
+
+/** 최상위 배열 schema 를 객체로 감쌀 때의 칸 이름. */
+export const OPENAI_JSON_SCHEMA_ARRAY_WRAPPER_KEY = "items";
+
+/** 최상위가 배열이면 {type:"object", properties:{items: schema}, required:["items"]} 로 감싼다. 아니면 그대로. */
+export function wrapArrayRootSchema(schema: Record<string, unknown>): Record<string, unknown> {
+  if (schema.type !== "array") return schema;
+  return {
+    type: "object",
+    properties: { [OPENAI_JSON_SCHEMA_ARRAY_WRAPPER_KEY]: schema },
+    required: [OPENAI_JSON_SCHEMA_ARRAY_WRAPPER_KEY],
+    additionalProperties: false,
+  };
 }
 
 export type OpenAiContentPart =
@@ -95,9 +115,12 @@ export function buildOpenAiChatBody(
     body[dialect.tokenLimitParam] = options.maxOutputTokens;
   }
   if (options.jsonSchema) {
+    const schema = dialect.jsonSchemaObjectRootOnly
+      ? wrapArrayRootSchema(options.jsonSchema)
+      : options.jsonSchema;
     body.response_format = {
       type: "json_schema",
-      json_schema: { name: OPENAI_JSON_SCHEMA_NAME, schema: options.jsonSchema, strict: false },
+      json_schema: { name: OPENAI_JSON_SCHEMA_NAME, schema, strict: false },
     };
   } else if (options.jsonMode) {
     body.response_format = { type: "json_object" };

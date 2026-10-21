@@ -185,6 +185,27 @@ describe("buildDateOccurrences", () => {
     expect([...response.upcoming, ...response.past].some((o) => o.title.includes("버터"))).toBe(false);
   });
 
+  test("scheduleHidden 표시가 켜진 메모는 일정 목록에서 빠지고 다른 메모는 남는다", async () => {
+    const hiddenId = await h.store.addNode({
+      content: "교훈: 블렌더 정리",
+      eventAt: "2026-06-20",
+      metadata: { scheduleHidden: true },
+      embedding: embeddingFixture(),
+    });
+    await h.store.addNode({ content: "치과 예약", eventAt: "2026-07-05", embedding: embeddingFixture() });
+    await h.store.addNode({
+      content: "표시가 false 인 메모", eventAt: "2026-07-06", metadata: { scheduleHidden: false }, embedding: embeddingFixture(),
+    });
+
+    const response = await buildDateOccurrences(deps(), { now: new Date(2026, 5, 30, 9, 0, 0), days: 30, pastDays: 30, limit: 80 });
+
+    const titles = [...response.upcoming, ...response.past].map((o) => o.title);
+    expect(titles).toContain("치과 예약");
+    expect(titles).toContain("표시가 false 인 메모");
+    expect(titles.some((t) => t.includes("블렌더"))).toBe(false);
+    expect((await h.store.getNode(hiddenId))?.eventAt).toBe("2026-06-20");
+  });
+
   test("일정이 만들어진 원본 메모는 달력에서 빠지고 일정 제목만 남는다", async () => {
     const memoId = await h.store.addNode({
       content: "민수가 7월 3일 결혼한다더라",

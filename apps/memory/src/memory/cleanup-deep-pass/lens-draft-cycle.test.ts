@@ -10,6 +10,8 @@
  *   - 자동 적용 0: 유효 초안도 엔티티를 안 고치고 cleanup_proposals 로만 남는다.
  *   - fingerprint guard: 제안 payload 에 초안 시점 fingerprint·렌즈 직렬화·근거 노드 동반.
  *   - approve 공유 함수 경유: cleanup-proposals approve 가 applyLensDraft 로 실제 적용.
+ *   - 2026-10-19: 지시문이 relations 를 요청하지 않음(항상 {}) + 엔티티 블록에 relations 칸 없음,
+ *     출력 한도가 엔티티 수에 비례, 한 호출 엔티티 수가 출력 상한 아래로 잘림.
  */
 
 import {
@@ -41,6 +43,12 @@ import {
   type LensDraftInferInput,
 } from "./lens-draft-cycle.ts";
 import { getStageResult } from "./stage-results-ledger.ts";
+import { buildLensDraftRunRequest } from "./lens-draft-infer-prompt.ts";
+import { stripLensDraftRelationsAndMetadata } from "./lens-draft-batch.ts";
+import {
+  cleanupStageMaxItemsPerCall,
+  cleanupStageMaxOutputTokensFor,
+} from "./stage-constants.ts";
 
 const STAGE_VERSION = 1;
 const MAX_ATTEMPTS = 3;
@@ -248,6 +256,59 @@ describe("유효 초안 → 제안(자동 적용 0)", () => {
     const led = getStageResult(db, "lens_draft", targetKeyOf("material", ent.id));
     expect(led?.status).toBe("completed");
   });
+
+  test("AI 가 지시를 어기고 relations·metadata 를 채워도 그 두 칸만 버리고 칸 초안은 제안으로 남는다", async () => {
+    const ent = await store.entitiesRepo.findOrCreateEntity("material", "관계어김자료");
+    await addEvidenceNode(ent.id, "이 자료의 주제는 그래프 이론이다.");
+
+    let filledKey = "";
+    const infer = fixtureInfer((input) => {
+      const target = input.entities.find((e) => e.entityId === ent.id)!;
+      filledKey = target.emptyColumnKeys[0]!;
+      return [
+        {
+          typeName: "material",
+          entityId: ent.id,
+          values: {
+            columns: { [filledKey]: "그래프 이론" },
+            labels: {},
+            // 렌즈 밖 키여도 사전 필터 탈락이 아니라 조용히(요약에 세고) 버려진다.
+            relations: { 렌즈에없는관계: { id: "x" } },
+            metadata: { 렌즈에없는키: "값" },
+          },
+        },
+      ];
+    });
+    const summary = await runLensDraftCycle(cycleDeps({ infer: infer.fn }));
+
+    expect(summary.droppedRelationsMetadata).toBe(1);
+    expect(summary.rejectedInvalid).toBe(0);
+    expect(summary.proposalsInserted).toBe(1);
+    const proposals = listLensDraftProposals();
+    expect(proposals).toHaveLength(1);
+    const values = proposals[0]!.payload.values as Record<string, Record<string, unknown>>;
+    expect(values.columns).toEqual({ [filledKey]: "그래프 이론" });
+    expect(values.relations).toEqual({});
+    expect(values.metadata).toEqual({});
+    expect(getStageResult(db, "lens_draft", targetKeyOf("material", ent.id))?.status).toBe("completed");
+  });
+});
+
+describe("relations·metadata 비우기(내부·외부 제출 공용 규칙)", () => {
+  test("채워진 칸이 있으면 dropped=true 로 두 칸만 비우고 나머지는 그대로, 비어 있으면 dropped=false", () => {
+    const filled = stripLensDraftRelationsAndMetadata({
+      columns: { a: 1 },
+      labels: { b: 2 },
+      relations: { r: { id: "x" } },
+      metadata: {},
+    });
+    expect(filled).toEqual({
+      dropped: true,
+      values: { columns: { a: 1 }, labels: { b: 2 }, relations: {}, metadata: {} },
+    });
+    const clean = stripLensDraftRelationsAndMetadata({ columns: {}, labels: {}, relations: {}, metadata: {} });
+    expect(clean.dropped).toBe(false);
+  });
 });
 
 describe("멱등", () => {
@@ -420,5 +481,62 @@ describe("approve 공유 함수 경유", () => {
     // 초안 값("그래프 이론")이 적용되지 않았다 — 사용자가 먼저 채운 값이 그대로 남는다.
     const cols = store.entitiesRepo.listAttributes(ent.id).filter((a) => a.isColumn);
     expect(cols.find((c) => c.key === filledKey)?.value).toBe("사용자가 먼저 채운 값");
+  });
+});
+
+describe("지시문·출력 한도(2026-10-19)", () => {
+  /** 관계 칸이 있는 렌즈 데이터 fixture — 순수 함수 입력(DB 불필요). */
+  const contextWithRelations: LensDraftInferInput["entities"][number] = {
+    typeName: "project",
+    entityId: "prj_fixture",
+    name: "그래프 프로젝트",
+    emptyColumnKeys: ["주제"],
+    filledColumns: {},
+    evidence: [{ nodeId: 1, content: "그래프 프로젝트는 수민이 이끈다." }],
+    lens: {
+      typeName: "project",
+      columns: [{ key: "주제", dataType: "text" }],
+      attributeKeys: ["분야"],
+      relations: [
+        { key: "담당자", relation: "managed_by", targetTypes: ["person"], defaultTargetType: "person" },
+      ],
+      metadataKeys: [],
+    },
+  };
+
+  test("지시문은 relations 를 채우지 말라고(항상 {}) 하고, 엔티티 블록은 relations 를 채울 칸으로 내놓지 않는다", () => {
+    const req = buildLensDraftRunRequest({ entities: [contextWithRelations] });
+    const system = req.messages[0]!.content;
+    const user = req.messages[1]!.content;
+    expect(system).toContain("relations 와 metadata 는 채우지 않는다. 둘 다 항상 빈 객체 {} 로 둔다.");
+    // 옛 모순·중복 문장 제거 확인.
+    expect(system).not.toContain("기존 id 객체만 쓴다");
+    expect(system).not.toContain("광고된 키만 채운다");
+    expect(user).not.toContain("채울 수 있는 relations");
+    expect(user).not.toContain("담당자");
+    expect(user).toContain("채울 수 있는 columns: 주제(text)");
+  });
+
+  test("출력 한도는 엔티티 수에 비례(기본 몫 + 엔티티 수 × 엔티티 몫), 한 호출 상한 개수에서도 상한 아래", () => {
+    const one = buildLensDraftRunRequest({ entities: [contextWithRelations] });
+    expect(one.maxOutputTokens).toBe(cleanupStageMaxOutputTokensFor("lens_draft", 1));
+    const max = cleanupStageMaxItemsPerCall("lens_draft");
+    const full = buildLensDraftRunRequest({
+      entities: Array.from({ length: max }, () => contextWithRelations),
+    });
+    expect(full.maxOutputTokens).toBe(cleanupStageMaxOutputTokensFor("lens_draft", max));
+    expect(full.maxOutputTokens).toBeLessThan(full.maxOutputTokensCap);
+  });
+
+  test("한 사이클 후보가 호출당 엔티티 상한을 넘으면 상한 개수씩 나눠 부른다", async () => {
+    const max = cleanupStageMaxItemsPerCall("lens_draft");
+    const total = max + 1;
+    for (let i = 0; i < total; i++) {
+      const ent = await store.entitiesRepo.findOrCreateEntity("material", `분할자료${i}`);
+      await addEvidenceNode(ent.id, `자료 ${i} 의 주제는 그래프다.`);
+    }
+    const infer = fixtureInfer(() => []);
+    await runLensDraftCycle(cycleDeps({ infer: infer.fn, batchSize: total }));
+    expect(infer.calls.map((c) => c.entities.length)).toEqual([max, 1]);
   });
 });
