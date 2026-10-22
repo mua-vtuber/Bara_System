@@ -22,6 +22,7 @@ import type { Hono } from "hono";
 import type { MemoryApiDeps, SearchBody } from "../types.ts";
 import { err } from "../http-helpers.ts";
 import { runSearchPipeline, SearchInputError } from "./search-service.ts";
+import { ProjectScopeError } from "../../memory/project-scope-resolver.ts";
 
 export { resolvePlaceSignal } from "./search-service.ts";
 
@@ -49,6 +50,8 @@ export function registerSearchRoutes(app: Hono, deps: MemoryApiDeps): void {
       return c.json(response);
     } catch (e) {
       if (e instanceof SearchInputError) return err(c, 400, e.message);
+      // 모르는·애매한 프로젝트 범위 — MCP search_memory 와 같은 code·문구로 400.
+      if (e instanceof ProjectScopeError) return c.json(e.toPayload(), 400);
       throw e;
     }
   });

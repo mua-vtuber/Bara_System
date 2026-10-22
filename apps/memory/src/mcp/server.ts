@@ -22,9 +22,12 @@ import { registerDoctorTools } from "./tools-doctor.ts";
 import { registerProfileTools } from "./tools-profile.ts";
 import { registerMutationTools } from "./tools-mutations.ts";
 import { registerContextTools } from "./tools-context.ts";
+import { registerGuideTools } from "./tools-guide.ts";
 import { buildMcpInstructions } from "./instructions.ts";
 import { serializeToolError, type BaraToolErrorCode } from "./errors.ts";
 import { ScopedMcpServer } from "./access.ts";
+import { McpUsageRecorder } from "./usage-recorder.ts";
+import { HANDSHAKE_NAME } from "./usage-categories.ts";
 
 export const MCP_SERVER_NAME = "bara-memory";
 /** 저장 계열 도구의 saveTextInput source 값 — 봇 "discord" 와 같은 플랫폼 표기 단일 출처. */
@@ -36,6 +39,8 @@ export interface McpToolContext {
   /** auth-gate 가 /mcp 한정으로 전파한 adapterId. gate 미경유(직접 마운트 테스트)면 undefined. */
   adapterId: string | undefined;
   scope?: TokenScope;
+  /** 도구 호출·연결 시작 횟수 기록기 — registerMcpRoutes 가 서버 하나에 한 개만 만들어 요청마다 넘긴다. */
+  usage: McpUsageRecorder;
 }
 
 /**
@@ -75,7 +80,8 @@ export function toolError(
 }
 
 /**
- * 요청 단위 MCP 서버 조립 — 도구 등록부 5종(T4 tools-memory·T6 tools-capture·T11 tools-cleanup·T23 tools-doctor·T25 tools-profile) 합류. 도구 18종.
+ * 요청 단위 MCP 서버 조립 — 도구 등록부(tools-memory·tools-capture·tools-cleanup·tools-doctor·tools-profile·
+ * tools-mutations·tools-context·tools-guide) 합류. 도구 19종(2026-10-21 get_usage_guide 추가).
  *
  * T27(spec G) — 도구를 가로지르는 사용 전략을 instructions 로 싣는다. SDK 는 이 값을
  * initialize 응답에 담아 보내고(server/index.js: `...(this._instructions && ...)`),
@@ -95,7 +101,13 @@ export function buildBaraMcpServer(ctx: McpToolContext): McpServer {
     { name: MCP_SERVER_NAME, version: APP_VERSION },
     { instructions: buildMcpInstructions(ctx.scope) },
     ctx.scope,
+    ctx.usage,
+    ctx.adapterId,
   );
+  // 연결 시작 횟수 — 클라이언트가 initialized 알림을 보낼 때(연결 1회에 1번) 센다.
+  server.server.oninitialized = () => {
+    ctx.usage.record({ client: ctx.adapterId, kind: "handshake", name: HANDSHAKE_NAME, outcome: "ok" });
+  };
   registerMemoryTools(server, ctx);
   registerCaptureTools(server, ctx);
   registerCleanupTools(server, ctx);
@@ -103,17 +115,27 @@ export function buildBaraMcpServer(ctx: McpToolContext): McpServer {
   registerProfileTools(server, ctx);
   registerMutationTools(server, ctx);
   registerContextTools(server, ctx);
+  registerGuideTools(server, ctx);
   return server;
 }
 
-/** /mcp 라우트 마운트 — buildMemoryApi 가 호출한다. */
-export function registerMcpRoutes(app: Hono, deps: MemoryApiDeps): void {
+/**
+ * /mcp 라우트 마운트 — buildMemoryApi 가 호출한다. 사용 횟수 기록기를 한 번 만들어 요청마다 넘기고,
+ * 숫자 읽기 라우트(GET /api/mcp-usage)가 같은 기록기의 health() 를 싣도록 돌려준다.
+ * 저장소 연결은 첫 기록 때 얻는다(deps.store 가 없는 직접 마운트 테스트도 목록·지침은 확인할 수 있게).
+ */
+export function registerMcpRoutes(app: Hono, deps: MemoryApiDeps): McpUsageRecorder {
+  const usage = new McpUsageRecorder(() => {
+    if (!deps.store) throw new Error("deps.store 누락 — MCP 사용 횟수를 기록할 저장소가 주입되지 않았다");
+    return deps.store.getRawDb();
+  });
   app.all("/mcp", async (c: Context) => {
     const adapterId = c.get(MCP_ADAPTER_ID_VAR) as string | undefined;
     const scope = c.get(MCP_TOKEN_SCOPE_VAR) as TokenScope | undefined;
-    const server = buildBaraMcpServer({ deps, adapterId, scope });
+    const server = buildBaraMcpServer({ deps, adapterId, scope, usage });
     const transport = new StreamableHTTPTransport();
     await server.connect(transport);
     return transport.handleRequest(c);
   });
+  return usage;
 }

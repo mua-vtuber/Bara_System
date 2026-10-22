@@ -284,6 +284,31 @@ export class CleanupRunsLedger {
     return reclaimed;
   }
 
+  /**
+   * 마지막 "전체 실행"의 시작 시각(설정 시간대 "YYYY-MM-DD HH:MM:SS") 또는 없으면 null.
+   * 정기 실행 예약의 기준점이다(deep-pass-schedule.ts) — 서버 재시작과 무관하게 남는 기록이라
+   * 재시작해도 일정이 밀리지 않는다.
+   *
+   * 전체 실행 = 켜진 단계 전부를 대상 제한 없이 실제로 돌린 run. 그래서 다음은 세지 않는다:
+   *  - 단계를 골랐거나(stages) 메모를 정한(nodeIds) 부분 실행 — 메모 저장 직후 정리가 여기 든다.
+   *    이것까지 세면 저장이 잦을 때 전체 정리가 영영 밀린다.
+   *  - dryRun — AI 를 부르지 않은 추정 실행.
+   *  - failed — 끝까지 못 간 실행(재시작으로 멈춘 run 회수 포함). 다음 자정에 다시 시도한다.
+   * cancelled 는 센다 — 사용자가 일부러 멈춘 실행을 다음 자정에 바로 다시 돌리지 않는다.
+   */
+  lastFullRunStartedAt(): string | null {
+    const row = this.db
+      .query(
+        `SELECT MAX(started_at) AS started_at FROM cleanup_runs
+         WHERE status IN ('completed', 'cancelled')
+           AND json_extract(options_json, '$.stages') IS NULL
+           AND json_extract(options_json, '$.nodeIds') IS NULL
+           AND COALESCE(json_extract(options_json, '$.dryRun'), 0) = 0`,
+      )
+      .get() as { started_at: string | null } | null;
+    return row?.started_at ?? null;
+  }
+
   /** run 한 건 조회(파싱된 형) 또는 없으면 null. */
   getRun(runId: string): CleanupRunRow | null {
     const raw = this.db

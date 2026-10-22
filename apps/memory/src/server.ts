@@ -65,6 +65,7 @@ import { registerServerRestartRoutes } from "./server-internal/routes/server-res
 import { registerDoctorRoutes } from "./server-internal/routes/doctor.ts";
 import { registerProfileRoutes } from "./server-internal/routes/profile.ts";
 import { registerMcpRoutes } from "./mcp/server.ts";
+import { registerMcpUsageRoutes } from "./server-internal/routes/mcp-usage.ts";
 import { EventBus } from "./server-internal/event-bus.ts";
 import { EventRepository } from "./db/store-internal/event-repository.ts";
 import { SseTokenStore } from "./federation/sse-tokens.ts";
@@ -292,7 +293,9 @@ export function buildMemoryApi(deps: MemoryApiDeps): Hono {
   // /mcp — MCP 도구 표면 (2026-07-19 MCP spec 단락 4). REST 와 같은 deps 를 공유해
   // 도구 핸들러가 같은 내부 서비스 함수를 부른다. 인증은 outer authGate("*") 자동
   // 적용 — 공개 allowlist 에 넣지 않는다(무인증 MCP 접속 없음).
-  registerMcpRoutes(app, deps);
+  const mcpUsage = registerMcpRoutes(app, deps);
+  // GET /api/mcp-usage — MCP 도구 호출 횟수 읽기 (full 토큰 전용). /mcp 와 같은 기록기의 health 를 싣는다.
+  registerMcpUsageRoutes(app, deps, mcpUsage);
 
   return app;
 }

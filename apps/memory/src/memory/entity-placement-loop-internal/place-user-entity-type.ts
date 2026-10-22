@@ -9,6 +9,9 @@
  */
 
 import type { SqliteMemoryStore } from "../../db/store.ts";
+import { PROJECT_TYPE_NAME } from "../../db/store-internal/project-repository.ts";
+import type { UserEntity } from "../../db/store-internal/entities-repository.ts";
+import { ambiguousProjectNameWarning, resolveProjectName } from "../project-name-lookup.ts";
 import type { EntityTypeClassification } from "../entity-type-classifier.ts";
 import {
   linkSubcategoryToTypeRoot,
@@ -132,7 +135,20 @@ export async function placeOneUserEntityType(
 
   // 4) 범용 본체 행 생성 + 합성 텍스트 임베딩 적재. findOrCreateEntity 가 UNIQUE(type_name,name)
   //    로 같은 이름을 한 행에 모은다(멱등). 미등록 종류·빈 이름은 repo 가 loud throw.
-  const entity = await store.entitiesRepo.findOrCreateEntity(userType, trimmedName);
+  //    project 는 이름만 보면 안 된다 — 글을 프로젝트에 붙이는 단계(planProjectAttachment)가
+  //    별칭까지 보는 resolveProjectName 으로 "이 이름이 어느 프로젝트인가"를 정하므로, 여기서
+  //    이름만 보고 만들면 별칭(`바라`)으로 쓴 사슬이 같은 이름의 프로젝트를 하나 더 만들고 다음
+  //    저장부터 기억이 그쪽으로 갈라진다(2026-10-22 결함). 같은 조회를 써서 판정을 하나로 맞춘다.
+  const entity = await resolvePlacementEntity(store, userType, trimmedName, result);
+  if (entity === null) {
+    result.hierarchyEdges += await linkAdjacentCategoryPairs(
+      store,
+      originNodeId,
+      classification.categoryChain,
+      provenance,
+    );
+    return;
+  }
   result.entityRowCreated = true;
   result.entityId = entity.id;
   (result.entities ??= []).push({ typeName: userType, id: entity.id });
@@ -284,4 +300,34 @@ export async function placeOneUserEntityType(
 
   // 합성 텍스트(이름 + ko_name + 칸값) 임베딩 적재 — 검색(T5)이 entities_vec KNN 으로 닿는다.
   await store.entitiesRepo.applyEmbedding(entity.id);
+}
+
+/**
+ * 배치할 행을 정한다. project 는 resolveProjectName(이름·별칭 — 글을 프로젝트에 붙이는 단계와 같은
+ * 함수)으로 기존 행을 먼저 찾고, 여러 프로젝트에 겹치면 행을 만들지 않고 경고를 남긴 뒤 null 을
+ * 돌려준다(어느 쪽인지 모르는 채 하나를 고르거나 새로 만들지 않는다). 어디에도 없을 때만 새로 만든다.
+ * project 밖 새 종류는 기존대로 이름으로 찾거나 만든다.
+ */
+async function resolvePlacementEntity(
+  store: SqliteMemoryStore,
+  typeName: string,
+  name: string,
+  result: EntityPlacementResult,
+): Promise<UserEntity | null> {
+  if (typeName !== PROJECT_TYPE_NAME) {
+    return store.entitiesRepo.findOrCreateEntity(typeName, name);
+  }
+  const resolved = await resolveProjectName(store, name);
+  if (resolved.kind === "ambiguous") {
+    result.warnings.push(ambiguousProjectNameWarning(name));
+    return null;
+  }
+  if (resolved.kind === "missing") return store.entitiesRepo.findOrCreateEntity(typeName, name);
+  const existing = await store.entitiesRepo.get(resolved.projectId);
+  if (existing === null) {
+    throw new Error(
+      `resolvePlacementEntity: 프로젝트 '${resolved.projectId}' 를 찾았는데 entities 행이 없다`,
+    );
+  }
+  return existing;
 }

@@ -11,7 +11,8 @@
 
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { getProfile, PROFILE_FACETS } from "../server-internal/profile.ts";
+import { getProfileForRequest, PROFILE_FACETS } from "../server-internal/profile.ts";
+import { ProjectScopeError } from "../memory/project-scope-resolver.ts";
 import { memoryReadScopeSchema } from "../memory/shared-memory-contract.ts";
 import { TOOL_DESCRIPTIONS } from "./descriptions.ts";
 import { TOOL_ANNOTATIONS } from "./annotations.ts";
@@ -34,7 +35,15 @@ export function registerProfileTools(server: McpServer, ctx: McpToolContext): vo
     },
     async (args) => {
       if (!canUseMcpTool(ctx.scope, "get_profile")) return toolError("FORBIDDEN", "Token scope does not permit get_profile");
-      return toolJson(getProfile(deps, args));
+      try {
+        return toolJson(await getProfileForRequest(deps, args));
+      } catch (e) {
+        if (e instanceof ProjectScopeError) {
+          const payload = e.toPayload();
+          return toolError(payload.code, payload.message, payload.details);
+        }
+        return toolError("INTERNAL", `Profile read failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
     },
   );
 }

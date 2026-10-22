@@ -38,6 +38,8 @@ import {
   type BackfillRetrySummary,
 } from "./memory/backfill-attempts/cycle-guard.ts";
 import { extractionFingerprint } from "./memory/backfill-attempts/fingerprint.ts";
+import { msUntilNextDeepPass } from "./memory/cleanup-deep-pass/deep-pass-schedule.ts";
+import { pastCutoffInZone } from "./db/store-internal/helpers.ts";
 import { inspectExtractionAttempt } from "./memory/backfill-attempts/targets.ts";
 
 /**
@@ -180,6 +182,7 @@ function startGenericBackfillScheduler(args: {
   offsetMin: number;
   logPrefix: string;
   runCycle: (ctx?: CleanupRunContext) => Promise<BackfillCycleSummary>;
+  nextDelayMs?: (nowMs: number) => number;
   now?: () => number;
   setTimeoutFn?: (fn: () => void, ms: number) => unknown;
   clearTimeoutFn?: (handle: unknown) => void;
@@ -349,6 +352,12 @@ export interface CleanupDeepPassSchedulerOptions {
    * 취소 신호 없음), 수동 run 은 stages/dryRun/maxCalls/cancelSignal + runId 를 실어 보낸다.
    */
   runCycle: (ctx?: CleanupRunContext) => Promise<void>;
+  /**
+   * 마지막 전체 실행의 시작 시각(설정 시간대 "YYYY-MM-DD HH:MM:SS") 또는 null — 실행 기록
+   * (CleanupRunsLedger.lastFullRunStartedAt)을 읽는다. 다음 정기 실행을 이 기록 기준으로 잡아,
+   * 서버를 다시 켜도 주기가 처음부터 다시 세지지 않는다(deep-pass-schedule.ts). 예약할 때마다 새로 읽는다.
+   */
+  lastFullRunStartedAt: () => string | null;
   /** 로그 출력 prefix. 기본 "[cleanup-deep-pass scheduler]". */
   logPrefix?: string;
   /** 현재 시각 주입 (테스트용). 미주입 시 Date.now. */
@@ -363,9 +372,10 @@ export interface CleanupDeepPassSchedulerOptions {
  * Phase 7 깊은 패스 Task 4 — 정규식 강화 깊은 패스 스케줄러를 시작.
  *
  * extractor·vision 스케줄러와 *같은 런타임 골격*(`startGenericBackfillScheduler`)을
- * 공유한다 — 다음-경계(KST 자정 anchor) 재예약·overlap 가드·stop/tickNow/lastSummary
- * 를 다시 작성하지 않는다(DCL-1 정합). 깊은 패스 전용 = 주기가 *일* 단위라는 점뿐:
- * `intervalMin = intervalDays * 1440`, offset 0(자정 격자 정렬).
+ * 공유한다 — 재예약·overlap 가드·stop/tickNow/lastSummary 를 다시 작성하지 않는다(DCL-1 정합).
+ * 깊은 패스 전용 = 다음 실행 시각 계산뿐이다. 주기가 *일* 단위라 "오늘 자정 + 주기" 격자를 쓰면
+ * 주기 안에 재시작할 때마다 날짜가 다시 세져 한 번도 돌지 않는다(2026-10-22 실측). 그래서
+ * 실행 기록의 마지막 전체 실행 + intervalDays 의 자정으로 잡는다(msUntilNextDeepPass).
  *
  * 깊은 패스 사이클(runRegexStrengthenCycle)은 자체 요약 타입을 쓰는 void 흐름이라,
  * 골격이 요구하는 BackfillCycleSummary 로 빈 요약을 감싼다(emptySummary). 깊은 패스의
@@ -396,6 +406,14 @@ export function startCleanupDeepPassScheduler(
     offsetMin: 0,
     logPrefix,
     runCycle,
+    nextDelayMs: (nowMs) => {
+      const last = options.lastFullRunStartedAt();
+      const delay = msUntilNextDeepPass(nowMs, options.intervalDays, last);
+      console.log(
+        `${logPrefix} next run at ${pastCutoffInZone(nowMs + delay)} (intervalDays=${options.intervalDays}, last full run=${last ?? "none"})`,
+      );
+      return delay;
+    },
     now: options.now,
     setTimeoutFn: options.setTimeoutFn,
     clearTimeoutFn: options.clearTimeoutFn,

@@ -14,6 +14,11 @@ import {
 } from "./save-input.ts";
 import { PreparedExtractionMismatchError } from "./save-input-immediate.ts";
 import { applyWriteGuard, SecretDetectedError, type WriteGuardOptions } from "./write-guard/write-guard.ts";
+import {
+  predictWriteProject, type ProjectAttachmentPlan, type WriteProjectPrediction,
+} from "../memory/project-attachment-plan.ts";
+import { projectGroupForWrite } from "../memory/project-scope-resolver.ts";
+import { loadReservedKeys, requireSingleReservedKey } from "../memory/parsers/hashtag-reserved-keys.ts";
 
 // Clients describe evidence, but cannot set lifecycle state, revisions, or author identity.
 export const memoryEvidenceSchema = z.object({
@@ -29,6 +34,69 @@ export type MemoryEvidenceInput = z.input<typeof memoryEvidenceSchema>;
 
 export class MemoryEvidenceError extends Error {
   readonly code = "INVALID_INPUT";
+  constructor(message: string, readonly details?: Record<string, unknown>) {
+    super(message);
+  }
+}
+
+/** One side of an evidence project mismatch, as shown to the caller. */
+interface EvidenceProjectSide {
+  projectId: string | null;
+  name: string | null;
+}
+
+/**
+ * Evidence project mismatch wording (2026-10-21 spec 20.5): both sides are named so the caller can see
+ * which project the evidence is in and where this memory will land.
+ */
+export const EVIDENCE_PROJECT_MESSAGES = {
+  evidenceSide: (id: number, side: EvidenceProjectSide) =>
+    `evidence memory ${id} is in project "${side.name}" (${side.projectId ?? "no project id"})`,
+  chainSide: (side: EvidenceProjectSide, projectKey: string) =>
+    `this memory will be saved in project "${side.name}" (${side.projectId ?? "new project"}, from the #${projectKey} chain)`,
+  argumentSide: (side: EvidenceProjectSide) =>
+    `this memory will be saved in project "${side.name}" (${side.projectId ?? "no project id"}, from the project argument)`,
+  noProjectSide: () => "this memory will be saved with no project",
+} as const;
+
+/**
+ * Evidence must be global or in the project this memory will be saved in (spec 20.4). The project is
+ * predicted the same way the save attaches it (planProjectAttachment), and "same project" uses the read
+ * resolver's grouping (prj_ id + older plain values of its name and aliases).
+ */
+async function assertEvidenceProject(
+  store: SqliteMemoryStore,
+  evidenceId: number,
+  evidenceProjectId: string,
+  prediction: WriteProjectPrediction,
+): Promise<void> {
+  if (prediction.group !== null && prediction.group.projectIds.includes(evidenceProjectId)) return;
+  const evidenceGroup = await projectGroupForWrite(store, { kind: "value", value: evidenceProjectId });
+  const evidenceSide = { projectId: evidenceGroup.projectId, name: evidenceGroup.projectName ?? evidenceGroup.label };
+  const memorySide = prediction.group === null
+    ? { projectId: null, name: null }
+    : { projectId: prediction.group.projectId, name: prediction.group.projectName ?? prediction.group.label };
+  const projectKey = requireSingleReservedKey(loadReservedKeys(), "entity_project");
+  const memoryText = prediction.source === "none"
+    ? EVIDENCE_PROJECT_MESSAGES.noProjectSide()
+    : prediction.source === "chain"
+      ? EVIDENCE_PROJECT_MESSAGES.chainSide(memorySide, projectKey)
+      : EVIDENCE_PROJECT_MESSAGES.argumentSide(memorySide);
+  throw new MemoryEvidenceError(`${EVIDENCE_PROJECT_MESSAGES.evidenceSide(evidenceId, evidenceSide)}; ${memoryText}`, {
+    evidenceId,
+    evidenceProject: evidenceSide,
+    memoryProject: { ...memorySide, source: prediction.source },
+  });
+}
+
+/** saveSharedMemoryInput options. */
+export interface SharedMemoryWriteOptions {
+  /**
+   * Project attachment plan already computed for this (guarded) content before the save. Used only by the
+   * check outside the write lock; the check inside the lock recomputes it, since a project can appear while
+   * this call waits.
+   */
+  projectPlan?: ProjectAttachmentPlan;
 }
 
 function guardedEvidence(input: MemoryEvidenceInput | undefined, options?: WriteGuardOptions) {
@@ -114,19 +182,21 @@ export async function saveSharedMemoryInput(
   store: SqliteMemoryStore,
   args: SaveTextInputArgs,
   evidenceInput?: MemoryEvidenceInput,
+  options: SharedMemoryWriteOptions = {},
 ): Promise<SaveTextInputResult> {
-  return withMemoryWriteActivity(store, () => prepareAndSaveSharedMemoryInput(store, args, evidenceInput));
+  return withMemoryWriteActivity(store, () => prepareAndSaveSharedMemoryInput(store, args, evidenceInput, options));
 }
 
 async function prepareAndSaveSharedMemoryInput(
   store: SqliteMemoryStore,
   args: SaveTextInputArgs,
-  evidenceInput?: MemoryEvidenceInput,
+  evidenceInput: MemoryEvidenceInput | undefined,
+  options: SharedMemoryWriteOptions,
 ): Promise<SaveTextInputResult> {
   if (immediateExtractionArgs(args) === null) {
     return withMemoryMutationLock(store, () => saveSharedMemoryInputLocked(store, args, evidenceInput, undefined, false));
   }
-  const checked = await checkSharedMemoryInput(store, args, evidenceInput);
+  const checked = await checkSharedMemoryInput(store, args, evidenceInput, options.projectPlan);
   const resent = checked.eventKey !== null && findResentOrigin(store, checked.eventKey, checked) !== null;
   const prepared = resent ? undefined : await prepareImmediateExtraction(store, writeArgs(args, checked));
   return withMemoryMutationLock(store, () => saveSharedMemoryInputLocked(store, args, evidenceInput, prepared, resent));
@@ -151,6 +221,7 @@ async function checkSharedMemoryInput(
   store: SqliteMemoryStore,
   args: SaveTextInputArgs,
   evidenceInput: MemoryEvidenceInput | undefined,
+  projectPlan?: ProjectAttachmentPlan,
 ): Promise<CheckedSharedMemoryInput> {
   // Even replay requests must pass the credential guard. Trusted state never travels in
   // free-form metadata: REST routes reject server-owned keys with 400 first; for MCP
@@ -171,13 +242,15 @@ async function checkSharedMemoryInput(
     throw new MemoryEvidenceError("validUntil must be after validFrom");
   }
   const visible = evidence.evidenceRefs?.length ? readMemoryVisibility(store).allowedIds : undefined;
+  let prediction: WriteProjectPrediction | undefined;
   for (const id of evidence.evidenceRefs ?? []) {
     const reference = await store.getNode(id);
     if (!reference || !isCurrentMemory(reference.metadata) || (visible !== undefined && !visible.has(id))) {
       throw new MemoryEvidenceError(`evidence memory ${id} is missing or inactive`);
     }
-    if (reference.projectId !== null && reference.projectId !== projectId) {
-      throw new MemoryEvidenceError(`evidence memory ${id} belongs to a different project`);
+    if (reference.projectId !== null) {
+      prediction ??= await predictWriteProject(store, content, projectId, projectPlan);
+      await assertEvidenceProject(store, id, reference.projectId, prediction);
     }
   }
   if (evidenceInput && planEntityInput(content).mode !== "memory_text") {

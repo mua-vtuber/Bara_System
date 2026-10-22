@@ -8,7 +8,8 @@
  * 금지 규칙 정합)로 둔다.
  *
  * 검증:
- *   - 첫 delay 가 msUntilNextBoundary(now, intervalDays*1440, 0) 와 일치(자정 격자 정렬).
+ *   - 첫 delay 가 실행 기록의 마지막 전체 실행 + intervalDays 의 자정을 겨눈다(재시작해도 안 밀림).
+ *     기록이 없거나 기한이 지났으면 다음 자정.
  *   - 주입 타이머가 발화하면 runCycle 콜백이 불리고 다음 경계로 재예약된다.
  *   - stop() 이 진행 중 타이머를 clearTimeout 으로 취소하고 신규 등록을 멈춘다.
  *   - tickNow() 가 runCycle 을 즉시 한 번 가동한다.
@@ -16,18 +17,18 @@
 
 import { describe, expect, test } from "bun:test";
 import { startCleanupDeepPassScheduler } from "./scheduler.ts";
-import { msUntilNextBoundary } from "./schedule-timing.ts";
 import { shouldRunSummaryStage } from "./memory/cleanup-deep-pass/summary-cycle.ts";
 import { shouldRunCleanupDeepPass } from "./memory/cleanup-deep-pass/scheduler-gate.ts";
 
 describe("startCleanupDeepPassScheduler — Phase 7 깊은 패스 Task 4", () => {
-  test("첫 delay 가 intervalDays 격자(=intervalDays*1440분) 경계와 일치", () => {
+  test("실행 기록이 없으면 첫 delay 는 다음 자정(7일 격자를 새로 세지 않음)", () => {
     const captured: { fn: () => void; ms: number }[] = [];
     const nowMs = new Date("2026-06-05T10:07:00+09:00").getTime();
     let runs = 0;
 
     const handle = startCleanupDeepPassScheduler({
       intervalDays: 7,
+      lastFullRunStartedAt: () => null,
       runCycle: async () => {
         runs += 1;
       },
@@ -39,12 +40,67 @@ describe("startCleanupDeepPassScheduler — Phase 7 깊은 패스 Task 4", () =>
       clearTimeoutFn: () => {},
     });
 
-    // 즉시 가동 X — 다음 경계까지 setTimeout 한 번만 예약. intervalMin = 7*1440 = 10080.
+    // 즉시 가동 X — 다음 자정까지 setTimeout 한 번만 예약.
     expect(captured).toHaveLength(1);
-    expect(captured[0]!.ms).toBe(msUntilNextBoundary(nowMs, 7 * 1440, 0));
+    expect(nowMs + captured[0]!.ms).toBe(new Date("2026-06-06T00:00:00+09:00").getTime());
     expect(runs).toBe(0);
 
     void handle.stop();
+  });
+
+  test("재시작해도 마지막 전체 실행 + 7일 자정이 그대로 — 서버 켠 날로 다시 세지 않음", () => {
+    const lastRun = "2026-10-22 00:00:03";
+    const due = new Date("2026-10-29T00:00:00+09:00").getTime();
+    // 같은 기록을 두고 서로 다른 날 세 번 "재시작"한다 — 셋 다 같은 시각을 겨눠야 한다.
+    for (const bootIso of ["2026-10-22T09:00:00+09:00", "2026-10-25T13:30:00+09:00", "2026-10-28T23:59:00+09:00"]) {
+      const captured: number[] = [];
+      const nowMs = new Date(bootIso).getTime();
+      const handle = startCleanupDeepPassScheduler({
+        intervalDays: 7,
+        lastFullRunStartedAt: () => lastRun,
+        runCycle: async () => {},
+        now: () => nowMs,
+        setTimeoutFn: (_fn, ms) => {
+          captured.push(ms);
+          return captured.length;
+        },
+        clearTimeoutFn: () => {},
+      });
+      expect(nowMs + captured[0]!).toBe(due);
+      void handle.stop();
+    }
+  });
+
+  test("사이클이 끝나면 방금 남은 실행 기록을 다시 읽어 그 날 + 주기로 예약", async () => {
+    const captured: { fn: () => void; ms: number }[] = [];
+    let nowMs = new Date("2026-10-28T10:00:00+09:00").getTime();
+    // 실행 기록 sink — 사이클이 돌면 시작 시각을 남긴다(index.ts scheduledRunCycle 의 run 행과 같은 역할).
+    let lastRun: string | null = "2026-10-20 00:00:01";
+    const handle = startCleanupDeepPassScheduler({
+      intervalDays: 7,
+      lastFullRunStartedAt: () => lastRun,
+      runCycle: async () => {
+        lastRun = "2026-10-29 00:00:01";
+      },
+      now: () => nowMs,
+      setTimeoutFn: (fn, ms) => {
+        captured.push({ fn, ms });
+        return captured.length;
+      },
+      clearTimeoutFn: () => {},
+    });
+
+    // 10/20 + 7 = 10/27 기한이 지났다 → 다음 자정(10/29 00:00).
+    expect(nowMs + captured[0]!.ms).toBe(new Date("2026-10-29T00:00:00+09:00").getTime());
+
+    nowMs += captured[0]!.ms + 1_000;
+    captured[0]!.fn();
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(captured).toHaveLength(2);
+    expect(nowMs + captured[1]!.ms).toBe(new Date("2026-11-05T00:00:00+09:00").getTime());
+
+    await handle.stop();
   });
 
   test("주입 타이머 발화 → runCycle 가동 + 다음 경계로 재예약", async () => {
@@ -54,6 +110,7 @@ describe("startCleanupDeepPassScheduler — Phase 7 깊은 패스 Task 4", () =>
 
     const handle = startCleanupDeepPassScheduler({
       intervalDays: 1,
+      lastFullRunStartedAt: () => null,
       runCycle: async () => {
         runs += 1;
       },
@@ -66,7 +123,7 @@ describe("startCleanupDeepPassScheduler — Phase 7 깊은 패스 Task 4", () =>
     });
 
     expect(captured).toHaveLength(1);
-    expect(captured[0]!.ms).toBe(msUntilNextBoundary(nowMs, 1 * 1440, 0));
+    expect(nowMs + captured[0]!.ms).toBe(new Date("2026-06-06T00:00:00+09:00").getTime());
 
     // mock clock 을 경계로 전진 후 콜백 수동 실행 → 사이클 + 재예약.
     nowMs += captured[0]!.ms;
@@ -76,7 +133,7 @@ describe("startCleanupDeepPassScheduler — Phase 7 깊은 패스 Task 4", () =>
 
     expect(runs).toBe(1);
     expect(captured).toHaveLength(2);
-    expect(captured[1]!.ms).toBe(msUntilNextBoundary(nowMs, 1 * 1440, 0));
+    expect(nowMs + captured[1]!.ms).toBe(new Date("2026-06-07T00:00:00+09:00").getTime());
 
     await handle.stop();
   });
@@ -88,6 +145,7 @@ describe("startCleanupDeepPassScheduler — Phase 7 깊은 패스 Task 4", () =>
 
     const handle = startCleanupDeepPassScheduler({
       intervalDays: 3,
+      lastFullRunStartedAt: () => null,
       runCycle: async () => {},
       now: () => nowMs,
       setTimeoutFn: (fn, ms) => {
@@ -113,6 +171,7 @@ describe("startCleanupDeepPassScheduler — Phase 7 깊은 패스 Task 4", () =>
 
     const handle = startCleanupDeepPassScheduler({
       intervalDays: 7,
+      lastFullRunStartedAt: () => null,
       runCycle: async () => {
         runs += 1;
       },
@@ -144,6 +203,7 @@ describe("tryTickNow 원자 트리거 — spec 5.B-1", () => {
     let seenCtx: unknown = "unset";
     const handle = startCleanupDeepPassScheduler({
       intervalDays: 7,
+      lastFullRunStartedAt: () => null,
       runCycle: async (ctx) => {
         seenCtx = ctx;
       },
@@ -175,6 +235,7 @@ describe("tryTickNow 원자 트리거 — spec 5.B-1", () => {
     const seenIds: string[] = [];
     const handle = startCleanupDeepPassScheduler({
       intervalDays: 7,
+      lastFullRunStartedAt: () => null,
       runCycle: async (ctx) => {
         cycleRuns += 1;
         if (ctx) seenIds.push(ctx.runId);
@@ -211,6 +272,7 @@ describe("tryTickNow 원자 트리거 — spec 5.B-1", () => {
     const captured: { fn: () => void; ms: number }[] = [];
     const handle = startCleanupDeepPassScheduler({
       intervalDays: 7,
+      lastFullRunStartedAt: () => null,
       runCycle: async () => {},
       now: () => nowMs,
       setTimeoutFn: (fn, ms) => {
@@ -304,6 +366,7 @@ describe("요약 단계 wiring — Phase 7 요약 단계 Task 7", () => {
     });
     const handle = startCleanupDeepPassScheduler({
       intervalDays: 1,
+      lastFullRunStartedAt: () => null,
       runCycle: async () => {
         calls.push("regex");
         if (summaryGate) calls.push("summary");
@@ -339,6 +402,7 @@ describe("요약 단계 wiring — Phase 7 요약 단계 Task 7", () => {
     });
     const handle = startCleanupDeepPassScheduler({
       intervalDays: 1,
+      lastFullRunStartedAt: () => null,
       runCycle: async () => {
         calls.push("regex");
         if (summaryGate) calls.push("summary");
@@ -407,6 +471,7 @@ describe("게이트 재구성 wiring — spec 5.B-2", () => {
     let calls: string[] = [];
     const handle = startCleanupDeepPassScheduler({
       intervalDays: 1,
+      lastFullRunStartedAt: () => null,
       runCycle: async () => {
         calls = runCycleGrid(gates);
       },

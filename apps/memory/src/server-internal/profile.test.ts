@@ -13,6 +13,7 @@ import { openMemoryDatabase } from "../db/migrations.ts";
 import { SqliteMemoryStore } from "../db/store.ts";
 import { retractSharedMemory } from "../memory/shared-memory-mutations.ts";
 import type { MemoryApiDeps } from "./types.ts";
+import { globalScope, projectValuesScope } from "../test-utils/resolved-scope.ts";
 import { getProfile, NOTE_NONE_CURRENT, NOTE_NONE_STORED, noteForFacet, PROFILE_FACETS } from "./profile.ts";
 
 let embedder: Bgem3Embedder;
@@ -34,7 +35,7 @@ afterEach(() => {
 });
 
 test("선호 0건 — 에러가 아닌 설명 포함 성공 응답", () => {
-  const report = getProfile(deps);
+  const report = getProfile(deps, { scope: globalScope() });
   expect(report).toEqual({ facets: {}, note: NOTE_NONE_STORED });
 });
 
@@ -53,7 +54,7 @@ test("유일한 선호를 철회하면 NOTE_NONE_STORED 가 아니라 NOTE_NONE_
     nodeId: id, expectedRevision: 0, requestId: "retract-only-preference", actor: "ai-a",
   });
 
-  const report = getProfile(deps);
+  const report = getProfile(deps, { scope: globalScope() });
   expect(report).toEqual({
     facets: {}, note: NOTE_NONE_CURRENT, omitted: { outOfScope: 0, notCurrent: 1 },
   });
@@ -67,7 +68,7 @@ test("다른 프로젝트 소속이라 scope 밖으로 빠진 선호는 outOfSco
     metadata: { facet: "stack" },
   });
 
-  const report = getProfile(deps, { scope: { projectId: "my-project" } });
+  const report = getProfile(deps, { scope: projectValuesScope(["my-project"], true) });
   expect(report).toEqual({
     facets: {}, note: NOTE_NONE_CURRENT, omitted: { outOfScope: 1, notCurrent: 0 },
   });
@@ -80,7 +81,7 @@ test("facet 지정 조회인데 그 facet 이 비어 있으면 facet 전용 문�
     metadata: { facet: "communication" },
   });
 
-  const report = getProfile(deps, { facet: "stack" });
+  const report = getProfile(deps, { facet: "stack", scope: globalScope() });
   expect(report).toEqual({ facets: {}, note: noteForFacet("stack") });
 });
 
@@ -96,7 +97,7 @@ test("facet 지정 저장 → 그 facet 조회 시 회신, 다른 facet엔 안 �
     metadata: { facet: "workflow" },
   });
 
-  const stackOnly = getProfile(deps, { facet: "stack" });
+  const stackOnly = getProfile(deps, { facet: "stack", scope: globalScope() });
   expect(Object.keys(stackOnly.facets)).toEqual(["stack"]);
   expect(stackOnly.facets.stack).toHaveLength(1);
   expect(stackOnly.facets.stack![0]!.content).toBe("탭 대신 스페이스 4칸을 쓴다");
@@ -114,7 +115,7 @@ test("facet 미지정 조회 — 전 facet + unclassified 를 함께 회신", as
     memoryType: "preference",
   });
 
-  const report = getProfile(deps);
+  const report = getProfile(deps, { scope: globalScope() });
   expect(report.facets.communication).toHaveLength(1);
   expect(report.facets.unclassified).toHaveLength(1);
   expect(report.facets.unclassified![0]!.content).toBe("facet 없이 저장된 옛 선호");
@@ -133,7 +134,7 @@ test("facet 미지정 저장분(오타·구버전 값 포함) — 추론 없이 
     metadata: { facet: "존재하지않는facet" },
   });
 
-  const report = getProfile(deps);
+  const report = getProfile(deps, { scope: globalScope() });
   expect(report.facets.unclassified).toHaveLength(2);
 });
 
@@ -145,7 +146,7 @@ test("preference 아닌 memoryType 은 get_profile 결과에 섞이지 않음", 
     metadata: { facet: "directives" },
   });
 
-  const report = getProfile(deps);
+  const report = getProfile(deps, { scope: globalScope() });
   const allEntries = Object.values(report.facets).flat();
   expect(allEntries).toHaveLength(1);
   expect(allEntries[0]!.content).toBe("선호 하나");
@@ -163,7 +164,7 @@ test("응답 항목은 id·content·createdAt 을 포함하고 최근순으로 �
     metadata: { facet: "stack" },
   });
 
-  const report = getProfile(deps, { facet: "stack" });
+  const report = getProfile(deps, { facet: "stack", scope: globalScope() });
   const entries = report.facets.stack!;
   expect(entries).toHaveLength(2);
   expect(entries.map((e) => e.id)).toEqual([second, first]);
@@ -195,7 +196,7 @@ test("WP-B1-10 — disputed 선호가 옛 선호와 contradicts로 이어지면 
   });
   await store.addEdge({ sourceId: newId, targetId: oldId, relation: "contradicts", provenance: "system", sourceNodeId: newId, weight: 0.9 });
 
-  const report = getProfile(deps, { facet: "communication" });
+  const report = getProfile(deps, { facet: "communication", scope: globalScope() });
   const entries = report.facets.communication!;
   expect(entries).toHaveLength(1);
   expect(entries[0]!.id).toBe(oldId);
@@ -204,7 +205,7 @@ test("WP-B1-10 — disputed 선호가 옛 선호와 contradicts로 이어지면 
 
 test("WP-B1-10 — 충돌이 없는 선호는 conflicts가 빈 배열", async () => {
   await store.addNode({ content: "충돌 없는 선호", memoryType: "preference", metadata: { facet: "stack" } });
-  const report = getProfile(deps, { facet: "stack" });
+  const report = getProfile(deps, { facet: "stack", scope: globalScope() });
   expect(report.facets.stack![0]!.conflicts).toEqual([]);
 });
 
@@ -223,7 +224,7 @@ test("WP-B1-10 — supersede로 해소된 뒤에는 표시가 사라진다", asy
     nodeId: oldId, replacementId: newId, expectedRevision: 0, requestId: "resolve-1", actor: "ai-a",
   });
 
-  const report = getProfile(deps, { facet: "workflow" });
+  const report = getProfile(deps, { facet: "workflow", scope: globalScope() });
   const entries = report.facets.workflow!;
   expect(entries).toHaveLength(1);
   expect(entries[0]!.id).toBe(newId);
@@ -245,7 +246,7 @@ test("WP-B1-10R — 원문에서 추출된 자식이 supersede되면 원문 항�
   await store.db.query("UPDATE knowledge_nodes SET metadata_json = ? WHERE id = ?")
     .run(JSON.stringify({ facet: "stack", sharedMemory: { status: "superseded", revision: 1, assertionKind: "ai_inference", supersededBy: replacement } }), child);
 
-  const report = getProfile(deps, { facet: "stack" });
+  const report = getProfile(deps, { facet: "stack", scope: globalScope() });
   const originEntry = report.facets.stack!.find((e) => e.id === origin)!;
   expect(originEntry.originMarks).toEqual({ openConflicts: [], supersededClaims: [{ childId: child, replacementId: replacement }] });
 });

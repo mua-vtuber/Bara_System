@@ -15,7 +15,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { saveSharedMemoryInput, memoryEvidenceSchema, MemoryEvidenceError } from "../server-internal/shared-memory-write.ts";
 import { canUseMcpTool } from "./access.ts";
 import { readMemoryVisibility } from "../memory/shared-memory-read.ts";
-import { SecretDetectedError } from "../server-internal/write-guard/write-guard.ts";
+import { applyWriteGuard, SecretDetectedError } from "../server-internal/write-guard/write-guard.ts";
 import { PreparedExtractionMismatchError } from "../server-internal/save-input.ts";
 import { DuplicateMemoryError } from "../server-internal/write-guard/duplicate-check.ts";
 import { EVENT_TYPES } from "../server-internal/event-bus.ts";
@@ -24,6 +24,9 @@ import type { MemoryType } from "../memory/types.ts";
 import { PROFILE_FACETS } from "../server-internal/profile.ts";
 import { TOOL_DESCRIPTIONS } from "./descriptions.ts";
 import { TOOL_ANNOTATIONS } from "./annotations.ts";
+import {
+  hashtagWarningDetails, hashtagWarningFields, prepareHashtagCheck, projectPlanForSave,
+} from "./hashtag-warning-fields.ts";
 import {
   MCP_SOURCE,
   requireAdapterId,
@@ -85,6 +88,8 @@ export function registerCaptureTools(server: McpServer, ctx: McpToolContext): vo
           const adapterId = requireAdapterId(ctx);
           const settings = deps.getSettings?.();
           const facet = (args as { facet?: (typeof PROFILE_FACETS)[number] }).facet;
+          // 해시태그 경고는 저장 경로와 같은 관문을 지난 글로 본다(비밀값이면 저장과 같은 오류로 끝난다).
+          const hashtagCheck = await prepareHashtagCheck(deps.store, applyWriteGuard(args.content, settings?.writeGuard), args.project);
           const saved = await saveSharedMemoryInput(deps.store, {
             content: args.content,
             source: MCP_SOURCE,
@@ -117,11 +122,13 @@ export function registerCaptureTools(server: McpServer, ctx: McpToolContext): vo
               ? settings?.writeGuard?.duplicateCheck
               : { enabled: false },
             force: (args as { force?: boolean }).force === true,
-          }, args.evidence);
+          }, args.evidence, projectPlanForSave(hashtagCheck));
           if (saved.kind !== "memory" || saved.originNodeId === null) {
+            // 글 기억이 안 생긴 까닭(예: 쉼표가 빠져 본문이 태그 값에 먹힘)을 경고가 말해 주면 함께 싣는다.
             return toolError(
               "INTERNAL",
               `${tool.name} 저장 실패: 글 저장 경로가 memory 노드를 만들지 못했다 (kind=${saved.kind})`,
+              hashtagWarningDetails(hashtagCheck, saved.kind),
             );
           }
           deps.autoCleanupTrigger?.emit("external-sdk-write");
@@ -130,9 +137,12 @@ export function registerCaptureTools(server: McpServer, ctx: McpToolContext): vo
           // 능동 저장 4종도 REST 저장과 똑같이 대시보드 라이브 그래프를 갱신시킨다.
           deps.eventBus?.emit(EVENT_TYPES.GRAPH_CHANGED, { reason: "memory-added" });
           const visible = readMemoryVisibility(deps.store).allowedIds;
-          return toolJson({ id: saved.originNodeId, tag: tool.tag, current: visible === undefined || visible.has(saved.originNodeId) });
+          return toolJson({
+            id: saved.originNodeId, tag: tool.tag, current: visible === undefined || visible.has(saved.originNodeId),
+            ...hashtagWarningFields(hashtagCheck, "memory"),
+          });
         } catch (e) {
-          if (e instanceof MemoryEvidenceError) return toolError(e.code, e.message);
+          if (e instanceof MemoryEvidenceError) return toolError(e.code, e.message, e.details);
           // WP-B1-08 — 준비한 즉시 추출 결과를 쓸 수 없게 된 요청(아무것도 저장 안 함) — REST 409 와 같은
           // CONFLICT code 와 재전송 안내 메시지.
           if (e instanceof PreparedExtractionMismatchError) return toolError(e.code, e.message);

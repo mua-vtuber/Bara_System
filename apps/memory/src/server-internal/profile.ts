@@ -42,8 +42,10 @@ import { rowToNode } from "../db/store-internal/helpers.ts";
 import type { KnowledgeNodeRow } from "../db/store-internal/row-types.ts";
 import type { MemoryType } from "../memory/types.ts";
 import {
-  matchesMemoryScope, readSharedMemoryForNode, type MemoryReadScope, type SharedMemoryState,
+  matchesMemoryScope, readSharedMemoryForNode, type MemoryReadScope, type ResolvedMemoryScope,
+  type SharedMemoryState,
 } from "../memory/shared-memory-contract.ts";
+import { resolveMemoryReadScope, scopeNoteFields } from "../memory/project-scope-resolver.ts";
 import { readMemoryVisibility } from "../memory/shared-memory-read.ts";
 import { listOpenConflicts, listOriginMarks, type OriginMarks } from "../memory/open-conflicts.ts";
 
@@ -130,11 +132,40 @@ function isProfileFacet(value: unknown): value is ProfileFacet {
   return typeof value === "string" && (PROFILE_FACETS as readonly string[]).includes(value);
 }
 
-/** get_profile 입력 — facet 생략 시 전 facet 회신(spec H). */
+/**
+ * getProfile 입력 — facet 생략 시 전 facet 회신(spec H). scope 는 해석이 끝난 범위만 받는다
+ * (프로젝트 이름·옛 글자값 해석은 project-scope-resolver.ts, 2026-10-21 spec 10.2).
+ */
 export interface GetProfileArgs {
+  facet?: ProfileFacet;
+  scope: ResolvedMemoryScope;
+  includeInactive?: boolean;
+}
+
+/** REST GET /profile·MCP get_profile 입력 — 밖에서 받은 그대로의 범위. */
+export interface ProfileRequest {
   facet?: ProfileFacet;
   scope?: MemoryReadScope;
   includeInactive?: boolean;
+}
+
+/** 두 표면의 응답 — 실제로 적용한 범위와, 범위를 안 줬을 때의 안내 문구를 함께 싣는다. */
+export type ProfileResponse = ProfileReport & { scope: ResolvedMemoryScope; scopeNote?: string };
+
+/**
+ * REST·MCP 공용 입구: 범위를 해석하고(기본값 = 프로젝트 없는 기억만, spec P16) getProfile 을
+ * 부른다. 모르는·애매한 프로젝트는 ProjectScopeError 로 던진다 — 빈 결과로 가리지 않는다.
+ */
+export async function getProfileForRequest(deps: MemoryApiDeps, request: ProfileRequest): Promise<ProfileResponse> {
+  // 프로젝트 범위를 주면 전역 선호도 함께 본다(includeGlobal 기본 true — 기존 계약).
+  const requested = request.scope
+    ? { ...request.scope, includeGlobal: request.scope.includeGlobal ?? true }
+    : undefined;
+  const scope = await resolveMemoryReadScope(deps.store, requested, "global");
+  const report = getProfile(deps, {
+    ...(request.facet ? { facet: request.facet } : {}), scope, includeInactive: request.includeInactive,
+  });
+  return { ...report, scope, ...scopeNoteFields(request.scope) };
 }
 
 /**
@@ -148,10 +179,8 @@ export interface GetProfileArgs {
  * 가정한 통째 주입 표면이기 때문. 이 가정을 넘는 규모가 실측되면 그때 facet 별
  * cap + 잘림 표시(정직 회신)를 재검토할 것 (T25 검토 Minor 반영).
  */
-export function getProfile(deps: MemoryApiDeps, args: GetProfileArgs = {}): ProfileReport {
-  const scope: MemoryReadScope = args.scope
-    ? { ...args.scope, includeGlobal: args.scope.includeGlobal ?? true }
-    : { projectId: null };
+export function getProfile(deps: MemoryApiDeps, args: GetProfileArgs): ProfileReport {
+  const scope = args.scope;
   const visibleIds = readMemoryVisibility(deps.store, scope, args.includeInactive).allowedIds;
   const db = deps.store.getRawDb();
   const rows = db

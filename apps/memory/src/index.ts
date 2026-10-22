@@ -683,6 +683,7 @@ if (shouldRunCleanupDeepPass(cleanupGateInput)) {
   cleanupDeepPassScheduler = startCleanupDeepPassScheduler({
     intervalDays: cleanupSlot.intervalDays,
     runCycle: scheduledRunCycle,
+    lastFullRunStartedAt: () => cleanupRunsLedger.lastFullRunStartedAt(),
   });
 
   // spec 5.B-1 — run API 배선. 라우트가 이 묶음으로 원장·스케줄러 트리거·취소에 접근한다.

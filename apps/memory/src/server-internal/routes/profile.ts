@@ -16,27 +16,37 @@
 import type { Hono } from "hono";
 import type { MemoryApiDeps } from "../types.ts";
 import { err } from "../http-helpers.ts";
-import { getProfile, PROFILE_FACETS, type ProfileFacet } from "../profile.ts";
-import { parseMemoryReadScope } from "../../memory/shared-memory-contract.ts";
+import { getProfileForRequest, PROFILE_FACETS, type ProfileFacet } from "../profile.ts";
+import { parseMemoryReadScope, type MemoryReadScope } from "../../memory/shared-memory-contract.ts";
+import { ProjectScopeError } from "../../memory/project-scope-resolver.ts";
 
 function isProfileFacet(value: string): value is ProfileFacet {
   return (PROFILE_FACETS as readonly string[]).includes(value);
 }
 
 export function registerProfileRoutes(app: Hono, deps: MemoryApiDeps): void {
-  app.get("/profile", (c) => {
+  app.get("/profile", async (c) => {
     const raw = c.req.query("facet");
     if (raw !== undefined && !isProfileFacet(raw)) {
       return err(c, 400, `미지원 facet '${raw}' — 유효 값: ${PROFILE_FACETS.join("/")}`);
     }
+    let scope: MemoryReadScope | undefined;
     try {
       const rawScope = c.req.query("scope");
-      const scope = parseMemoryReadScope(rawScope === undefined ? undefined : JSON.parse(rawScope));
-      const includeInactive = c.req.query("includeInactive");
-      if (includeInactive !== undefined && includeInactive !== "true" && includeInactive !== "false") return err(c, 400, "includeInactive must be true or false");
-      return c.json(getProfile(deps, { ...(raw ? { facet: raw } : {}), scope, includeInactive: includeInactive === "true" }));
+      scope = parseMemoryReadScope(rawScope === undefined ? undefined : JSON.parse(rawScope));
     } catch (error) {
       return err(c, 400, `Invalid profile scope: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const includeInactive = c.req.query("includeInactive");
+    if (includeInactive !== undefined && includeInactive !== "true" && includeInactive !== "false") return err(c, 400, "includeInactive must be true or false");
+    try {
+      return c.json(await getProfileForRequest(deps, {
+        ...(raw ? { facet: raw } : {}), scope, includeInactive: includeInactive === "true",
+      }));
+    } catch (error) {
+      // 모르는·애매한 프로젝트 — MCP get_profile 과 같은 code·문구로 400.
+      if (error instanceof ProjectScopeError) return c.json(error.toPayload(), 400);
+      throw error;
     }
   });
 }

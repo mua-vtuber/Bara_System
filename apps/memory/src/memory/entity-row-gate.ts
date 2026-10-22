@@ -35,7 +35,9 @@
  */
 
 import type { SqliteMemoryStore } from "../db/store.ts";
+import { PROJECT_TYPE_NAME } from "../db/store-internal/project-repository.ts";
 import type { ClassificationSource } from "./entity-type-classifier.ts";
+import { ambiguousProjectNameWarning, resolveProjectName } from "./project-name-lookup.ts";
 import {
   placementTypeNames,
   isPlacementType,
@@ -238,7 +240,15 @@ export async function createEntityRow(
     const person = await store.findOrCreatePersonByName(name);
     return { id: person.personId, name: person.displayName, typeName };
   }
-  if (typeName === "project") {
+  if (typeName === PROJECT_TYPE_NAME) {
+    // 이름만 보고 만들면 다른 프로젝트의 별칭과 같은 이름이 프로젝트를 하나 더 만든다 — 이름·별칭
+    // 조회(resolveProjectName)로 기존 행을 먼저 쓴다. 애매한 이름은 어느 행인지 정할 수 없어 던진다
+    // (호출처가 먼저 가려야 한다 — resolveRelationTarget·placeOneUserEntityType 이 그렇게 한다).
+    const resolved = await resolveProjectName(store, name);
+    if (resolved.kind === "ambiguous") {
+      throw new Error(`createEntityRow: ${ambiguousProjectNameWarning(name)} — 호출처가 애매함을 먼저 가려야 한다`);
+    }
+    if (resolved.kind === "existing") return { id: resolved.projectId, name: resolved.name, typeName };
     const project = await store.findOrCreateProject({ name });
     return { id: project.projectId, name: project.name, typeName };
   }

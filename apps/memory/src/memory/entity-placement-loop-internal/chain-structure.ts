@@ -6,7 +6,7 @@
  * parseClassificationTags 단일 출처 위에서 사슬 구조(값→다음 키 연결)만 보는 store 무접촉
  * 순수 함수를 모은다:
  *   - isMidChainNode — 후보 이름이 사슬 중간 마디인지 구조 판정.
- *   - resolveChainLeafValue — 사슬 진입 값에서 끝-실체 값까지 추적.
+ *   - resolveChainLeafValue·traceChainLeaf — 사슬 진입 값에서 끝-실체 값까지 추적(순환 여부 포함).
  *   - GroupDecl·chainEntriesOf — 그룹 선언 중 사슬 진입점(머리)만 추리기.
  *   - buildForwardChainSubContent — 진입점의 forward 사슬 + 타입 속성 sub-content 재조립.
  *   - projectChainConsumedKeys — project 사슬이 콜론 키로 소비하는 rawCategory 집합.
@@ -59,19 +59,44 @@ export function isMidChainNode(candidate: string, content: string): boolean {
  * 빈 진입 값은 빈 문자열을 돌려준다(호출처가 빈 이름 가드를 별도로 진다).
  */
 export function resolveChainLeafValue(entryValue: string, content: string): string {
+  return traceChainLeaf(entryValue, content).leaf;
+}
+
+/** traceChainLeaf 결과 — 끝 값과, 순환 때문에 멈췄는지. */
+export interface ChainTrace {
+  /** resolveChainLeafValue 가 돌려주는 바로 그 값(멈춘 자리 값). */
+  leaf: string;
+  /** 이미 지나온 키로 되돌아와 멈췄으면 true. */
+  cycle: boolean;
+  /** 지나온 키(소문자) — 한 순환을 여러 태그에서 거듭 보고하지 않게 묶는 데 쓴다. */
+  keys: readonly string[];
+}
+
+/**
+ * resolveChainLeafValue 의 순회 본체 — 끝 값과 함께 순환으로 멈췄는지를 돌려준다. 해시태그
+ * 경고(hashtag-chain-check.ts 의 CHAIN_CYCLE)가 저장 경로와 같은 순회로 판정하게 하는 단일 출처.
+ *
+ * 순환 판정: 멈춘 자리 값이 이미 지나온 키이고 그 키에 다음 값이 이어지면 순환이다. 방문 집합에
+ * 걸려 멈춘 경우와, 태그 수만큼 내려가 반복 횟수가 끝난 경우(키가 태그 수보다 많을 수 없어
+ * 다음 키는 반드시 이미 지나온 키다)가 둘 다 여기에 든다. 사슬 끝에서 멈춘 경우는 다음 값이 없다.
+ */
+export function traceChainLeaf(entryValue: string, content: string): ChainTrace {
   let cursor = (entryValue ?? "").trim();
-  if (!cursor) return "";
+  if (!cursor) return { leaf: "", cycle: false, keys: [] };
   const tags = parseClassificationTags(content ?? "");
+  const nextOf = (key: string) => tags.find((t) => t.rawCategory.trim().toLowerCase() === key);
   const visited = new Set<string>();
   for (let i = 0; i < tags.length; i += 1) {
     const key = cursor.toLowerCase();
     if (visited.has(key)) break; // 순환 차단 — 멈춘 자리 값 유지.
     visited.add(key);
-    const next = tags.find((t) => t.rawCategory.trim().toLowerCase() === key);
+    const next = nextOf(key);
     if (!next || !next.value.trim()) break; // 더는 키로 안 쓰임 — 사슬 끝.
     cursor = next.value.trim();
   }
-  return cursor;
+  const stopKey = cursor.toLowerCase();
+  const cycle = visited.has(stopKey) && nextOf(stopKey) !== undefined;
+  return { leaf: cursor, cycle, keys: [...visited] };
 }
 
 /** 한 선언 — 콜론 태그의 키·값. 그룹 안 사슬 분리·진입점 판정에 쓴다. */

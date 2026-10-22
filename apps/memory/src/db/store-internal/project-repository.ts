@@ -82,10 +82,14 @@ export interface UpdateProjectArgs {
   embeddingText?: string | null;
 }
 
-/** findProjectByNameOrAlias 결과 — 확정 프로젝트와 모호 신호를 함께 담는다. */
+/**
+ * findProjectByNameOrAlias 결과 — 확정 프로젝트와 모호 신호를 함께 담는다.
+ * candidates 는 모호할 때만 실린다(겹친 프로젝트의 번호·이름).
+ */
 export interface ProjectLookup {
   project: Project | null;
   ambiguous: boolean;
+  candidates?: Array<{ projectId: string; name: string }>;
 }
 
 /** entity_attributes 한 행(프로젝트 속성 읽기용). */
@@ -303,7 +307,16 @@ export class ProjectRepository {
    */
   async findProjectByNameOrAlias(name: string): Promise<ProjectLookup> {
     const lookup = await this.entitiesRepo.findByNameOrAlias(PROJECT_TYPE_NAME, name);
-    if (lookup.ambiguous) return { project: null, ambiguous: true };
+    if (lookup.ambiguous) {
+      if (lookup.candidates === undefined) {
+        throw new Error(`findProjectByNameOrAlias: '${name}' 이 모호한데 후보 목록이 없다`);
+      }
+      return {
+        project: null,
+        ambiguous: true,
+        candidates: lookup.candidates.map((e) => ({ projectId: e.id, name: e.name })),
+      };
+    }
     if (!lookup.entity) return { project: null, ambiguous: false };
     const project = await this.reassemble(lookup.entity.id);
     return { project, ambiguous: false };

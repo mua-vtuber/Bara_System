@@ -20,6 +20,7 @@ import {
   type CachedSearch,
   type SearchCacheKeyInput,
 } from "./search-cache.ts";
+import { globalScope, projectValuesScope } from "../test-utils/resolved-scope.ts";
 
 // ── fixtures (데이터 입력→출력 — 인터페이스 가짜 구현체 없음) ──────────────────
 
@@ -200,6 +201,17 @@ describe("buildCacheKey — 21차원 결정적 직렬화", () => {
     };
     expect(buildCacheKey(base)).not.toBe(buildCacheKey(diffInput));
     expect(buildCacheKey(base)).not.toBe(buildCacheKey(diffOutput));
+  });
+
+  test("읽기 범위 — 해석 결과가 같으면 같은 키, 묶인 값·includeGlobal 이 다르면 다른 키", () => {
+    const named = { ...projectValuesScope(["prj_1", "bara_system"]), requested: "bara_system", resolvedFrom: "project_name" as const };
+    const byId = { ...projectValuesScope(["bara_system", "prj_1"]), requested: "prj_1", resolvedFrom: "project_id" as const };
+    expect(buildCacheKey({ ...baseKeyInput(), scope: named })).toBe(buildCacheKey({ ...baseKeyInput(), scope: byId }));
+    expect(buildCacheKey({ ...baseKeyInput(), scope: named }))
+      .not.toBe(buildCacheKey({ ...baseKeyInput(), scope: projectValuesScope(["prj_1"]) }));
+    expect(buildCacheKey({ ...baseKeyInput(), scope: named }))
+      .not.toBe(buildCacheKey({ ...baseKeyInput(), scope: { ...named, includeGlobal: true } }));
+    expect(buildCacheKey({ ...baseKeyInput(), scope: globalScope() })).not.toBe(buildCacheKey(baseKeyInput()));
   });
 
   test("dbRevision 이 바뀌면 키가 달라진다", () => {

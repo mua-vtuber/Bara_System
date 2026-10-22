@@ -16,17 +16,18 @@ import type { Database } from "bun:sqlite";
 import { openMemoryDatabase } from "../db/migrations.ts";
 import {
   isDerivedSourceType, matchesMemoryScope, readSharedMemory, readSharedMemoryForNode,
-  type MemoryReadScope,
+  type ResolvedMemoryScope,
 } from "./shared-memory-contract.ts";
 import {
   countMemoryVisibilityComputations, getMemoryVisibilitySnapshot, MemoryVisibilityStateError,
   readMemoryVisibilityFromDatabase,
 } from "./shared-memory-read.ts";
+import { globalScope, projectValuesScope } from "../test-utils/resolved-scope.ts";
 
 type Visibility = { allowedIds: ReadonlySet<number> | undefined; validityEpoch: number };
 
 /** readMemoryVisibilityFromDatabase as committed in d451e3a6 (the pre-snapshot semantics). */
-function legacyVisibility(db: Database, scope?: MemoryReadScope, includeInactive = false, now = Date.now()): Visibility {
+function legacyVisibility(db: Database, scope?: ResolvedMemoryScope, includeInactive = false, now = Date.now()): Visibility {
   const legacyIsCurrent = (metadata: Record<string, unknown>, at: number): boolean => {
     const state = readSharedMemory(metadata);
     return state.status === "active" && Number.isFinite(at)
@@ -103,10 +104,12 @@ const comparable = (v: Visibility) => ({
 });
 
 const PROJECTS = ["A", "B", "C"] as const;
-const SCOPES: Array<MemoryReadScope | undefined> = [
-  undefined, { projectId: null }, { projectId: null, includeGlobal: true },
-  ...PROJECTS.flatMap((projectId) => [{ projectId }, { projectId, includeGlobal: true }]),
-  { projectId: "Z" }, { projectId: "Z", includeGlobal: true },
+const SCOPES: Array<ResolvedMemoryScope | undefined> = [
+  undefined, globalScope(), { ...globalScope(), includeGlobal: true },
+  ...PROJECTS.flatMap((projectId) => [projectValuesScope([projectId]), projectValuesScope([projectId], true)]),
+  projectValuesScope(["Z"]), projectValuesScope(["Z"], true),
+  // 해석기가 한 프로젝트를 번호 + 옛 글자값 여러 개로 묶은 범위(2026-10-21 spec 10.1).
+  projectValuesScope(["A", "B"]), projectValuesScope(["B", "A"], true),
 ];
 
 function expectSameAsLegacy(db: Database, now: number): void {

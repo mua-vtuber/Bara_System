@@ -16,7 +16,7 @@
 import { createHash } from "node:crypto";
 import type { MemoryApiDeps } from "../types.ts";
 import type { DocumentOcrCycleSummary } from "../../api-client-types.ts";
-import { nowKst, pastCutoffInZone } from "../../db/store-internal/helpers.ts";
+import { nowKst, pastCutoffInZone, zoneDay } from "../../db/store-internal/helpers.ts";
 import {
   OCR_AUTOMATIC_PARSE_STATUSES,
   isDocumentParseLeaseActive,
@@ -71,7 +71,7 @@ export interface DocumentOcrCycleOptions {
 
 /** 설정 시간대 날짜(YYYY-MM-DD) — 하루 한도의 기준. */
 export function documentOcrDay(now: string = nowKst()): string {
-  return now.slice(0, 10);
+  return zoneDay(now);
 }
 
 /** 쪽 입력 지문 — 리더 정보(공급자·모델·한도·지시문 버전)·쪽 그림 크기·원본 자산·쪽 번호. */

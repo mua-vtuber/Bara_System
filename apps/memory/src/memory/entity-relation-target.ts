@@ -36,6 +36,8 @@ import type { PlacementTypeName } from "./concept-type-vocabulary.ts";
 import { parseClassificationTags } from "./parsers/classification-tag.ts";
 import { lookupRelationTag, type RelationSpec } from "./entity-relation-vocabulary.ts";
 import { createEntityRow, type CreatedEntityRow } from "./entity-row-gate.ts";
+import { PROJECT_TYPE_NAME } from "../db/store-internal/project-repository.ts";
+import { ambiguousProjectNameWarning, resolveProjectName } from "./project-name-lookup.ts";
 
 /** parseRelationTags 한 항목 — 사용자가 적은 키·값 + 그 키가 가리키는 관계 명세. */
 export interface ParsedRelationTag {
@@ -177,6 +179,12 @@ export async function resolveRelationTarget(
     };
   }
 
+  // project 대상은 이름·별칭 조회(resolveProjectName)로 가린다 — 여러 프로젝트에 겹치는 이름은
+  // 어느 쪽인지 모르므로 관계를 만들지 않는다(거짓 엣지·새 프로젝트 행 0). 기존·새 이름은
+  // createEntityRow 가 같은 조회로 기존 행을 쓰거나 새로 만든다.
+  if (targetType === PROJECT_TYPE_NAME && (await resolveProjectName(store, name)).kind === "ambiguous") {
+    return { skipped: true, reason: `관계 '${spec.relation}' 의 target — ${ambiguousProjectNameWarning(name)}` };
+  }
   const row: CreatedEntityRow = await createEntityRow(store, targetType, name);
   return { type: row.typeName, id: row.id, name: row.name };
 }

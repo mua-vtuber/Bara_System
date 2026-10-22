@@ -22,10 +22,11 @@ import { SqliteMemoryStore } from "../db/store.ts";
 import { SseTokenStore } from "../federation/sse-tokens.ts";
 import { createAuthGate } from "../server-internal/auth-gate.ts";
 import type { MemoryApiDeps } from "../server-internal/types.ts";
-import type { ProfileReport } from "../server-internal/profile.ts";
+import type { ProfileResponse } from "../server-internal/profile.ts";
 import { MEMORY_DEFAULTS } from "../settings/memory-defaults.ts";
 import { registerProfileRoutes } from "../server-internal/routes/profile.ts";
 import { registerMcpRoutes } from "./server.ts";
+import { GLOBAL_READ_SCOPE, SCOPE_NOTE_WHEN_ABSENT } from "../memory/project-scope-resolver.ts";
 
 let embedder: Bgem3Embedder;
 beforeAll(async () => {
@@ -81,9 +82,9 @@ async function connectClient(inner: Hono): Promise<void> {
   await client.connect(transport);
 }
 
-function toolResultJson(res: Awaited<ReturnType<Client["callTool"]>>): ProfileReport {
+function toolResultJson(res: Awaited<ReturnType<Client["callTool"]>>): ProfileResponse {
   const content = res.content as Array<{ type: string; text: string }>;
-  return JSON.parse(content[0]!.text) as ProfileReport;
+  return JSON.parse(content[0]!.text) as ProfileResponse;
 }
 
 test("get_profile — 선호 0건이면 isError 없이 { facets: {}, note } 회신", async () => {
@@ -94,7 +95,11 @@ test("get_profile — 선호 0건이면 isError 없이 { facets: {}, note } 회�
   const res = await client.callTool({ name: "get_profile", arguments: {} });
   expect(res.isError).not.toBe(true);
   const body = toolResultJson(res);
-  expect(body).toEqual({ facets: {}, note: "no preferences stored yet" });
+  expect(body).toEqual({
+    facets: {}, note: "no preferences stored yet",
+    // 범위 없이 부르면 프로젝트 없는 기억만 본다는 사실과 적용 범위를 함께 싣는다(2026-10-21 spec 10.4).
+    scope: GLOBAL_READ_SCOPE, scopeNote: SCOPE_NOTE_WHEN_ABSENT,
+  });
 });
 
 test("get_profile — 유효하지 않은 facet 값은 스키마 자체가 거부(SDK 입력 검증 에러, isError true)", async () => {
@@ -168,7 +173,7 @@ test("REST GET /profile 와 MCP get_profile — 같은 deps 에서 동일 facets
   const restApp = new Hono({ strict: false });
   registerProfileRoutes(restApp, deps);
   const restRes = await restApp.request("/profile");
-  const restBody = (await restRes.json()) as ProfileReport;
+  const restBody = (await restRes.json()) as ProfileResponse;
 
   // MCP — 같은 deps 로 도구 호출.
   const inner = new Hono({ strict: false });

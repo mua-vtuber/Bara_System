@@ -24,6 +24,7 @@ import {
 } from "./context-fence.ts";
 import type { RetrievalResult, RetrievalSource } from "./retriever.ts";
 import type { MemoryNode } from "./types.ts";
+import { projectValuesScope } from "../test-utils/resolved-scope.ts";
 
 // ── Fixture builders ────────────────────────────────────────────────────
 
@@ -306,7 +307,7 @@ test("context assembly independently excludes inactive and wrong-project evidenc
     makeResult({ id: 2, content: "other project", projectId: "B" }),
     makeResult({ id: 3, content: "retracted", projectId: "A", metadata: { sharedMemory: { status: "retracted" } } }),
   ];
-  const result = new ContextAssembler().assemble(memories, { scope: { projectId: "A" }, memoryBudget: 1000 });
+  const result = new ContextAssembler().assemble(memories, { scope: projectValuesScope(["A"]), memoryBudget: 1000 });
   expect(result.memoryBlock).toContain("allowed");
   expect(result.memoryBlock).not.toContain("other project");
   expect(result.memoryBlock).not.toContain("retracted");

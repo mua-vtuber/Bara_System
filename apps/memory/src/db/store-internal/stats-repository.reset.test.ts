@@ -235,6 +235,7 @@ describe("스키마 표 분류 가드", () => {
     "knowledge_edges",
     "knowledge_nodes",
     "knowledge_nodes_archive",
+    "mcp_tool_usage_daily",
     "memory_revisions",
     "node_concept_edges",
     "node_person_edges",

@@ -288,7 +288,10 @@ test("findByNameOrAlias — 이름 우선, 별칭 단일 매칭, 2건+ 모호", 
   repo.setKoAliases(avante.id, ["겹침"]);
   repo.setKoAliases(sonata.id, ["겹침"]);
   const ambiguous = await repo.findByNameOrAlias("vehicle", "겹침");
-  expect(ambiguous).toEqual({ entity: null, ambiguous: true });
+  expect(ambiguous.entity).toBe(null);
+  expect(ambiguous.ambiguous).toBe(true);
+  // 모호하면 같은 규칙에 걸린 행 전부를 후보로 돌려준다(호출처가 오류에 후보를 밝힌다).
+  expect(ambiguous.candidates?.map((e) => e.id).sort()).toEqual([avante.id, sonata.id].sort());
 
   const missing = await repo.findByNameOrAlias("vehicle", "없는별칭");
   expect(missing).toEqual({ entity: null, ambiguous: false });

@@ -1,7 +1,7 @@
 import type { SqliteMemoryStore } from "../db/store.ts";
 import type { Database } from "bun:sqlite";
 import {
-  matchesMemoryScope, SHARED_MEMORY_LINEAGE_RELATIONS, type MemoryReadScope,
+  matchesMemoryScope, resolvedScopeKey, SHARED_MEMORY_LINEAGE_RELATIONS, type ResolvedMemoryScope,
 } from "./shared-memory-contract.ts";
 import {
   computeMemoryVisibility, type MemoryVisibilityComputation,
@@ -45,8 +45,8 @@ export interface MemoryVisibilitySnapshot {
   readonly windowEnd: number;
   /** Readable rows flagged pending_review, for sizing the retriever's exclusion supply. */
   readonly pendingReviewIds: ReadonlySet<number>;
-  view(scope?: MemoryReadScope, includeInactive?: boolean): MemoryVisibilityView;
-  isAllowed(id: number, scope?: MemoryReadScope, includeInactive?: boolean): boolean;
+  view(scope?: ResolvedMemoryScope, includeInactive?: boolean): MemoryVisibilityView;
+  isAllowed(id: number, scope?: ResolvedMemoryScope, includeInactive?: boolean): boolean;
 }
 
 /** The generation table or its single row is missing: the baseline schema seeds that row, so the database is damaged. */
@@ -77,13 +77,13 @@ class VisibilitySnapshot implements MemoryVisibilitySnapshot {
     return Number.isFinite(now) && this.computed.windowStart <= now && now < this.computed.windowEnd;
   }
 
-  view(scope?: MemoryReadScope, includeInactive = false): MemoryVisibilityView {
+  view(scope?: ResolvedMemoryScope, includeInactive = false): MemoryVisibilityView {
     // The cached view keeps its own copy: a caller changing its scope object later cannot
     // make the view disagree with the key it is stored under.
-    const own: MemoryReadScope | undefined = scope === undefined
+    const own: ResolvedMemoryScope | undefined = scope === undefined
       ? undefined
-      : { projectId: scope.projectId, includeGlobal: scope.includeGlobal === true };
-    const key = `${includeInactive ? "inactive" : "default"}:${own === undefined ? "*" : JSON.stringify([own.projectId, own.includeGlobal])}`;
+      : { ...scope, projectIds: scope.projectIds === null ? null : [...scope.projectIds] };
+    const key = `${includeInactive ? "inactive" : "default"}:${own === undefined ? "*" : resolvedScopeKey(own)}`;
     const cached = this.views.get(key);
     if (cached !== undefined) {
       this.views.delete(key);
@@ -100,7 +100,7 @@ class VisibilitySnapshot implements MemoryVisibilitySnapshot {
     return created;
   }
 
-  isAllowed(id: number, scope?: MemoryReadScope, includeInactive = false): boolean {
+  isAllowed(id: number, scope?: ResolvedMemoryScope, includeInactive = false): boolean {
     return this.view(scope, includeInactive).isAllowed(id);
   }
 }
@@ -108,7 +108,7 @@ class VisibilitySnapshot implements MemoryVisibilitySnapshot {
 function createView(
   generation: number,
   computed: MemoryVisibilityComputation,
-  scope: MemoryReadScope | undefined,
+  scope: ResolvedMemoryScope | undefined,
   includeInactive: boolean,
 ): MemoryVisibilityView {
   // includeInactive admits every readable row; the default rules admit supported rows only.
@@ -201,7 +201,7 @@ export function countMemoryVisibilityComputations(owner: MemoryVisibilityOwner):
  */
 export function readMemoryVisibility(
   store: SqliteMemoryStore,
-  scope?: MemoryReadScope,
+  scope?: ResolvedMemoryScope,
   includeInactive = false,
   now = Date.now(),
 ): { allowedIds: ReadonlySet<number> | undefined; validityEpoch: number } {
@@ -211,7 +211,7 @@ export function readMemoryVisibility(
 /** Repository callers use the same snapshot without constructing another store. */
 export function readMemoryVisibilityFromDatabase(
   db: Database,
-  scope?: MemoryReadScope,
+  scope?: ResolvedMemoryScope,
   includeInactive = false,
   now = Date.now(),
 ): { allowedIds: ReadonlySet<number> | undefined; validityEpoch: number } {

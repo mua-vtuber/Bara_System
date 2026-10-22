@@ -57,6 +57,9 @@ export const EN_ALIASES_ATTR_KEY = "en_aliases";
  * 한다. medium·createdBy 는 entities 보조 칼럼(work 만 채워짐·그 외 null), 별칭은
  * entity_attributes(is_column=1·예약 키) 에서 읽어 JSON 파싱한다(없으면 빈 배열).
  */
+/** list() 가 한 번에 돌려주는 최대 행 수 — 이름·별칭 조회와 사용 안내 목록도 같은 상한을 쓴다. */
+export const ENTITY_LIST_LIMIT_MAX = 5000;
+
 export interface UserEntity {
   id: string;
   typeName: string;
@@ -123,10 +126,15 @@ export interface EntityVectorHit {
   distance: number;
 }
 
-/** 이름 또는 별칭 조회 결과 — 단일 매칭만 확정, 2건 이상이면 모호로 돌린다. */
+/**
+ * 이름 또는 별칭 조회 결과 — 단일 매칭만 확정, 2건 이상이면 모호로 돌린다.
+ * candidates 는 모호할 때만 실린다: 같은 규칙에 걸린 행 전부(호출처가 "어느 것과
+ * 겹쳤는지"를 오류로 밝힐 수 있게 — 조회 규칙을 호출처에서 다시 만들지 않는다).
+ */
 export interface EntityNameOrAliasLookup {
   entity: UserEntity | null;
   ambiguous: boolean;
+  candidates?: UserEntity[];
 }
 
 /**
@@ -489,19 +497,20 @@ export class EntitiesRepository {
     const trimmed = toNfc(name).trim();
     if (!trimmed) return { entity: null, ambiguous: false };
 
+    // 같은 이름 행은 동명이매체(work) 몇 건뿐이라 전부 읽어 모호 후보로 돌려준다.
     const exactRows = this.db
-      .query("SELECT * FROM entities WHERE type_name = ? AND name = ? LIMIT 2")
+      .query("SELECT * FROM entities WHERE type_name = ? AND name = ?")
       .all(typeName, trimmed) as EntityRow[];
     if (exactRows.length === 1) {
       return { entity: this.toView(exactRows[0]!), ambiguous: false };
     }
     if (exactRows.length > 1) {
-      return { entity: null, ambiguous: true };
+      return { entity: null, ambiguous: true, candidates: exactRows.map((row) => this.toView(row)) };
     }
 
     // 별칭도 저장된 쪽을 NFC 로 통일해 비교한다 — 들어온 이름만 NFC 이고 저장 별칭이
     // NFD 면 같은 한글 별칭이 안 잡혀 새 행이 쌓인다(exact name 갈래와 같은 규칙).
-    const rows = await this.list(typeName, { limit: 5000 });
+    const rows = await this.list(typeName, { limit: ENTITY_LIST_LIMIT_MAX });
     const aliasMatches = rows.filter(
       (e) =>
         e.koAliases.some((a) => toNfc(a) === trimmed) ||
@@ -511,7 +520,7 @@ export class EntitiesRepository {
       return { entity: aliasMatches[0]!, ambiguous: false };
     }
     if (aliasMatches.length > 1) {
-      return { entity: null, ambiguous: true };
+      return { entity: null, ambiguous: true, candidates: aliasMatches };
     }
     return { entity: null, ambiguous: false };
   }
@@ -521,7 +530,7 @@ export class EntitiesRepository {
    * + type_name 칸으로 가름. limit 기본 1000·상한 5000. 0건 = 빈 배열.
    */
   async list(typeName: string, options: { limit?: number } = {}): Promise<UserEntity[]> {
-    const limit = Math.min(options.limit ?? 1000, 5000);
+    const limit = Math.min(options.limit ?? 1000, ENTITY_LIST_LIMIT_MAX);
     const rows = this.db
       // dynamic SQL: limit placeholder, keep prepare()
       .prepare(

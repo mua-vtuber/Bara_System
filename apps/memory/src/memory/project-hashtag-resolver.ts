@@ -7,16 +7,14 @@
  */
 
 import type { SqliteMemoryStore } from "../db/store.ts";
-import {
-  classifyEntityTypeDeterministic,
-} from "./entity-type-classifier.ts";
-import {
-  buildForwardChainSubContent,
-  resolveChainLeafValue,
-  isMidChainNode,
-} from "./entity-placement-loop.ts";
-import { shouldCreateEntityRow } from "./entity-row-gate.ts";
 import { parseHashtagEntities } from "./parsers/hashtag-entity-parser.ts";
+import { planProjectAttachment } from "./project-attachment-plan.ts";
+import { ambiguousProjectNameWarning } from "./project-name-lookup.ts";
+
+export {
+  decideProjectDeclaration,
+  type ProjectDeclarationDecision,
+} from "./project-attachment-plan.ts";
 
 export interface ProjectDeclarationResolution {
   projectId: string | null;
@@ -24,6 +22,10 @@ export interface ProjectDeclarationResolution {
   touched: boolean;
 }
 
+/**
+ * 프로젝트 선언을 글에 붙인다. 붙일지·어디에 붙일지는 planProjectAttachment(저장 전 예측과 같은 함수)가
+ * 정하고, 여기서는 그 계획대로 기존 프로젝트에 붙이거나(existing), 만들어 붙이거나(new), 붙이지 않는다.
+ */
 export async function resolveProjectDeclaration(
   store: SqliteMemoryStore,
   content: string,
@@ -35,53 +37,27 @@ export async function resolveProjectDeclaration(
     warnings: [],
     touched: false,
   };
-  if (projectDeclarations.length === 0) return result;
-
-  const declaredProject = projectDeclarations[0]!;
-  const projectName = resolveChainLeafValue(declaredProject, content);
-  const projGate = shouldCreateEntityRow({
-    typeName: "project",
-    candidateName: projectName,
-    source: "explicit",
-    hasAttributes: false,
-    subcategory: null,
-    isMidChainNode: isMidChainNode(projectName, content),
-  });
-  const projectChainClassification = classifyEntityTypeDeterministic(
-    buildForwardChainSubContent(
-      { rawCategory: "프로젝트", value: declaredProject },
-      content,
-      new Set(),
-    ),
-  );
-  const chainEndsInCategory =
-    projectChainClassification.typeName === "project" &&
-    projectChainClassification.chainStop?.reason === "ended-in-category";
-  if (!projGate.create || chainEndsInCategory) {
-    result.warnings.push(
-      `프로젝트 사슬이 분류 폴더/중간 마디 '${projectName}' 에서 끝나 1급 project 행을 만들지 않음(개념·위계만)`,
-    );
+  const plan = await planProjectAttachment(store, content, projectDeclarations);
+  if (plan.kind === "none") return result;
+  if (plan.kind === "not_attached") {
+    result.warnings.push(plan.reason === "ends_in_category"
+      ? `프로젝트 사슬이 분류 폴더/중간 마디 '${plan.name}' 에서 끝나 1급 project 행을 만들지 않음(개념·위계만)`
+      : ambiguousProjectNameWarning(plan.name));
     return result;
   }
 
-  const lookup = await store.findProjectByNameOrAlias(projectName);
-  if (lookup.ambiguous) {
-    result.warnings.push(
-      `프로젝트 이름/별칭 '${projectName}' 이 2개+ 프로젝트에 겹쳐 모호 — project_id 미반영`,
-    );
-    return result;
-  }
-
-  const project = lookup.project ?? await store.findOrCreateProject({ name: projectName });
-  result.projectId = project.projectId;
+  const projectId = plan.kind === "existing"
+    ? plan.projectId
+    : (await store.findOrCreateProject({ name: plan.name })).projectId;
+  result.projectId = projectId;
   if (originNodeId !== null) {
-    await store.setNodeProjectId(originNodeId, project.projectId);
+    await store.setNodeProjectId(originNodeId, projectId);
   }
   result.touched = true;
   if (projectDeclarations.length > 1) {
     result.warnings.push(
       `프로젝트 선언이 ${projectDeclarations.length}개 — ` +
-        `첫 선언 '${projectName}' 만 이 글에 연결`,
+        `첫 선언 '${plan.name}' 만 이 글에 연결`,
     );
   }
   return result;

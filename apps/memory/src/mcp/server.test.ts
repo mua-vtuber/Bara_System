@@ -18,9 +18,10 @@ import { MEMORY_DEFAULTS } from "../settings/memory-defaults.ts";
 import type { MemoryApiDeps } from "../server-internal/types.ts";
 import { registerMcpRoutes, MCP_SERVER_NAME, toolError } from "./server.ts";
 import { serializeToolError, type BaraToolErrorCode } from "./errors.ts";
+import { PROJECT_SCOPE_ERROR_CODES } from "../memory/project-scope-resolver.ts";
 import { TOOL_DESCRIPTIONS } from "./descriptions.ts";
 import { TOOL_ANNOTATIONS } from "./annotations.ts";
-import { MCP_INSTRUCTIONS } from "./instructions.ts";
+import { buildMcpInstructions, MCP_INSTRUCTIONS } from "./instructions.ts";
 import { CAPTURE_TOOLS } from "./tools-capture.ts";
 import { PROPOSAL_PAYLOAD_DESCRIPTION } from "./tools-cleanup.ts";
 import { CAPTURE_TAG_SET } from "../memory/context-assembler.ts";
@@ -68,6 +69,16 @@ test("BaraToolErrorCode 는 닫힌 리터럴 유니온 — 등록 안 된 문자
   // 실패해야 @ts-expect-error 가 통과한다(임의 문자열 widening 불허 증거).
   const bad: BaraToolErrorCode = "WRONG_CODE";
   expect(bad as string).toBe("WRONG_CODE");
+});
+
+test("BaraToolErrorCode 에 프로젝트 범위 오류 코드 2종이 있다 — 해석기 코드 목록과 같다(2026-10-21 spec C-T5)", () => {
+  // 해석기의 오류 코드 전부가 도구 오류 코드로 실릴 수 있어야 한다(컴파일 타임 대입 + 실행 시 직렬화).
+  const codes: readonly BaraToolErrorCode[] = PROJECT_SCOPE_ERROR_CODES;
+  expect([...codes]).toEqual(["UNKNOWN_PROJECT", "AMBIGUOUS_PROJECT"]);
+  for (const code of codes) {
+    const parsed = JSON.parse(toolError(code, "m", { value: "x" }).content[0]!.text) as { code: string };
+    expect(parsed.code).toBe(code);
+  }
 });
 
 test("toolError → isError true + JSON { code, message } (details 부재 시 칸 생략)", () => {
@@ -144,7 +155,7 @@ async function listToolNames(): Promise<string[]> {
   return (await listTools()).map((t) => t.name);
 }
 
-test("tools/list = 정확히 18종(이름 배열 정렬 비교)", async () => {
+test("tools/list = 정확히 19종(이름 배열 정렬 비교)", async () => {
   const names = (await listToolNames()).sort();
   expect(names).toEqual(
     [
@@ -171,6 +182,8 @@ test("tools/list = 정확히 18종(이름 배열 정렬 비교)", async () => {
       "update_memory",
       "supersede_memory",
       "retract_memory",
+      // 사용 안내 1종(2026-10-21 spec 12.1).
+      "get_usage_guide",
     ].sort(),
   );
 });
@@ -300,6 +313,12 @@ const DESCRIPTION_PINS: Record<keyof typeof TOOL_DESCRIPTIONS, string[]> = {
     "exactly one firstBlockingCause", // 기존 사실 계약
     "not a live probe", // 기존 사실 계약(리뷰 Minor — embedder 단계 정직 한계)
   ],
+  get_usage_guide: [
+    "before your first save in a session", // trigger
+    "Takes no arguments", // 기존 사실 계약
+    "invented labels", // consequence
+    "live lists", // 기존 사실 계약(실시간 분류 값·프로젝트 목록)
+  ],
   get_profile: [
     "rarely resemble the wording", // deficit
     "structurally misses them", // deficit
@@ -341,7 +360,7 @@ test("문안에 이모지 없음(저장소 규약)", () => {
 
 // ── T9 annotations — tools/list 실제 회신에서 힌트 3종 확인 ──────────────────────
 
-test("tools/list annotations — 열람 7종은 readOnly + idempotent", async () => {
+test("tools/list annotations — 열람 8종은 readOnly + idempotent", async () => {
   const byName = new Map((await listTools()).map((t) => [t.name, t.annotations]));
   for (const name of [
     "search_memory",
@@ -351,6 +370,7 @@ test("tools/list annotations — 열람 7종은 readOnly + idempotent", async ()
     "cleanup_run_status",
     "bara_doctor",
     "get_profile",
+    "get_usage_guide",
   ]) {
     const ann = byName.get(name);
     expect(`${name}: ${ann?.readOnlyHint}`).toBe(`${name}: true`);
@@ -380,7 +400,7 @@ test("tools/list annotations — 쓰기 7종은 readOnly false + destructive fal
 
 test("tools/list annotations — 14종 전부 title 노출 + 단일 출처 맵과 일치", async () => {
   const tools = await listTools();
-  expect(tools.length).toBe(18);
+  expect(tools.length).toBe(19);
   for (const tool of tools) {
     const expected = TOOL_ANNOTATIONS[tool.name as keyof typeof TOOL_ANNOTATIONS];
     expect(`${tool.name}: ${tool.annotations?.title}`).toBe(`${tool.name}: ${expected.title}`);
@@ -395,6 +415,9 @@ test("tools/list annotations — 14종 전부 title 노출 + 단일 출처 맵�
 
 const FIELD_DESCRIPTION_PINS: Array<[tool: string, field: string, pin: string]> = [
   ["search_memory", "since", "YYYY-MM-DD"],
+  ["search_memory", "since", "in any language"],
+  ["search_memory", "since", "drops the rest"],
+  ["search_memory", "since", "only Korean time words in the query are read"],
   ["search_memory", "until", "YYYY-MM-DD"],
   ["search_memory", "contextBudget", "ignored when responseMode is index"],
   ["search_memory", "responseMode", "call get_memory with the ids you need"],
@@ -432,8 +455,12 @@ test("tools/list description — 등록부가 descriptions.ts 단일 출처를 �
 // 다듬을 여지는 남기되(부분 문자열 비교) 계약 자체가 빠지면 여기서 먼저 실패한다.
 
 const INSTRUCTION_PINS: Array<[label: string, pin: string]> = [
-  // 1. READ 계기 + 색인 우선 2단 검색.
-  ["read-trigger", "before substantive work"],
+  // 1. READ 계기(구체적인 찾는 순간, 2026-10-21 spec 11.3) + 색인 우선 2단 검색.
+  ["recall-moments", "WHEN TO RECALL"],
+  ["moment-project", "Starting work in a project"],
+  ["moment-options", "choosing between options"],
+  ["moment-past", "points to the past"],
+  ["moment-error", "same symptom"],
   ["session-start", "list_recent"],
   ["index-first", 'responseMode "index"'],
   ["index-then-get", "get_memory with the ids"],
@@ -446,6 +473,17 @@ const INSTRUCTION_PINS: Array<[label: string, pin: string]> = [
   ["dont-already-known", "already in this conversation"],
   // 4. 정직한 부정 + doctor 유도.
   ["honest-negative", "successful answer"],
+  ["mismatch-is-miss", "not answering the question is no hit"],
+  ["insufficient-evidence", "When evidence is insufficient, say so instead of guessing"],
+  ["per-part-count", "Two such tries per part"],
+  ["error-not-empty", "A tool error or timeout is not \"nothing stored\""],
+  ["timed-out-save", "search before saving it again"],
+  ["forbidden", "FORBIDDEN means this client's token lacks permission"],
+  ["ask-before-asking", "Before asking the user something they may already have told you"],
+  ["vague-pointer", "For a vague pointer"],
+  ["guide-chain-examples", "chain examples"],
+  ["split-compound", "split compound questions"],
+  ["retry-without-range", "drop any appliedFilters date range"],
   ["no-thrash", "Do not thrash"],
   ["doctor-trigger", "call bara_doctor before concluding"],
   // 5. 인용 양식.
@@ -461,6 +499,16 @@ const INSTRUCTION_PINS: Array<[label: string, pin: string]> = [
   // 8. 비밀값 거부 대응.
   ["secret", "SECRET_DETECTED"],
   ["secret-no-retry", "never retry with the credential"],
+  // 9. 프로젝트 범위 해석(묶음 C 동작 — project-scope-resolver.ts).
+  ["scope-name", "accepts a project name, alias or id"],
+  ["scope-error", "returns an error, not an empty result"],
+  ["scope-default", "cover only memories outside any project"],
+  // 10. 저장 안내 도구 + 분류 사슬 양식 + 해시태그 경고(2026-10-21 spec 11.3).
+  ["guide-pointer", "Before your first save in a session, call get_usage_guide"],
+  ["chain-format", "#key:value"],
+  ["chain-close", "end with a comma or line break"],
+  ["chain-reuse", "do not coin synonyms"],
+  ["hashtag-warnings", "hashtagWarnings"],
 ];
 
 test("instructions 고정 — spec G 계약 8항목 문구 보존", () => {
@@ -478,6 +526,20 @@ test("instructions 길이 예산 — 500 단어 미만(세션마다 전량 지�
 
 test("instructions 에 이모지 없음(저장소 규약)", () => {
   expect(/\p{Extended_Pictographic}/u.test(MCP_INSTRUCTIONS)).toBe(false);
+  expect(/\p{Extended_Pictographic}/u.test(buildMcpInstructions("read-only"))).toBe(false);
+});
+
+test("읽기 전용 instructions — 500 단어 미만, 저장 안내·쓰기 도구 이름 없음", () => {
+  const text = buildMcpInstructions("read-only");
+  const words = text.split(/\s+/).filter((t) => /[A-Za-z0-9]/.test(t)).length;
+  expect(`words=${words} < 500: ${words < 500}`).toBe(`words=${words} < 500: true`);
+  expect(text.includes("first save")).toBe(false);
+  // 쓰기 도구 = annotations 단일 출처에서 readOnlyHint 가 false 인 도구.
+  const writeTools = Object.entries(TOOL_ANNOTATIONS).filter(([, a]) => !a.readOnlyHint).map(([name]) => name);
+  expect(writeTools).toContain("store_memory");
+  for (const name of writeTools) expect(`${name}: ${text.includes(name)}`).toBe(`${name}: false`);
+  // 범위 문장은 읽기 도구에도 참이라 읽기 전용에도 실린다(spec 11.2).
+  expect(text.includes("accepts a project name, alias or id")).toBe(true);
 });
 
 test("instructions 가 실제 initialize 응답에 실린다(실 SDK 클라이언트)", async () => {

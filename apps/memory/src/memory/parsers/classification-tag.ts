@@ -17,7 +17,7 @@
  */
 
 import { recognizeCategorySynonym } from "../synonyms/category-synonyms.ts";
-import { extractTagValueForKey } from "./tag-value-boundary.ts";
+import { findTagValueEndForKey } from "./tag-value-boundary.ts";
 
 export interface ClassificationTag {
   category: string;
@@ -39,8 +39,26 @@ export interface ClassificationTag {
 // 한국어 가나다 / 영어 / 숫자 / underscore / hyphen 한 갈래.
 const CLASSIFICATION_KEY_REGEX = /#([\p{L}\p{N}_-]+):/gu;
 
-export function parseClassificationTags(text: string): ClassificationTag[] {
-  const result: ClassificationTag[] = [];
+/** 콜론 태그 키 하나가 글 안에서 놓인 자리 — 값이 비어 있어도 담는다. */
+export interface ClassificationKeyMatch {
+  /** `#` 의 위치. */
+  index: number;
+  rawCategory: string;
+  /** 값이 시작하는 위치(`:` 바로 뒤). */
+  valueStart: number;
+  /** 값 경계(다음 쉼표·줄바꿈·`#` 또는 글 끝)의 위치. */
+  valueEnd: number;
+  /** 앞뒤 공백을 자른 값. 빈 문자열이면 parseClassificationTags 가 버리는 태그다. */
+  value: string;
+}
+
+/**
+ * 글 안 모든 `#키:` 자리를 값 경계와 함께 돌려준다. parseClassificationTags 가 이 결과에서
+ * 값이 빈 것만 빼고 쓰므로, 저장 응답의 해시태그 경고(hashtag-chain-check.ts)가 파서와
+ * 똑같은 읽기를 보게 하는 단일 출처다.
+ */
+export function scanClassificationKeys(text: string): ClassificationKeyMatch[] {
+  const result: ClassificationKeyMatch[] = [];
   if (!text) return result;
 
   CLASSIFICATION_KEY_REGEX.lastIndex = 0;
@@ -49,12 +67,24 @@ export function parseClassificationTags(text: string): ClassificationTag[] {
     const rawCategory = match[1];
     if (!rawCategory) continue;
     const valueStart = match.index + match[0].length;
-    const value = extractTagValueForKey(text, valueStart, rawCategory);
-    if (rawCategory && value) {
-      const category = recognizeCategorySynonym(rawCategory);
-      result.push({ category, value, rawCategory });
-    }
+    const valueEnd = findTagValueEndForKey(text, valueStart, rawCategory);
+    result.push({
+      index: match.index,
+      rawCategory,
+      valueStart,
+      valueEnd,
+      value: text.slice(valueStart, valueEnd).trim(),
+    });
   }
+  return result;
+}
 
+export function parseClassificationTags(text: string): ClassificationTag[] {
+  const result: ClassificationTag[] = [];
+  for (const match of scanClassificationKeys(text)) {
+    if (!match.value) continue;
+    const category = recognizeCategorySynonym(match.rawCategory);
+    result.push({ category, value: match.value, rawCategory: match.rawCategory });
+  }
   return result;
 }

@@ -19,7 +19,8 @@ import type {
 } from "../types.ts";
 import { isPositiveString, parseLimit } from "../http-helpers.ts";
 import { toNfc } from "../../memory/nfc.ts";
-import { parseMemoryReadScope } from "../../memory/shared-memory-contract.ts";
+import { parseMemoryReadScope, type ResolvedMemoryScope } from "../../memory/shared-memory-contract.ts";
+import { resolveMemoryReadScope } from "../../memory/project-scope-resolver.ts";
 import type { SqliteMemoryStore } from "../../db/store.ts";
 import type { MemorySettings } from "../../settings/memory-settings.ts";
 import { DEFAULT_MAX_CONTEXT_TOKENS } from "../../memory/neighbor-chunks.ts";
@@ -80,6 +81,12 @@ export class SearchInputError extends Error {}
  */
 export interface SearchPipelineOptions {
   applyResultFloor?: boolean;
+  /**
+   * 호출측이 이미 해석한 읽기 범위(recall_context 가 기본값 "global" 로 해석한 것). 주면
+   * body.scope 는 비어 있어야 한다 — 두 범위가 갈리는 호출을 조용히 한쪽으로 고르지 않는다.
+   * 안 주면 body.scope 를 여기서 해석한다(없으면 거름 없음, spec 10.1 단계 1).
+   */
+  resolvedScope?: ResolvedMemoryScope;
 }
 
 /**
@@ -180,9 +187,15 @@ export async function runSearchPipeline(
   // 질의가 다른 결과·다른 캐시 슬롯을 만든다. trim 은 하지 않는다(질의 앞뒤
   // 공백 의미는 이 경계 밖 — 기존 파싱 계약 불변).
   const query = toNfc(body.query);
-  let scope;
-  try { scope = parseMemoryReadScope(body.scope); }
+  let requestedScope;
+  try { requestedScope = parseMemoryReadScope(body.scope); }
   catch (error) { throw new SearchInputError(`Invalid memory scope: ${error instanceof Error ? error.message : String(error)}`); }
+  if (options?.resolvedScope !== undefined && requestedScope !== undefined) {
+    throw new SearchInputError("scope must not be given twice (body.scope and a resolved scope)");
+  }
+  // 프로젝트 이름·별칭·번호·옛 글자값을 실제 project_id 값 묶음으로 해석한다. 모르는·애매한
+  // 값은 ProjectScopeError 로 그대로 던진다(REST 400 / MCP 도구 오류 — 빈 결과로 가리지 않음).
+  const scope = options?.resolvedScope ?? await resolveMemoryReadScope(store, requestedScope, "unfiltered");
   if (body.includeInactive !== undefined && typeof body.includeInactive !== "boolean") throw new SearchInputError("includeInactive must be a boolean");
   const includeInactive = body.includeInactive === true;
 
@@ -419,6 +432,7 @@ export async function runSearchPipeline(
       removedFilters,
       processing_info: indexProcessingInfo,
       appliedFilters,
+      ...(scope ? { appliedScope: scope } : {}),
     };
   }
 
@@ -576,6 +590,8 @@ export async function runSearchPipeline(
     // T10 — 항상 존재하는 두 칸(additive only / 기존 칸 무변경).
     processing_info: processingInfo,
     appliedFilters,
+    // 실제로 적용한 읽기 범위(해석 결과). 범위를 안 주면 거름이 없어 칸을 생략한다.
+    ...(scope ? { appliedScope: scope } : {}),
   };
 
   if (assembled) {

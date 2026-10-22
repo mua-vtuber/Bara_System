@@ -46,7 +46,7 @@
 import { estimateTokens } from "./token-counter.ts";
 import { sanitizeFenceBreakout, wrapInFence } from "./context-fence.ts";
 import type { RetrievalResult, RetrievalSource } from "./retriever.ts";
-import { isCurrentMemory, matchesMemoryScope, readSharedMemory, type MemoryReadScope } from "./shared-memory-contract.ts";
+import { isCurrentMemory, matchesMemoryScope, readSharedMemory, type ResolvedMemoryScope } from "./shared-memory-contract.ts";
 
 export type ContextMemory = Pick<RetrievalResult, "node" | "sources"> & {
   /**
@@ -154,7 +154,7 @@ function formatContextMarker(node: RetrievalResult["node"]): string {
 export interface AssembleOptions {
   /** Return the actual selected IDs; consumers must not infer them from untrusted text. */
   includeIds?: boolean;
-  scope?: MemoryReadScope;
+  scope?: ResolvedMemoryScope;
   includeInactive?: boolean;
   /**
    * Maximum tokens the memory block may consume, *including* the header.

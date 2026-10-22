@@ -583,8 +583,9 @@ export async function wireEntityPlacement(
     // 안 건드리고 루트 개념·위계 사슬·끝-실체 leaf 를 받는다. project 는 STATIC 종류라
     // isUserEntityType=false 라서 명시 합류 조건을 더한다(spec §12 단계3·§9 D5). getTypeColumns
     // ("project") 는 빈 배열·getTypeAttributes("project")=[참여자] 정상 반환이라
-    // 새 종류 attrKeys 짜기가 그대로 동작한다. 행 생성은 findOrCreateEntity("project",name) 이
-    // 옛 findOrCreateProject 와 name UNIQUE 로 같은 prj_ 행을 공유한다(멱등·충돌 0). 글↔project
+    // 새 종류 attrKeys 짜기가 그대로 동작한다. project 행은 resolveProjectName(이름·별칭)으로 기존
+    // 행을 먼저 쓰고 없을 때만 만든다 — 글을 붙이는 단계와 같은 판정이라 별칭이 프로젝트를 가르지
+    // 않는다(place-user-entity-type resolvePlacementEntity, 2026-10-22). 글↔project
     // 연결(setNodeProjectId·project_id 칸)은 옛 통로(wireHashtagEntities)가 단일 책임 유지.
     if (
       store.entityTypeRegistryDb.isUserEntityType(group.type) ||

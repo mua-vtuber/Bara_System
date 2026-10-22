@@ -110,6 +110,14 @@ export function nowKst(): string {
 }
 
 /**
+ * 설정 시간대 날짜("YYYY-MM-DD") — 하루 단위 집계(문서 OCR 하루 호출 수, MCP 도구 호출 횟수)의 기준 날짜 단일 출처.
+ * now 를 주면 그 시각 문자열("YYYY-MM-DD HH:MM:SS")의 날짜 부분을 돌려준다.
+ */
+export function zoneDay(now: string = nowKst()): string {
+  return now.slice(0, 10);
+}
+
+/**
  * 과거 컷오프 시각을 설정 시간대 기준 SQLite 문자열("YYYY-MM-DD HH:MM:SS")로 만든다.
  *
  * 저장 시각(archived_at·created_at)이 nowInZone 으로 같은 zone 에 적히므로, 보관·통계

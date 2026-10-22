@@ -575,7 +575,7 @@ test("(f) createMemoryApi 실 조립 앱에 SDK 연결 → tools/list 14종 (마
   await client.connect(transport);
 
   const { tools } = await client.listTools();
-  expect(tools.length).toBe(18);
+  expect(tools.length).toBe(19);
   const names = tools.map((t) => t.name).sort();
   expect(names).toEqual(
     [
@@ -597,6 +597,7 @@ test("(f) createMemoryApi 실 조립 앱에 SDK 연결 → tools/list 14종 (마
       "update_memory",
       "supersede_memory",
       "retract_memory",
+      "get_usage_guide",
     ].sort(),
   );
 

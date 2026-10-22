@@ -308,6 +308,7 @@ test('a current source exports and lists the auto-register, server OCR ledger an
   expect(byName.get('document_ocr_page_results')).toBeTruthy();
   expect(byName.get('document_ocr_daily_usage')).toBeTruthy();
   expect(byName.get('backfill_attempts')).toBeTruthy();
+  expect(byName.get('mcp_tool_usage_daily')).toBeTruthy();
   await validatePortableArchive(f.destination);
 });
 test('a v47 source (before the upgrade) still exports without the v48 exclusions', async () => {

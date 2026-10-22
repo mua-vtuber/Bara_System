@@ -9,6 +9,7 @@
  *  - `intervalMs < 60_000` 이면 즉시 throw (AI 과부하 차단 안전선).
  *  - 즉시 트리거 안 함 — 다음 경계(설정 시간대 자정 격자 + offset)에 첫 사이클이 setTimeout 으로 돌고, 사이클이 끝나면
  *    다음 경계로 다시 예약한다(시계 정렬). 서버 켠 시각이 아니라 격자 기준으로 정렬된다.
+ *    nextDelayMs 를 주면 이 계산 대신 그것을 쓴다(정리 깊은 패스 — 실행 기록 기준 예약).
  *  - 겹침 방지 — 진행 중 사이클이 있으면 그 결과를 기다린다(중복 가동 차단). running 이 단일 출처.
  *  - stop() 후 tickNow → 즉시 빈 요약(emptySummary) / 진행 중 사이클은 끝까지 기다린 뒤 멈춤.
  *  - lastSummary() — 마지막 사이클 요약.
@@ -50,6 +51,11 @@ export interface ClockAlignedSchedulerArgs<S, C> {
   runCycle: (ctx?: C) => Promise<S>;
   /** stop() 뒤 tickNow 가 돌려줄 0건 요약. */
   emptySummary: () => S;
+  /**
+   * 다음 사이클까지 남은 ms 계산 덮어쓰기. 미주입 시 msUntilNextBoundary(now, intervalMin, offsetMin) 격자.
+   * 주기가 길어 재시작마다 격자가 다시 시작되면 안 되는 스케줄러(깊은 패스)가 실행 기록 기준 계산을 넣는다.
+   */
+  nextDelayMs?: (nowMs: number) => number;
   /** 현재 시각 주입 (테스트용). 미주입 시 Date.now. */
   now?: () => number;
   /** setTimeout 주입 (테스트용). */
@@ -68,6 +74,8 @@ export function startClockAlignedScheduler<S, C>(
   }
   const logPrefix = args.logPrefix;
   const now = args.now ?? (() => Date.now());
+  const nextDelayMs =
+    args.nextDelayMs ?? ((nowMs: number) => msUntilNextBoundary(nowMs, args.intervalMin, args.offsetMin));
   const schedule = args.setTimeoutFn ?? ((fn, ms) => setTimeout(fn, ms));
   const cancel =
     args.clearTimeoutFn ??
@@ -120,7 +128,7 @@ export function startClockAlignedScheduler<S, C>(
   // 시계 정렬 다음-경계 재예약. 사이클 throw 도 다음 경계로 흐름 끊김 차단.
   function scheduleNext(): void {
     if (stopped) return;
-    const delay = msUntilNextBoundary(now(), args.intervalMin, args.offsetMin);
+    const delay = nextDelayMs(now());
     pendingTimer = schedule(() => {
       pendingTimer = null;
       void tick()

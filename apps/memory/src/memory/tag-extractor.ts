@@ -33,7 +33,11 @@ interface RemoveRange {
   end: number;
 }
 
-function isHashtagKeyChar(ch: string | undefined): boolean {
+/**
+ * 콜론 없는 태그(`#AI기록`)의 키 글자인지 — 문자·숫자·밑줄(하이픈 없음).
+ * 해시태그 경고(hashtag-chain-check.ts)가 같은 판정을 쓰도록 내보낸다.
+ */
+export function isHashtagKeyChar(ch: string | undefined): boolean {
   return ch !== undefined && HASHTAG_KEY_CHAR.test(ch);
 }
 

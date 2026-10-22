@@ -200,6 +200,22 @@ describe("ProjectRepository — entities(type_name='project') 통합 CRUD (T7'b)
     expect(missing).toEqual({ project: null, ambiguous: false });
   });
 
+  test("findProjectByNameOrAlias — 별칭이 두 프로젝트에 겹치면 모호 + 후보 번호·이름", async () => {
+    const a = await repo.findOrCreateProject({ name: "알파 프로젝트" });
+    const b = await repo.findOrCreateProject({ name: "베타 프로젝트" });
+    const entityRepo = new EntitiesRepository(db, embedder, new EntityTypeRegistryDb(db));
+    entityRepo.setKoAliases(a.projectId, ["겹침"]);
+    entityRepo.setKoAliases(b.projectId, ["겹침"]);
+
+    const lookup = await repo.findProjectByNameOrAlias("겹침");
+    expect(lookup.project).toBeNull();
+    expect(lookup.ambiguous).toBe(true);
+    expect(lookup.candidates?.sort((x, y) => x.name.localeCompare(y.name))).toEqual([
+      { projectId: a.projectId, name: "알파 프로젝트" },
+      { projectId: b.projectId, name: "베타 프로젝트" },
+    ].sort((x, y) => x.name.localeCompare(y.name)));
+  });
+
   test("getProject — 다른 종류 entity_id 는 project 로 안 잡힌다(null)", async () => {
     // person·새 종류 등 비-project 본체를 project getter 로 읽으면 null(혼선 방지).
     const reg = new EntityTypeRegistryDb(db);

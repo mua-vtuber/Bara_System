@@ -30,7 +30,7 @@ import {
   resolveDateRange,
 } from "./search-params.ts";
 import { filterOcrIncompleteResults } from "./search-enrich.ts";
-import type { MemoryReadScope } from "../../memory/shared-memory-contract.ts";
+import type { ResolvedMemoryScope } from "../../memory/shared-memory-contract.ts";
 import { getMemoryVisibilitySnapshot } from "../../memory/shared-memory-read.ts";
 import { StageTimer, type RetrieveStageTimings } from "../../memory/stage-timer.ts";
 import type { SearchRetrievalPassTrace } from "./search-timing.ts";
@@ -39,7 +39,7 @@ export type SearchMode = "strict" | "relaxed";
 
 /** 파사드(search.ts)의 body 파싱 단계가 만든 검증 완료 검색 인자 묶음. */
 export interface SearchRetrievalArgs {
-  scope?: MemoryReadScope;
+  scope?: ResolvedMemoryScope;
   includeInactive?: boolean;
   query: string;
   limit: number;
@@ -66,7 +66,7 @@ export interface SearchRetrievalArgs {
  * 응답 JSON 에서 생략되게 한다. search-service.ts 가 값 채택).
  */
 export interface AppliedFilters {
-  scope?: MemoryReadScope;
+  scope?: ResolvedMemoryScope;
   includeInactive?: boolean;
   dateRange?: EventDateRange;
   place?: string;

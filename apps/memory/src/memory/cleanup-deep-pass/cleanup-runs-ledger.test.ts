@@ -339,3 +339,55 @@ test("options 원문 보존 — stages/maxCalls 왕복", () => {
   });
   db.close();
 });
+
+/** run 하나를 만들어 종료 상태·시작 시각을 정한다(예약 기준점 검증용 데이터 준비). */
+function seedRun(
+  db: Database,
+  ledger: CleanupRunsLedger,
+  run: { id: string; startedAt: string; status: "running" | "completed" | "cancelled" | "failed"; trigger?: "manual" | "scheduled"; options?: Record<string, unknown> },
+): void {
+  ledger.startRun({ trigger: run.trigger ?? "scheduled", options: run.options ?? {}, idGen: () => run.id });
+  if (run.status !== "running") {
+    ledger.finishRun({ runId: run.id, status: run.status, aggregates: SAMPLE_AGGREGATES });
+  }
+  db.prepare("UPDATE cleanup_runs SET started_at = ? WHERE run_id = ?").run(run.startedAt, run.id);
+}
+
+test("lastFullRunStartedAt — 기록이 없으면 null", () => {
+  const ledger = new CleanupRunsLedger(freshDb());
+  expect(ledger.lastFullRunStartedAt()).toBeNull();
+});
+
+test("lastFullRunStartedAt — 정기·수동 전체 실행 중 가장 늦은 completed/cancelled 시작 시각", () => {
+  const db = freshDb();
+  const ledger = new CleanupRunsLedger(db);
+  seedRun(db, ledger, { id: "a", startedAt: "2026-10-08 00:00:01", status: "completed" });
+  seedRun(db, ledger, { id: "b", startedAt: "2026-10-15 14:20:00", status: "completed", trigger: "manual" });
+  seedRun(db, ledger, { id: "c", startedAt: "2026-10-12 00:00:01", status: "cancelled" });
+  expect(ledger.lastFullRunStartedAt()).toBe("2026-10-15 14:20:00");
+
+  seedRun(db, ledger, { id: "d", startedAt: "2026-10-16 00:00:01", status: "cancelled" });
+  expect(ledger.lastFullRunStartedAt()).toBe("2026-10-16 00:00:01");
+});
+
+test("lastFullRunStartedAt — 실패·진행 중·부분 실행·dryRun 은 기준점이 아니다", () => {
+  const db = freshDb();
+  const ledger = new CleanupRunsLedger(db);
+  seedRun(db, ledger, { id: "full", startedAt: "2026-10-08 00:00:01", status: "completed" });
+  seedRun(db, ledger, { id: "failed", startedAt: "2026-10-15 00:00:01", status: "failed" });
+  seedRun(db, ledger, { id: "running", startedAt: "2026-10-16 00:00:01", status: "running" });
+  seedRun(db, ledger, {
+    id: "memo",
+    startedAt: "2026-10-17 10:00:00",
+    status: "completed",
+    trigger: "manual",
+    options: { stages: ["entityRegister"], nodeIds: [5], reason: "memo_saved" },
+  });
+  seedRun(db, ledger, { id: "stages", startedAt: "2026-10-18 10:00:00", status: "completed", trigger: "manual", options: { stages: ["summary"] } });
+  seedRun(db, ledger, { id: "dry", startedAt: "2026-10-19 10:00:00", status: "completed", trigger: "manual", options: { dryRun: true } });
+  expect(ledger.lastFullRunStartedAt()).toBe("2026-10-08 00:00:01");
+
+  // dryRun:false 를 명시한 수동 실행은 전체 실행이다.
+  seedRun(db, ledger, { id: "manual", startedAt: "2026-10-20 10:00:00", status: "completed", trigger: "manual", options: { dryRun: false, maxCalls: 5 } });
+  expect(ledger.lastFullRunStartedAt()).toBe("2026-10-20 10:00:00");
+});

@@ -11,6 +11,8 @@
  * 7종 전부 실 호출부가 있다: SECRET_DETECTED 는 T15 비밀값 게이트(write-guard-http),
  * DUPLICATE 는 T16 유사-중복 보류(tools-memory·tools-capture·REST 409), DISABLED 는
  * cleanup 비활성 갈래(tools-cleanup) — T13 시점의 "예약" 상태는 P3 에서 해소됐다.
+ * UNKNOWN_PROJECT·AMBIGUOUS_PROJECT 는 읽기 범위 해석기(memory/project-scope-resolver.ts)의
+ * 오류 — 범위를 받는 읽기 도구 4종(recall_context·search_memory·list_recent·get_profile)이 낸다.
  */
 
 export type BaraToolErrorCode =
@@ -22,6 +24,8 @@ export type BaraToolErrorCode =
   | "STALE_CANDIDATE"
   | "CONFLICT"
   | "FORBIDDEN"
+  | "UNKNOWN_PROJECT"
+  | "AMBIGUOUS_PROJECT"
   | "INTERNAL";
 
 export interface BaraToolErrorPayload {

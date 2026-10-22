@@ -1,10 +1,11 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { RegisteredTool } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { TokenScope } from "../federation/sse-tokens.ts";
+import type { McpUsageRecorder } from "./usage-recorder.ts";
 
 const READ_TOOLS = new Set([
   "search_memory", "get_memory", "list_recent", "get_profile", "bara_doctor",
-  "recall_context", "cleanup_list_candidates", "cleanup_run_status",
+  "recall_context", "cleanup_list_candidates", "cleanup_run_status", "get_usage_guide",
 ]);
 const WRITE_TOOLS = new Set([
   "store_memory", "save_decision", "save_idea", "save_question", "save_preference",
@@ -47,6 +48,8 @@ export class ScopedMcpServer extends McpServer {
     serverInfo: ConstructorParameters<typeof McpServer>[0],
     options: ConstructorParameters<typeof McpServer>[1],
     private readonly scope: TokenScope | undefined,
+    private readonly usage: McpUsageRecorder,
+    private readonly adapterId: string | undefined,
   ) {
     super(serverInfo, options);
   }
@@ -56,8 +59,33 @@ export class ScopedMcpServer extends McpServer {
     config: Parameters<McpServer["registerTool"]>[1],
     cb: Parameters<McpServer["registerTool"]>[2],
   ): RegisteredTool {
-    const registered = super.registerTool(name, config as never, cb as never);
+    const registered = super.registerTool(name, config as never, this.countingCallback(name, cb) as never);
     if (!canUseMcpTool(this.scope, name)) registered.disable();
     return registered;
+  }
+
+  /**
+   * 도구 콜백을 감싸 호출 결과(ok/error)를 센다(2026-10-21 mcp-usage spec P1). 원래 콜백을 먼저 끝까지 실행하고, 기록은 그 뒤에 한다.
+   * 결과(isError)·예외는 그대로 돌려준다 — 기록 실패도 도구 결과를 바꾸지 않는다(McpUsageRecorder.record 가 던지지 않는다).
+   * 인자 검사에서 SDK 가 먼저 거절한 호출, 권한으로 꺼진 도구는 콜백까지 오지 않아 세지 못한다(notCounted 에 명시).
+   */
+  private countingCallback(
+    name: string,
+    cb: Parameters<McpServer["registerTool"]>[2],
+  ): Parameters<McpServer["registerTool"]>[2] {
+    const inner = cb as (...args: unknown[]) => unknown;
+    const counted = async (...args: unknown[]) => {
+      let result: unknown;
+      try {
+        result = await inner(...args);
+      } catch (error) {
+        this.usage.record({ client: this.adapterId, kind: "tool", name, outcome: "error" });
+        throw error;
+      }
+      const isError = (result as { isError?: boolean } | null | undefined)?.isError === true;
+      this.usage.record({ client: this.adapterId, kind: "tool", name, outcome: isError ? "error" : "ok" });
+      return result;
+    };
+    return counted as unknown as Parameters<McpServer["registerTool"]>[2];
   }
 }

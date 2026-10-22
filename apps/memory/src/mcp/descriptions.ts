@@ -117,6 +117,13 @@ export const TOOL_DESCRIPTIONS = {
     "Call this only when the user gives you a runId " +
     "to read that run's status and aggregates before reporting progress. Without it you " +
     "would be guessing at whether a run finished, stalled, or failed.",
+  get_usage_guide:
+    "You do not know this server's conventions: which save tool fits, how a lesson is written, " +
+    "which evidence fields exist, what hashtag warnings mean, or which classification values and " +
+    "projects already exist. Call this once before your first save in a session, or when you need " +
+    "a project's name or id. Skipping it scatters new memories under invented labels that the " +
+    "user's graph cannot group. Takes no arguments. Returns the guide text plus live lists of " +
+    "classification values and projects.",
   bara_doctor:
     "An empty search result looks identical whether nothing was stored on this " +
     "topic or the embedder, vector index, or FTS index is broken — you cannot " +
@@ -141,7 +148,7 @@ export const TOOL_DESCRIPTIONS = {
 /**
  * cleanup_list_candidates 의 read-only 문안. read-only 토큰은 cleanup_submit_proposal 이
  * tools/list 에서 빠지므로(access.ts) 제출을 권하는 TOOL_DESCRIPTIONS 문안 대신 이것을 쓴다.
- * 등록부(tools-cleanup.ts)가 scope 로 고른다. TOOL_DESCRIPTIONS 키 집합(14종)에는 넣지 않는다.
+ * 등록부(tools-cleanup.ts)가 scope 로 고른다. TOOL_DESCRIPTIONS 키 집합에는 넣지 않는다.
  */
 export const CLEANUP_LIST_CANDIDATES_READ_ONLY =
   "The memory store accumulates entries needing curation, and you cannot see " +

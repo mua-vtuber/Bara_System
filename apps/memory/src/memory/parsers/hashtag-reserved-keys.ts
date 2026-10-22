@@ -108,3 +108,24 @@ export function loadReservedKeys(
   }
   return { ...DEFAULT_RESERVED_KEYS, ...settings };
 }
+
+/** 한 갈래에 속한 예약 키 이름들(묶음에 적힌 순서). */
+export function reservedKeyNamesOfKind(keys: ReservedKeyMap, kind: ReservedKind): string[] {
+  return Object.entries(keys).filter(([, def]) => def.kind === kind).map(([name]) => name);
+}
+
+/**
+ * 한 갈래의 예약 키가 정확히 하나일 때 그 이름. 0개·2개 이상이면 이름을 대며 던진다 —
+ * 서버 지침·사용 안내가 "프로젝트 키는 이것" 이라고 한 이름으로 말하므로, 묶음이 그
+ * 전제를 깨면 문안을 조립하지 않고 멈춘다(지어낸 이름으로 대체하지 않음).
+ */
+export function requireSingleReservedKey(keys: ReservedKeyMap, kind: ReservedKind): string {
+  const names = reservedKeyNamesOfKind(keys, kind);
+  if (names.length !== 1) {
+    throw new Error(
+      `예약 키 갈래 '${kind}' 의 키가 정확히 1개여야 하는데 ${names.length}개임` +
+        (names.length > 0 ? ` (${names.join(", ")})` : ""),
+    );
+  }
+  return names[0]!;
+}

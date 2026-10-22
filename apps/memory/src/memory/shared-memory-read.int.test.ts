@@ -6,7 +6,8 @@ import { SqliteMemoryStore } from "../db/store.ts";
 import { HybridRetriever } from "./retriever.ts";
 import { ContextAssembler } from "./context-assembler.ts";
 import { SearchCache } from "./search-cache.ts";
-import { getProfile } from "../server-internal/profile.ts";
+import { getProfile, getProfileForRequest } from "../server-internal/profile.ts";
+import { globalScope, projectValuesScope } from "../test-utils/resolved-scope.ts";
 import { runSearchPipeline } from "../server-internal/routes/search-service.ts";
 import type { MemoryApiDeps } from "../server-internal/types.ts";
 import {
@@ -37,9 +38,9 @@ test("scope and lifecycle filter before candidate limit, preserving a distant va
   const current = await store.addNode({ content: "공용 장기 기억 프로젝트 A", embedding: vector, project_id: "A" });
   await store.addNode({ content: "공용 장기 기억 폐기", embedding: vector, project_id: "A", metadata: { sharedMemory: { status: "retracted" } } });
   await store.addNode({ content: "공용 장기 기억 만료", embedding: vector, project_id: "A", metadata: { sharedMemory: { validUntil: "2020-01-01T00:00:00Z" } } });
-  const result = await deps.retriever.retrieve("공용 장기 기억", { limit: 2, vectorK: 2, ftsLimit: 2, scope: { projectId: "A", includeGlobal: true } });
+  const result = await deps.retriever.retrieve("공용 장기 기억", { limit: 2, vectorK: 2, ftsLimit: 2, scope: projectValuesScope(["A"], true) });
   expect(new Set(result.map(r => r.node.id))).toEqual(new Set([global, current]));
-  const history = await deps.retriever.retrieve("공용 장기 기억", { limit: 100, scope: { projectId: "A" }, includeInactive: true });
+  const history = await deps.retriever.retrieve("공용 장기 기억", { limit: 100, scope: projectValuesScope(["A"]), includeInactive: true });
   expect(history).toHaveLength(3);
 });
 
@@ -49,8 +50,8 @@ test("profile defaults global, project includes global, and omits inactive prefe
   const scoped = await store.addNode({ content: "A 규칙", memoryType: "preference", embedding, project_id: "A" });
   await store.addNode({ content: "B 규칙", memoryType: "preference", embedding, project_id: "B" });
   await store.addNode({ content: "철회 규칙", memoryType: "preference", embedding, metadata: { sharedMemory: { status: "superseded" } } });
-  expect(Object.values(getProfile(deps).facets).flat().map(x => x.id)).toEqual([global]);
-  expect(new Set(Object.values(getProfile(deps, { scope: { projectId: "A" } }).facets).flat().map(x => x.id))).toEqual(new Set([global, scoped]));
+  expect(Object.values(getProfile(deps, { scope: globalScope() }).facets).flat().map(x => x.id)).toEqual([global]);
+  expect(new Set(Object.values((await getProfileForRequest(deps, { scope: { projectId: "A" } })).facets).flat().map(x => x.id))).toEqual(new Set([global, scoped]));
 });
 
 test("search scope separates cached results and never relaxes project boundaries", async () => {
@@ -68,7 +69,7 @@ test("FTS-only search replenishes candidates before applying the requested limit
   const embedding = await embedder.embed("공용 기억");
   const allowed = await store.addNode({ content: "공용 기억 " + "보충 문장 ".repeat(40), embedding, project_id: "A" });
   for (let i = 0; i < 30; i++) await store.addNode({ content: "공용 기억", embedding, project_id: "B" });
-  const results = await deps.retriever.retrieve("공용 기억", { scope: { projectId: "A" }, limit: 1, ftsLimit: 1,
+  const results = await deps.retriever.retrieve("공용 기억", { scope: projectValuesScope(["A"]), limit: 1, ftsLimit: 1,
     channelMask: { vector: false, fts: true, graph: false, concept: false, imageVec: false, person: false, project: false } });
   expect(results.map(r => r.node.id)).toEqual([allowed]);
 });
@@ -110,11 +111,11 @@ test("dependent preferences disappear from cached search and profile when their 
     metadata: { sharedMemory: { assertionKind: "ai_inference", evidenceRefs: [source] } } });
   const body = { query: "공용 기억", responseMode: "index", memoryType: "preference" };
   expect((await runSearchPipeline(deps, body, new URLSearchParams())).results).toEqual([expect.objectContaining({ id: dependent })]);
-  expect(Object.values(getProfile(deps).facets).flat().map(x => x.id)).toEqual([dependent]);
+  expect(Object.values(getProfile(deps, { scope: globalScope() }).facets).flat().map(x => x.id)).toEqual([dependent]);
   await Bun.sleep(Math.max(0, expiry - Date.now()) + 20);
   expect((await runSearchPipeline(deps, body, new URLSearchParams())).results).toEqual([]);
-  expect(Object.values(getProfile(deps).facets).flat()).toEqual([]);
-  expect(Object.values(getProfile(deps, { includeInactive: true }).facets).flat().map(x => x.id)).toEqual([dependent]);
+  expect(Object.values(getProfile(deps, { scope: globalScope() }).facets).flat()).toEqual([]);
+  expect(Object.values(getProfile(deps, { scope: globalScope(), includeInactive: true }).facets).flat().map(x => x.id)).toEqual([dependent]);
 });
 
 test("visibility requires grounded current evidence, allowing independent support but excluding missing sources and cycles", async () => {
@@ -139,8 +140,8 @@ test("visibility requires grounded current evidence, allowing independent suppor
   expect(visible.has(cycleB)).toBe(false);
   expect(visible.has(supported)).toBe(true);
   expect(visible.has(descendant)).toBe(true);
-  expect(readMemoryVisibility(store, { projectId: "A" }).allowedIds).toEqual(new Set([supported, descendant]));
-  expect(Object.values(getProfile(deps).facets).flat()).toEqual([]);
+  expect(readMemoryVisibility(store, projectValuesScope(["A"])).allowedIds).toEqual(new Set([supported, descendant]));
+  expect(Object.values(getProfile(deps, { scope: globalScope() }).facets).flat()).toEqual([]);
   expect(readMemoryVisibility(store, undefined, true).allowedIds).toBeUndefined();
 });
 
@@ -188,7 +189,7 @@ test("search and recall omit the chunks of a retracted evidence-backed memory wh
     expect((await searchHitIds({ responseMode })).filter((id) => lineage.has(id))).toEqual([]);
   }
   // recall_context admits only ids inside this global-scope visibility set.
-  const recallable = readMemoryVisibility(store, { projectId: null }).allowedIds!;
+  const recallable = readMemoryVisibility(store, globalScope()).allowedIds!;
   for (const id of lineage) expect(recallable.has(id)).toBe(false);
   expect(recallable.has(evidence)).toBe(true);
   for (const id of chunks) {
@@ -237,10 +238,10 @@ test("legacy derived rows with copied evidenceRefs leave default reads once thei
   for (const id of [parent, chunk, child]) expect(visible.has(id)).toBe(false);
   const hits = (await runSearchPipeline(deps, { query: "배포 결정", responseMode: "index" }, new URLSearchParams())).results as Array<{ id: number }>;
   expect(hits.map((hit) => hit.id)).toEqual([evidence]);
-  expect(Object.values(getProfile(deps).facets).flat()).toEqual([]);
+  expect(Object.values(getProfile(deps, { scope: globalScope() }).facets).flat()).toEqual([]);
   expect((await store.getNode(chunk))!.metadata.sharedMemory).toEqual(copied("user_statement"));
   expect((await store.getNode(child))!.metadata.sharedMemory).toEqual(copied("ai_inference"));
-  const history = Object.values(getProfile(deps, { includeInactive: true }).facets).flat();
+  const history = Object.values(getProfile(deps, { scope: globalScope(), includeInactive: true }).facets).flat();
   expect(history.map((entry) => entry.id)).toEqual([child]);
   expect(history[0]!.sharedMemory).toEqual({ status: "active", revision: 0, assertionKind: "ai_inference" });
 });

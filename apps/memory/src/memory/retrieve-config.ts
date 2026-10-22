@@ -18,7 +18,7 @@
  */
 
 import type { MemoryType, Polarity } from "./types.ts";
-import type { MemoryReadScope } from "./shared-memory-contract.ts";
+import type { ResolvedMemoryScope } from "./shared-memory-contract.ts";
 import { detectCues, type SearchCues } from "./search-cues.ts";
 import {
   RRF_BLEND_WEIGHT,
@@ -101,7 +101,7 @@ export interface RetrieveTuning {
 }
 
 export interface RetrieveOptions {
-  scope?: MemoryReadScope;
+  scope?: ResolvedMemoryScope;
   includeInactive?: boolean;
   limit?: number;
   vectorK?: number;

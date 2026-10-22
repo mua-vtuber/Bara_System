@@ -27,8 +27,9 @@ import { rowToNode } from "../db/store-internal/helpers.ts";
 import type { KnowledgeNodeRow } from "../db/store-internal/row-types.ts";
 import { canUseMcpTool } from "./access.ts";
 import { readMemoryVisibility } from "../memory/shared-memory-read.ts";
+import { ProjectScopeError, resolveMemoryReadScope } from "../memory/project-scope-resolver.ts";
 import { listOpenConflicts, listOriginMarks } from "../memory/open-conflicts.ts";
-import { SecretDetectedError } from "../server-internal/write-guard/write-guard.ts";
+import { applyWriteGuard, SecretDetectedError } from "../server-internal/write-guard/write-guard.ts";
 import { PreparedExtractionMismatchError } from "../server-internal/save-input.ts";
 import { messageSourceInputProblem } from "../memory/node-sources/source-ref.ts";
 import { DuplicateMemoryError } from "../server-internal/write-guard/duplicate-check.ts";
@@ -37,6 +38,9 @@ import { EVENT_TYPES } from "../server-internal/event-bus.ts";
 import { MEMORY_TYPES, POLARITIES, type MemoryType } from "../memory/types.ts";
 import { TOOL_DESCRIPTIONS } from "./descriptions.ts";
 import { TOOL_ANNOTATIONS } from "./annotations.ts";
+import {
+  hashtagWarningDetails, hashtagWarningFields, prepareHashtagCheck, projectPlanForSave,
+} from "./hashtag-warning-fields.ts";
 import {
   MCP_SOURCE,
   requireAdapterId,
@@ -68,8 +72,14 @@ const SEARCH_MEMORY_SHAPE = {
   includeInactive: z.boolean().optional(),
   polarity: POLARITY_ENUM.optional().describe("Keep only memories with this polarity."),
   filter: z.record(z.string(), z.string()).optional(),
-  since: z.string().optional().describe("YYYY-MM-DD. Used only together with a valid until; otherwise dropped (see appliedFilters.dateRange)."),
-  until: z.string().optional().describe("YYYY-MM-DD. Used only together with a valid since; otherwise dropped (see appliedFilters.dateRange)."),
+  since: z.string().optional().describe(
+    "YYYY-MM-DD, inclusive. Set with until whenever the question names or implies a time, in any language. " +
+      "Keeps only memories whose event date (saved date when none) overlaps the range and drops the rest, " +
+      "so widen it when the time is vague. Overrides time words read from the query; " +
+      "without since/until, only Korean time words in the query are read. " +
+      "Used only together with a valid until; otherwise dropped (see appliedFilters.dateRange).",
+  ),
+  until: z.string().optional().describe("YYYY-MM-DD, inclusive. Used only together with a valid since; otherwise dropped (see appliedFilters.dateRange)."),
   place: z.string().optional(),
   withSummaries: z.boolean().optional(),
   memoryType: MEMORY_TYPE_ENUM.optional().describe("Keep only this memory type."),
@@ -130,6 +140,10 @@ export function registerMemoryTools(server: McpServer, ctx: McpToolContext): voi
         return toolJson(response);
       } catch (e) {
         if (e instanceof SearchInputError) return toolError("INVALID_INPUT", e.message);
+        if (e instanceof ProjectScopeError) {
+          const payload = e.toPayload();
+          return toolError(payload.code, payload.message, payload.details);
+        }
         return toolError("INTERNAL", `Search failed: ${e instanceof Error ? e.message : String(e)}`);
       }
     },
@@ -231,7 +245,18 @@ export function registerMemoryTools(server: McpServer, ctx: McpToolContext): voi
     },
     async (args) => {
       if (!canUseMcpTool(ctx.scope, "list_recent")) return toolError("FORBIDDEN", "list_recent is not allowed by this token");
-      const visible = readMemoryVisibility(deps.store, args.scope, args.includeInactive).allowedIds;
+      let scope;
+      try {
+        // 범위 없음 = 거름 없음(기존 동작). 프로젝트 이름·옛 글자값은 해석기가 묶는다.
+        scope = await resolveMemoryReadScope(deps.store, args.scope, "unfiltered");
+      } catch (e) {
+        if (e instanceof ProjectScopeError) {
+          const payload = e.toPayload();
+          return toolError(payload.code, payload.message, payload.details);
+        }
+        throw e;
+      }
+      const visible = readMemoryVisibility(deps.store, scope, args.includeInactive).allowedIds;
       const rows = deps.store.getRawDb().query(`SELECT * FROM knowledge_nodes
         WHERE source_type NOT IN ('document_chunk', 'llm_extract', 'image_caption')
         ORDER BY created_at DESC, id DESC`)
@@ -244,7 +269,7 @@ export function registerMemoryTools(server: McpServer, ctx: McpToolContext): voi
         if (memories.length >= (args.limit ?? 10)) break;
       }
       const payload = toRecentListPayload(memories);
-      return toolJson({ ...payload, memories: memories.map((node, i) => ({
+      return toolJson({ ...payload, ...(scope ? { scope } : {}), memories: memories.map((node, i) => ({
         ...(payload.memories[i] as Record<string, unknown>), projectId: node.projectId,
         sharedMemory: readSharedMemoryForNode(node),
       })) });
@@ -276,6 +301,8 @@ export function registerMemoryTools(server: McpServer, ctx: McpToolContext): voi
         const keyProblem = messageSourceInputProblem({ source: MCP_SOURCE, author: adapterId, metadata: args.metadata });
         if (keyProblem !== null) return toolError("INVALID_INPUT", keyProblem);
         const settings = deps.getSettings?.();
+        // 해시태그 경고는 저장 경로와 같은 관문을 지난 글로 본다(비밀값이면 저장과 같은 오류로 끝난다).
+        const hashtagCheck = await prepareHashtagCheck(deps.store, applyWriteGuard(args.content, settings?.writeGuard), args.project);
         const saved = await saveSharedMemoryInput(deps.store, {
           content: args.content,
           source: MCP_SOURCE,
@@ -302,7 +329,7 @@ export function registerMemoryTools(server: McpServer, ctx: McpToolContext): voi
           // T16(결정 D-A) — 유사-중복 검사 설정 + 우회 플래그.
           duplicateCheck: settings?.writeGuard?.duplicateCheck,
           force: args.force === true,
-        }, args.evidence);
+        }, args.evidence, projectPlanForSave(hashtagCheck));
         // memories-crud.ts:233 과 같은 위치·같은 조건 — kind 분기 앞에서 무조건 emit
         // 한다(entity_patch 포함, REST 동형 계약, review Fix 2). deps.autoCleanupTrigger
         // 동적 lookup(구조분해 금지) — 미주입이면 no-op.
@@ -321,10 +348,11 @@ export function registerMemoryTools(server: McpServer, ctx: McpToolContext): voi
             nodeIds: [],
             entities: saved.entities,
             warnings: saved.warnings,
+            ...hashtagWarningFields(hashtagCheck, "entity_patch"),
           });
         }
         if (saved.originNodeId === null) {
-          return toolError("INTERNAL", "Memory save failed: origin node id missing");
+          return toolError("INTERNAL", "Memory save failed: origin node id missing", hashtagWarningDetails(hashtagCheck, "memory"));
         }
         // memories-crud.ts:259 와 같은 조건·같은 이벤트(review Fix 1) — 저장 성공
         // 시점에서만 발행(에러 응답 경로는 여기 못 온다). eventBus 미주입이면 no-op.
@@ -344,9 +372,10 @@ export function registerMemoryTools(server: McpServer, ctx: McpToolContext): voi
           current: visible === undefined || visible.has(saved.originNodeId),
           evidence: records,
           ...(omittedCount > 0 ? { evidenceOmitted: omitted } : {}),
+          ...hashtagWarningFields(hashtagCheck, "memory"),
         });
       } catch (e) {
-        if (e instanceof MemoryEvidenceError) return toolError(e.code, e.message);
+        if (e instanceof MemoryEvidenceError) return toolError(e.code, e.message, e.details);
         // WP-B1-08 — 준비한 즉시 추출 결과를 쓸 수 없게 된 요청(아무것도 저장 안 함) — REST 409 와 같은
         // CONFLICT code 와 재전송 안내 메시지.
         if (e instanceof PreparedExtractionMismatchError) return toolError(e.code, e.message);

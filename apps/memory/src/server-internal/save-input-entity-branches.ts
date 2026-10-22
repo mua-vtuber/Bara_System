@@ -151,7 +151,8 @@ export async function saveScheduleOccurrence(
       entities.push(entity);
     }
   }
-  warnings.push(...placementResult.warnings);
+  // 붙이는 단계와 배치 단계가 같은 사실(애매한 프로젝트 이름 등)을 같은 문구로 알리면 한 줄만 남긴다.
+  for (const warning of placementResult.warnings) if (!warnings.includes(warning)) warnings.push(warning);
 
   if (
     entities.length > 0 ||
@@ -216,7 +217,8 @@ export async function saveEntityProfilePatch(
       entities.push(entity);
     }
   }
-  warnings.push(...placementResult.warnings);
+  // 붙이는 단계와 배치 단계가 같은 사실(애매한 프로젝트 이름 등)을 같은 문구로 알리면 한 줄만 남긴다.
+  for (const warning of placementResult.warnings) if (!warnings.includes(warning)) warnings.push(warning);
 
   if (
     entities.length > 0 ||

@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import {
   readSharedMemory, validateSharedMemory, parseMemoryReadScope,
-  matchesMemoryScope, isCurrentMemory,
+  matchesMemoryScope, isCurrentMemory, resolvedScopeKey,
   SHARED_MEMORY_DERIVED_SOURCE_TYPES, isDerivedSourceType,
   inheritSharedMemoryForDerived, readSharedMemoryForNode,
 } from "./shared-memory-contract.ts";
+import { globalScope, projectValuesScope } from "../test-utils/resolved-scope.ts";
 
 describe("shared memory read contract", () => {
   test("legacy metadata is active unknown evidence at revision zero", () => {
@@ -13,11 +14,30 @@ describe("shared memory read contract", () => {
   });
   test("scope distinguishes omitted, global, and project with optional global", () => {
     expect(matchesMemoryScope("B", undefined)).toBe(true);
-    expect(matchesMemoryScope("B", { projectId: null })).toBe(false);
-    expect(matchesMemoryScope(null, { projectId: null })).toBe(true);
-    expect(matchesMemoryScope(null, { projectId: "A" })).toBe(false);
-    expect(matchesMemoryScope(null, { projectId: "A", includeGlobal: true })).toBe(true);
-    expect(matchesMemoryScope("B", { projectId: "A", includeGlobal: true })).toBe(false);
+    expect(matchesMemoryScope("B", globalScope())).toBe(false);
+    expect(matchesMemoryScope(null, globalScope())).toBe(true);
+    expect(matchesMemoryScope(null, projectValuesScope(["A"]))).toBe(false);
+    expect(matchesMemoryScope(null, projectValuesScope(["A"], true))).toBe(true);
+    expect(matchesMemoryScope("B", projectValuesScope(["A"], true))).toBe(false);
+  });
+  test("a resolved scope admits any of its project values (prj_ id and legacy literal together)", () => {
+    const scope = projectValuesScope(["prj_1", "bara_system"]);
+    expect(matchesMemoryScope("prj_1", scope)).toBe(true);
+    expect(matchesMemoryScope("bara_system", scope)).toBe(true);
+    expect(matchesMemoryScope("bara", scope)).toBe(false);
+    expect(matchesMemoryScope(null, scope)).toBe(false);
+    // includeGlobal on a global scope changes nothing: a global scope already admits only null.
+    expect(matchesMemoryScope("prj_1", { ...globalScope(), includeGlobal: true })).toBe(false);
+    expect(matchesMemoryScope(null, { ...globalScope(), includeGlobal: true })).toBe(true);
+  });
+  test("cache key is the same for the same admitted set and differs otherwise", () => {
+    const a = projectValuesScope(["prj_1", "bara_system"]);
+    const b = { ...projectValuesScope(["bara_system", "prj_1"]), requested: "bara_system", resolvedFrom: "project_name" as const };
+    expect(resolvedScopeKey(a)).toBe(resolvedScopeKey(b));
+    expect(resolvedScopeKey(a)).not.toBe(resolvedScopeKey(projectValuesScope(["prj_1", "bara_system"], true)));
+    expect(resolvedScopeKey(a)).not.toBe(resolvedScopeKey(projectValuesScope(["prj_1"])));
+    expect(resolvedScopeKey(globalScope())).toBe(resolvedScopeKey({ ...globalScope(), includeGlobal: true }));
+    expect(resolvedScopeKey(globalScope())).not.toBe(resolvedScopeKey(a));
   });
   test("inactive and time-bounded evidence never passes as current", () => {
     for (const status of ["disputed", "superseded", "retracted"]) {

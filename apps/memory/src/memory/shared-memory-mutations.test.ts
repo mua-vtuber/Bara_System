@@ -14,6 +14,7 @@ import { MEMORY_DEFAULTS } from "../settings/memory-schema.ts";
 import type { MemorySettings } from "../settings/memory-settings.ts";
 import { saveSharedMemoryInput } from "../server-internal/shared-memory-write.ts";
 import { buildBaraMcpServer } from "../mcp/server.ts";
+import { McpUsageRecorder } from "../mcp/usage-recorder.ts";
 import { readMemoryVisibility } from "./shared-memory-read.ts";
 
 let embedder: Bgem3Embedder;
@@ -591,7 +592,7 @@ async function connectMcp(): Promise<{ call: (name: string, args: Record<string,
   settings.chunking.minChunkTokens = PARAGRAPH_CHUNKING.minChunkTokens;
   const server = buildBaraMcpServer({
     deps: { store, retriever: new HybridRetriever(store, embedder), assembler: new ContextAssembler(), getSettings: () => settings },
-    adapterId: actor, scope: "full",
+    adapterId: actor, scope: "full", usage: new McpUsageRecorder(() => store.getRawDb()),
   });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);

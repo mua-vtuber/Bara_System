@@ -52,6 +52,7 @@ export const TOOL_ANNOTATIONS = {
   cleanup_report_no_finding: appendOnly("Report cleanup no-finding"),
   cleanup_run_status: readOnly("Get cleanup run status"),
   bara_doctor: readOnly("Run self-diagnosis"),
+  get_usage_guide: readOnly("Usage guide"),
   get_profile: readOnly("Get preference profile"),
   recall_context: readOnly("Recall scoped context"),
   update_memory: { title: "Correct memory", readOnlyHint: false, destructiveHint: true, idempotentHint: true },

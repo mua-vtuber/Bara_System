@@ -60,7 +60,41 @@ export const memoryReadScopeSchema = z.object({
   projectId: z.string().trim().min(1).nullable(),
   includeGlobal: z.boolean().optional(),
 }).strict();
+/** The read scope as a client sends it. Only entry points accept it; they resolve it first. */
 export type MemoryReadScope = z.infer<typeof memoryReadScopeSchema>;
+
+/** How a client's scope.projectId was resolved (project-scope-resolver.ts). */
+export const RESOLVED_SCOPE_SOURCES = [
+  "global", "project_id", "project_name", "project_alias", "legacy_value",
+] as const;
+export type ResolvedScopeSource = (typeof RESOLVED_SCOPE_SOURCES)[number];
+
+/**
+ * A read scope after resolution (project-scope-resolver.ts). Inner read code accepts only this
+ * shape, so a raw client value cannot reach a filter unresolved. Entry points also return it to
+ * the caller as the scope that was actually applied.
+ */
+export interface ResolvedMemoryScope {
+  /** null = memories outside any project only. Otherwise memories whose project_id is one of these. */
+  readonly projectIds: readonly string[] | null;
+  /** With projectIds, also admit memories outside any project. */
+  readonly includeGlobal: boolean;
+  /** The projectId the client sent, unchanged; null when it sent null or no scope. */
+  readonly requested: string | null;
+  readonly resolvedFrom: ResolvedScopeSource;
+  /** Name of the project entity the scope resolved to; null for global and legacy-only scopes. */
+  readonly projectName: string | null;
+}
+
+/**
+ * Cache identity of a resolved scope: two scopes that admit the same rows give the same key.
+ * The value set is sorted, and includeGlobal is dropped for a global scope, which ignores it.
+ */
+export function resolvedScopeKey(scope: ResolvedMemoryScope): string {
+  if (scope.projectIds === null) return JSON.stringify(null);
+  const ids = [...scope.projectIds].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  return JSON.stringify([ids, scope.includeGlobal]);
+}
 
 const instant = z.iso.datetime({ offset: true });
 export const sharedMemorySchema = z.object({
@@ -127,13 +161,15 @@ export function readSharedMemoryForNode(
   return own;
 }
 
+/** No scope admits every row. A row outside any project needs a global scope or includeGlobal. */
 export function matchesMemoryScope(
   projectId: string | null | undefined,
-  scope?: MemoryReadScope,
+  scope?: ResolvedMemoryScope,
 ): boolean {
   if (!scope) return true;
   const actual = projectId ?? null;
-  return actual === scope.projectId || (scope.projectId !== null && scope.includeGlobal === true && actual === null);
+  if (actual === null) return scope.projectIds === null || scope.includeGlobal;
+  return scope.projectIds !== null && scope.projectIds.includes(actual);
 }
 
 /**

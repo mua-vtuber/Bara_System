@@ -31,6 +31,7 @@ import { v48EntityRegister } from "./migrations-internal/v48-entity-register.ts"
 import { v49DocumentOcrLedger } from "./migrations-internal/v49-document-ocr-ledger.ts";
 import { v50BackfillAttempts } from "./migrations-internal/v50-backfill-attempts.ts";
 import { v51EntityRegisterMemoDate } from "./migrations-internal/v51-entity-register-memo-date.ts";
+import { v52McpToolUsage } from "./migrations-internal/v52-mcp-tool-usage.ts";
 
 export interface Migration {
   version: number;
@@ -54,6 +55,7 @@ export const MIGRATIONS: Migration[] = [
   v49DocumentOcrLedger,
   v50BackfillAttempts,
   v51EntityRegisterMemoDate,
+  v52McpToolUsage,
 ];
 
 /** 이 마이그레이션 목록을 아는 코드의 최고 스키마 버전 — 기준 스키마 번호와 목록 최고값 중 큰 쪽. */

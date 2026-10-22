@@ -42,6 +42,7 @@ import {
   searchByVectorRaw,
   VEC0_MAX_K,
 } from "../db/store-internal/search-repo-vec-fts.ts";
+import { globalScope } from "../test-utils/resolved-scope.ts";
 
 /** 시험용 벡터 차원 — 방향만 지정하면 되므로 작게 잡아 빠르게 돌린다. */
 const DIM = 8;
@@ -655,8 +656,8 @@ describe("가시성 제외 방식 = 통과 집합 방식 (WP-B1-02)", () => {
 
   test("갈래 선택 — scope·다른 필터·큰 여유분은 통과 집합, 제외가 없으면 현행 질의", () => {
     const snapshot = getMemoryVisibilitySnapshot(db);
-    const scoped = snapshot.view({ projectId: null });
-    expect(planVisibleSupply(store, { scope: { projectId: null } }, snapshot, scoped, 20).mode).toBe("passSet");
+    const scoped = snapshot.view(globalScope());
+    expect(planVisibleSupply(store, { scope: globalScope() }, snapshot, scoped, 20).mode).toBe("passSet");
     const unscoped = snapshot.view();
     expect(planVisibleSupply(store, { memoryType: "fact" }, snapshot, unscoped, 20).mode).toBe("passSet");
     expect(planVisibleSupply(store, {}, snapshot, unscoped, VEC0_MAX_K).mode).toBe("passSet");

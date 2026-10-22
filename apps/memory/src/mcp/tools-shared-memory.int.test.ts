@@ -173,7 +173,7 @@ test("읽기 전용 연결의 tools/list — 쓰기 도구는 목록에 아예 �
   const names = (await client.listTools()).tools.map((tool) => tool.name).sort();
   expect(names).toEqual([
     "bara_doctor", "cleanup_list_candidates", "cleanup_run_status", "get_memory",
-    "get_profile", "list_recent", "recall_context", "search_memory",
+    "get_profile", "list_recent", "recall_context", "search_memory", "get_usage_guide",
   ].sort());
   for (const writeTool of [
     "store_memory", "save_decision", "save_idea", "save_question", "save_preference",
@@ -274,10 +274,10 @@ test("연결 진단은 도구와 지침을 확인하고 기억을 쓰지 않는�
   process.env[key] = tokenStore.issueToken("diagnostic", undefined, undefined, "read-only");
   try {
     const result = await checkMcpConnection({ client: "codex", url: `http://127.0.0.1:${server.port}/mcp`, tokenEnv: key });
-    // read-only 토큰이라 tools/list 에는 쓰기 도구가 빠진 읽기 8종만 실린다(WP-B1-16 /
+    // read-only 토큰이라 tools/list 에는 쓰기 도구가 빠진 읽기 9종만 실린다(WP-B1-16 /
     // SA-5) — required 4종(search_memory·get_memory·get_profile·recall_context)은
     // 전부 읽기 도구라 missing 은 여전히 없다.
-    expect(result).toMatchObject({ ok: true, toolCount: 8, instructions: true, missing: [] });
+    expect(result).toMatchObject({ ok: true, toolCount: 9, instructions: true, missing: [] });
     expect(db.query("SELECT COUNT(*) AS n FROM knowledge_nodes").get()).toEqual({ n: 0 });
   } finally {
     if (previous === undefined) delete process.env[key]; else process.env[key] = previous;

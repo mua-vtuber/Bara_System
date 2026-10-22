@@ -307,7 +307,12 @@ export function registerMemoriesCrudRoutes(app: Hono, deps: MemoryApiDeps): void
     } catch (e) {
       // 비밀값 거부는 사용자가 본문을 고쳐야 풀리는 문제라 400 + 구조화 본문으로
       // 회신한다(저장 실패 500 과 구분).
-      if (e instanceof MemoryEvidenceError) return err(c, 400, e.message);
+      // 근거 기억 프로젝트 불일치는 양쪽 프로젝트를 details 로 함께 싣는다(MCP 와 같은 칸, spec 20.5).
+      if (e instanceof MemoryEvidenceError) {
+        return e.details === undefined
+          ? err(c, 400, e.message)
+          : c.json({ error: e.message, code: e.code, details: e.details }, 400);
+      }
       const rejected = secretRejectionResponse(c, e);
       if (rejected) return rejected;
       // 유사-중복 거부는 이미 있는 기억과 부딪힌 것이라 409 + 구조화 본문(기존

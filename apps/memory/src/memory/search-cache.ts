@@ -54,7 +54,7 @@ import type { RetrievalResult, RetrieveStats } from "./retriever.ts";
 import type { Polarity, MemoryType } from "./types.ts";
 import type { EventDateRange } from "./event-date.ts";
 import type { BaselineFloorMode } from "./search-tuning.ts";
-import type { MemoryReadScope } from "./shared-memory-contract.ts";
+import { resolvedScopeKey, type ResolvedMemoryScope } from "./shared-memory-contract.ts";
 
 // ── 캐시 키 입력 계약 ─────────────────────────────────────────────────────────
 
@@ -80,7 +80,7 @@ export interface RerankerKeyState {
  * 가 ?? null 로 고정 토큰화해 "미지정" 이 안정 값을 갖는다(polarity·projectId 선례 정합).
  */
 export interface SearchCacheKeyInput {
-  scope?: MemoryReadScope;
+  scope?: ResolvedMemoryScope;
   includeInactive?: boolean;
   validityEpoch?: number;
   /**
@@ -206,7 +206,7 @@ export function buildCacheKey(input: SearchCacheKeyInput): string {
     w: input.weights,
     pol: input.polarity ?? null,
     proj: input.projectId ?? null,
-    scope: input.scope ? { projectId: input.scope.projectId, includeGlobal: input.scope.includeGlobal ?? false } : null,
+    scope: input.scope ? resolvedScopeKey(input.scope) : null,
     inactive: input.includeInactive ?? false,
     validity: input.validityEpoch ?? 0,
     vgen: input.visibilityGeneration ?? null,

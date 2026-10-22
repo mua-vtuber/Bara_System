@@ -38,7 +38,7 @@ import {
 } from "../../memory/neighbor-chunks.ts";
 import { isProvenance, type Provenance } from "../../memory/provenance-vocabulary.ts";
 import { listRelationEdges } from "../../memory/relation-reader.ts";
-import type { MemoryReadScope } from "../../memory/shared-memory-contract.ts";
+import type { ResolvedMemoryScope } from "../../memory/shared-memory-contract.ts";
 import {
   getMemoryVisibilitySnapshot,
   type MemoryVisibilityView,
@@ -276,7 +276,7 @@ export class AncillaryVisibility {
 /** 이번 응답의 판정기를 만든다 — 스냅샷은 여기서 한 번 읽는다(WP-B1-02 캐시 재사용). */
 export function readAncillaryVisibility(
   store: SqliteMemoryStore,
-  scope: MemoryReadScope | undefined,
+  scope: ResolvedMemoryScope | undefined,
   includeInactive: boolean,
   now: number = Date.now(),
 ): AncillaryVisibility {
