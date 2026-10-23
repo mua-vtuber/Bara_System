@@ -13,6 +13,10 @@ import { TUNNEL_KEEPALIVE_INTERVAL_S, TUNNEL_KEEPALIVE_MAX_MISSED } from "./limi
 const windowsOnly = test.skipIf(process.platform !== "win32");
 const FINGERPRINT = `SHA256:${"A".repeat(43)}`;
 const DELAYS = { firstMs: 20, maxMs: 80 };
+/** How much earlier than the asked wait a timer may be seen to fire. The event loop starts a timer from its cached
+ * loop time, which on Windows can lag the Date.now() taken when the attempt began, so a 40 ms wait was seen as 37 ms
+ * on the CI runner. Kept below half of every gap the checks tell apart (20 vs 40, 40 vs 80). */
+const TIMER_EARLY_MS = 10;
 const token = (seed: string) => seed.repeat(48);
 
 /** Resolves once `check` holds, polling the real event loop; fails the test after `limitMs`. */
@@ -45,7 +49,7 @@ test("a lost tunnel is opened again after the first wait, and an open tunnel end
   keeper.lost();
   expect(keeper.pending).toBe(true);
   await until(() => log.started.length === 1 && !keeper.pending);
-  expect(log.started[0]! - lostAt).toBeGreaterThanOrEqual(DELAYS.firstMs - 2);
+  expect(log.started[0]! - lostAt).toBeGreaterThanOrEqual(DELAYS.firstMs - TIMER_EARLY_MS);
   await Bun.sleep(DELAYS.maxMs * 2);
   expect(log.started).toHaveLength(1);
   expect(keeper.lastFailure()).toBeNull();
@@ -62,9 +66,9 @@ test("failed attempts try again with a doubling wait up to the limit, and keep t
   expect(keeper.lastFailure()).toBeNull();
   const waits = log.started.slice(1).map((at, index) => at - log.started[index]!);
   // 40, 80, 80 (capped), 80: never faster than the doubling, never slower than the cap allows by much.
-  expect(waits[0]!).toBeGreaterThanOrEqual(DELAYS.firstMs * 2 - 2);
-  expect(waits[1]!).toBeGreaterThanOrEqual(DELAYS.maxMs - 2);
-  expect(waits[2]!).toBeGreaterThanOrEqual(DELAYS.maxMs - 2);
+  expect(waits[0]!).toBeGreaterThanOrEqual(DELAYS.firstMs * 2 - TIMER_EARLY_MS);
+  expect(waits[1]!).toBeGreaterThanOrEqual(DELAYS.maxMs - TIMER_EARLY_MS);
+  expect(waits[2]!).toBeGreaterThanOrEqual(DELAYS.maxMs - TIMER_EARLY_MS);
   expect(Math.max(...waits)).toBeLessThan(DELAYS.maxMs * 4);
   await Bun.sleep(DELAYS.maxMs * 2);
   expect(log.started).toHaveLength(5);
