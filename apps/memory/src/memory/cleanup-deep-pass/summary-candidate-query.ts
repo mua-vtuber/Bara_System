@@ -59,6 +59,7 @@ import type { Database } from "bun:sqlite";
 import { listRelationEdges } from "../relation-reader.ts";
 import type { MemoryType } from "../types.ts";
 import { splitIntoMicrobatches } from "./input-estimate.ts";
+import { cleanupEligibleNodeSql } from "./cleanup-eligibility.ts";
 
 /**
  * 선호 트랙 배제 값(spec H 후반 / openhuman memory_protocol.rs:81-90 선례) —
@@ -167,6 +168,7 @@ export function findChunkSummaryCandidates(
               kn.metadata_json ->> '$.chunkIndex' AS chunk_index
        FROM knowledge_nodes kn
        WHERE kn.source_type = 'document_chunk'
+         AND ${cleanupEligibleNodeSql("kn.id")}
          AND kn.memory_type != ?
          AND kn.metadata_json ->> '$.parentId' IS NOT NULL
          AND kn.metadata_json ->> '$.chunkIndex' IS NOT NULL

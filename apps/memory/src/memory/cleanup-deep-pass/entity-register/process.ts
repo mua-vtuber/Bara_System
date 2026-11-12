@@ -22,6 +22,7 @@ import type { CleanupProposalsRepository } from "../../../db/store-internal/clea
 import { withMemoryMutationLock } from "../../shared-memory-mutation-lock.ts";
 import { getStageResult, recordStageDeterministicFailure, recordStageRetryable, recordStageSuccess, recordStageTerminal } from "../stage-results-ledger.ts";
 import { DEFAULT_RETRY_REAPPEAR_DELAY_MS, nextRetryAt } from "../stage-retry.ts";
+import { isCleanupExcludedNode } from "../cleanup-eligibility.ts";
 import {
   applyMemoChanges, EntityRegisterApplyRefusedError, type ApplyOutcome, type EntityApplication, type MemoDateApplication, type ScheduleApplication,
 } from "./apply.ts";
@@ -55,8 +56,9 @@ export interface ProcessMemoOutcome {
    * deterministic_failure = 자동 반영 거부(판정이 낡음), retryable = 그 밖의 반영 오류, terminal_failure = 둘 중
    * 하나가 상한만큼 되풀이됨.
    * already_processed = 다른 처리가 같은 지문·단계 버전으로 먼저 끝냄(아무것도 바꾸지 않았고 원장도 그대로).
+   * excluded = 추론을 기다리는 동안 정리 제외 대상이 됨(아무것도 바꾸지 않고 원장도 쓰지 않음).
    */
-  ledger: "completed" | "completed_noop" | "retryable" | "deterministic_failure" | "terminal_failure" | "already_processed";
+  ledger: "completed" | "completed_noop" | "retryable" | "deterministic_failure" | "terminal_failure" | "already_processed" | "excluded";
   error: string | null;
   /** 행 생성 기준(entity-row-gate)에 걸려 등록하지 않은 이름과 그 사유 — "왜 안 들어갔나"를 추적한다. */
   skipped: ApplyOutcome["skipped"];
@@ -126,13 +128,19 @@ function recordApplyError(
 }
 
 async function processUnderLock(deps: ProcessDeps, memo: EntityRegisterCandidateRow, result: EntityRegisterAiResult): Promise<ProcessMemoOutcome> {
-  if (isEntityRegisterMemoCompleted(deps.store.getRawDb(), memo)) {
+  const db = deps.store.getRawDb();
+  if (isCleanupExcludedNode(db, memo.nodeId)) {
+    return {
+      nodeId: memo.nodeId, autoApplied: 0, proposalId: null, ledger: "excluded",
+      error: `메모 ${memo.nodeId} 는 AI 프로젝트 기록이므로 정리 대상에서 제외됨`, skipped: [],
+    };
+  }
+  if (isEntityRegisterMemoCompleted(db, memo)) {
     return {
       nodeId: memo.nodeId, autoApplied: 0, proposalId: null, ledger: "already_processed",
       error: `메모 ${memo.nodeId} 는 같은 내용으로 이미 처리됨(다른 정리가 먼저 끝냄)`, skipped: [],
     };
   }
-  const db = deps.store.getRawDb();
   const key = { stage: ENTITY_REGISTER_LEDGER_STAGE, targetKey: memo.targetKey, inputFingerprint: memo.inputFingerprint, stageVersion: memo.stageVersion };
   const active = deps.records.activeScheduleForMemo(memo.nodeId);
   const j = judgeMemo({

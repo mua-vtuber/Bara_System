@@ -22,6 +22,7 @@
  */
 
 import type { Database } from "bun:sqlite";
+import { cleanupEligibleProposalSql } from "../../memory/cleanup-deep-pass/proposal-eligibility.ts";
 
 export type CleanupProposalStatus =
   | "pending"
@@ -133,13 +134,28 @@ export class CleanupProposalsRepository {
     // 순서 보장 불가 — 따라서 rowid 를 보조 키로 사용.
     const rows = this.db
       .query(
-        `SELECT * FROM cleanup_proposals
-         WHERE status = 'pending'
-         ORDER BY created_at ASC, rowid ASC
+        `SELECT cp.* FROM cleanup_proposals cp
+         WHERE cp.status = 'pending' AND ${cleanupEligibleProposalSql("cp")}
+         ORDER BY cp.created_at ASC, cp.rowid ASC
          LIMIT ? OFFSET ?`,
       )
       .all(limit, offset) as CleanupProposalRow[];
     return rows.map((r) => this.rowToProposal(r));
+  }
+
+  /** Count with the same eligibility rule and before paging, as findPending does. */
+  countPending(): number {
+    return (this.db.query(
+      `SELECT COUNT(*) AS n FROM cleanup_proposals cp
+       WHERE cp.status = 'pending' AND ${cleanupEligibleProposalSql("cp")}`,
+    ).get() as { n: number }).n;
+  }
+
+  /** Used again at approval time, including old direct links and unversioned proposals. */
+  isExcluded(id: string): boolean {
+    return this.db.query(
+      `SELECT 1 FROM cleanup_proposals cp WHERE cp.id = ? AND NOT ${cleanupEligibleProposalSql("cp")}`,
+    ).get(id) !== null;
   }
 
   /**

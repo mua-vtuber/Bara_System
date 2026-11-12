@@ -42,7 +42,7 @@ import {
   entityTargetKey,
   serializeLens,
   lensToApplyView,
-  listEvidenceNodeIds,
+  listCleanupEvidenceNodeIds,
 } from "../../memory/cleanup-deep-pass/lens-draft-candidate-query.ts";
 import { stripLensDraftRelationsAndMetadata } from "../../memory/cleanup-deep-pass/lens-draft-batch.ts";
 import type { LensDraftValues } from "../../memory/cleanup-deep-pass/lens-apply.ts";
@@ -243,13 +243,15 @@ function buildLensFingerprintGuard(
   expectedFingerprint: string;
   lensSerialization: string;
   evidenceNodeIds: number[];
-} {
+} | null {
   const db = deps.store.getRawDb();
   const lens = lensToApplyView(buildEntityLens(typeName));
+  const evidenceNodeIds = listCleanupEvidenceNodeIds(db, entityId);
+  if (evidenceNodeIds === null) return null;
   return {
     expectedFingerprint,
     lensSerialization: serializeLens(lens),
-    evidenceNodeIds: listEvidenceNodeIds(db, entityId),
+    evidenceNodeIds,
   };
 }
 
@@ -385,14 +387,18 @@ export async function submitExternalProposal(
   //         이 값으로 재대조한다.
   let finalPayload: Record<string, unknown> = pl;
   if (kind === "lens_draft") {
+    const fingerprintGuard = buildLensFingerprintGuard(
+      deps,
+      pl.typeName as string,
+      pl.entityId as string,
+      recomputed,
+    );
+    if (fingerprintGuard === null) {
+      return { ok: false, httpStatus: 409, message: "정리 제외 대상의 근거만 남아 제안을 등록할 수 없습니다." };
+    }
     finalPayload = {
       ...pl,
-      fingerprintGuard: buildLensFingerprintGuard(
-        deps,
-        pl.typeName as string,
-        pl.entityId as string,
-        recomputed,
-      ),
+      fingerprintGuard,
     };
   }
 

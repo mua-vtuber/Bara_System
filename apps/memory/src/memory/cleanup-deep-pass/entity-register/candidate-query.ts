@@ -8,6 +8,7 @@ import type { Database } from "bun:sqlite";
 import { readFieldSource } from "../../field-provenance.ts";
 import { entityRegisterFingerprint } from "../stage-fingerprint.ts";
 import { filterCandidatesByLedger } from "../stage-results-ledger.ts";
+import { cleanupEligibleNodeSql } from "../cleanup-eligibility.ts";
 import { AUTO_CAPTURE_SOURCE_TYPE, isCurrentMemory, isDerivedShaped } from "../../shared-memory-contract.ts";
 import { ENTITY_REGISTER_LEDGER_STAGE, ENTITY_REGISTER_LIMITS, SCHEDULE_OCCURRENCE_KEY } from "./constants.ts";
 import type { EntityRegisterMemo, MemoEventAtState } from "./types.ts";
@@ -43,7 +44,7 @@ function isOriginalMemo(row: RawMemo): boolean {
 
 export function readOriginalMemo(db: Database, nodeId: number): { nodeId: number; content: string; createdAt: string } | null {
   const row = db
-    .query("SELECT id, content, created_at, source_type, metadata_json FROM knowledge_nodes WHERE id = ? AND source_type = ?")
+    .query(`SELECT id, content, created_at, source_type, metadata_json FROM knowledge_nodes WHERE id = ? AND source_type = ? AND ${cleanupEligibleNodeSql("knowledge_nodes.id")}`)
     .get(nodeId, AUTO_CAPTURE_SOURCE_TYPE) as RawMemo | null;
   if (!row || !isOriginalMemo(row)) return null;
   return { nodeId: row.id, content: row.content, createdAt: row.created_at };
@@ -109,7 +110,7 @@ export function collectEntityRegisterCandidates(args: {
     if (args.nodeIds.length === 0) return [];
     const marks = args.nodeIds.map(() => "?").join(",");
     const rows = db
-      .query(`${select} WHERE source_type = ? AND id IN (${marks}) ORDER BY id`)
+      .query(`${select} WHERE source_type = ? AND id IN (${marks}) AND ${cleanupEligibleNodeSql("knowledge_nodes.id")} ORDER BY id`)
       .all(AUTO_CAPTURE_SOURCE_TYPE, ...args.nodeIds) as RawMemo[];
     picked = pick(rows).slice(0, limit);
   } else {
@@ -118,7 +119,7 @@ export function collectEntityRegisterCandidates(args: {
     const page = ENTITY_REGISTER_LIMITS.candidateScanPageSize;
     while (picked.length < limit) {
       const rows = db
-        .query(`${select} WHERE source_type = ? AND id > ? ORDER BY id LIMIT ?`)
+        .query(`${select} WHERE source_type = ? AND id > ? AND ${cleanupEligibleNodeSql("knowledge_nodes.id")} ORDER BY id LIMIT ?`)
         .all(AUTO_CAPTURE_SOURCE_TYPE, afterId, page) as RawMemo[];
       if (rows.length === 0) break;
       afterId = rows[rows.length - 1]!.id;

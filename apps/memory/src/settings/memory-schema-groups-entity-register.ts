@@ -19,7 +19,7 @@ export const entityRegisterSchemaBlock = {
   type: "object",
   title: "항목·일정 자동 등록 손잡이",
   description:
-    "태그 없는 메모에서 정리 AI 가 찾은 사람·장소·작품 등 항목과 일정을 등록한다. 확실한 것은 코드 검사로 바로 반영하고 애매한 것은 정리 제안으로 보낸다.",
+    "태그 없는 메모에서 정리 AI 가 찾은 사람·장소·작품 등 항목과 일정을 등록한다. AI가 프로젝트에 저장한 기억은 정리 대상에서 제외한다. 확실한 것은 코드 검사로 바로 반영하고 애매한 것은 정리 제안으로 보낸다.",
   properties: {
     enabled: {
       type: "boolean",

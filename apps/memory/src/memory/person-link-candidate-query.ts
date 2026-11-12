@@ -23,6 +23,7 @@ import {
 } from "./person-link-prefilter.ts";
 import { filterCandidatesByLedger } from "./cleanup-deep-pass/stage-results-ledger.ts";
 import { cleanupStageLlmLimitsOf } from "./cleanup-deep-pass/stage-constants.ts";
+import { cleanupEligibleNodeSql } from "./cleanup-deep-pass/cleanup-eligibility.ts";
 
 export const PERSON_LINK_KIND = "person_link";
 
@@ -210,6 +211,7 @@ export function queryCandidates(
       `SELECT kn.id, kn.content, kn.metadata_json
          FROM knowledge_nodes kn
         WHERE kn.source_type IN (${placeholders})
+          AND ${cleanupEligibleNodeSql("kn.id")}
           AND NOT EXISTS(
             SELECT 1 FROM cleanup_proposals cp
              WHERE cp.kind = '${PERSON_LINK_KIND}'

@@ -32,6 +32,7 @@
 import type { Database } from "bun:sqlite";
 import type { RegexL0Extractor } from "../regex-l0/extractor.ts";
 import type { MemoryType } from "../types.ts";
+import { cleanupEligibleNodeSql } from "./cleanup-eligibility.ts";
 
 /**
  * 선호 트랙 배제 값(spec H 후반 / openhuman memory_protocol.rs:81-90 선례) —
@@ -122,6 +123,7 @@ export function findRegexMissedCandidates(
       `SELECT kn.id AS id, kn.content AS content
        FROM knowledge_nodes kn
        WHERE kn.source_type = 'auto_capture'
+         AND ${cleanupEligibleNodeSql("kn.id")}
          AND kn.memory_type != ?
          AND EXISTS(
            SELECT 1 FROM knowledge_edges e

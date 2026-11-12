@@ -40,7 +40,7 @@ import {
   detectLensDraftCandidates,
   serializeLens,
   lensToApplyView,
-  listEvidenceNodeIds,
+  listCleanupEvidenceNodeIds,
   parseEntityTargetKey,
 } from "../../memory/cleanup-deep-pass/lens-draft-candidate-query.ts";
 import { serializeEntityStructuredValue } from "../../memory/cleanup-deep-pass/lens-apply.ts";
@@ -58,6 +58,7 @@ import {
 } from "../../memory/cleanup-deep-pass/entity-register/constants.ts";
 import { buildEntityRegisterInstruction } from "../../memory/cleanup-deep-pass/entity-register/prompt.ts";
 import { buildRegexStrengthenInstruction } from "../../memory/cleanup-deep-pass/regex-strengthen-cycle.ts";
+import { isCleanupExcludedNode } from "../../memory/cleanup-deep-pass/cleanup-eligibility.ts";
 import {
   collectPersonLinkCandidates,
   loadPeople,
@@ -264,6 +265,7 @@ export async function recomputeExternalFingerprint(
   if (stage === "regexStrengthen") {
     const nodeId = Number(targetKey);
     if (!Number.isInteger(nodeId)) return null;
+    if (isCleanupExcludedNode(db, nodeId)) return null;
     const row = db
       .prepare("SELECT content FROM knowledge_nodes WHERE id = ?")
       .get(nodeId) as { content: string } | null;
@@ -274,6 +276,7 @@ export async function recomputeExternalFingerprint(
   if (stage === "personLink") {
     const nodeId = Number(targetKey);
     if (!Number.isInteger(nodeId)) return null;
+    if (isCleanupExcludedNode(db, nodeId)) return null;
     const row = db
       .prepare("SELECT content, metadata_json FROM knowledge_nodes WHERE id = ?")
       .get(nodeId) as { content: string; metadata_json: string } | null;
@@ -311,12 +314,14 @@ export async function recomputeExternalFingerprint(
     .get(parsed.entityId) as { hit: number } | null;
   if (!entityRow) return null;
   const lens = lensToApplyView(buildEntityLens(parsed.typeName));
+  const evidenceNodeIds = listCleanupEvidenceNodeIds(db, parsed.entityId);
+  if (evidenceNodeIds === null) return null;
   return lensDraftFingerprint({
     entityStructuredValue: serializeEntityStructuredValue(
       { store: deps.store },
       parsed.entityId,
     ),
     lensSerialization: serializeLens(lens),
-    evidenceNodeIds: listEvidenceNodeIds(db, parsed.entityId),
+    evidenceNodeIds,
   });
 }

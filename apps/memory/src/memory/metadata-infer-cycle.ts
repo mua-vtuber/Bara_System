@@ -41,6 +41,7 @@
  */
 
 import type { Database } from "bun:sqlite";
+import { cleanupEligibleNodeSql } from "./cleanup-deep-pass/cleanup-eligibility.ts";
 import type { EventPublisher } from "./events/event-contract.ts";
 import {
   groupSessions,
@@ -513,6 +514,7 @@ function queryCandidates(
       )                AS place_values
     FROM knowledge_nodes kn
     WHERE kn.source_type IN (${placeholders})
+      AND ${cleanupEligibleNodeSql("kn.id")}
       AND NOT EXISTS(
         SELECT 1 FROM cleanup_proposals cp
         WHERE cp.kind = '${METADATA_FILL_KIND}'

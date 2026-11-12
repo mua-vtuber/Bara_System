@@ -108,15 +108,7 @@ export function registerCleanupProposalsRoutes(
       items: listProposalItems(p.kind, p.payload),
     }));
 
-    // total — pending 전체 개수 (paging UI 안 "1 / 12" 양식 산출 자료).
-    const totalRow = deps.store
-      .getRawDb()
-      .prepare(
-        "SELECT COUNT(*) AS n FROM cleanup_proposals WHERE status = 'pending'",
-      )
-      .get() as { n: number };
-
-    return c.json({ proposals, total: totalRow.n });
+    return c.json({ proposals, total: repo.countPending() });
   });
 
   // ── GET /cleanup-proposals/:id — 한 건 본문 ─────────────────────────────────
@@ -130,6 +122,7 @@ export function registerCleanupProposalsRoutes(
     // 무엇이 왜 안 들어갔는지). 둘 다 추가형 — 기존 칸은 그대로다(spec 5-9).
     return c.json({
       ...proposal,
+      ...(repo.isExcluded(id) ? { cleanupExcluded: true } : {}),
       items: listProposalItems(proposal.kind, proposal.payload),
       journal: repo.listJournal(proposal.id),
     });
@@ -150,6 +143,9 @@ export function registerCleanupProposalsRoutes(
     const proposal = repo.findById(id);
     if (!proposal) {
       return err(c, 404, "proposal 없음 — id 확인");
+    }
+    if (repo.isExcluded(id)) {
+      return err(c, 409, "AI가 등록한 프로젝트 기억은 정리 대상에서 제외되어 이 제안을 적용하지 않습니다.");
     }
     // entity_register 는 항목별 선택(choices) 승인 — 몸통은 별도 모듈(spec 6장: 라우트에 직접 쓰지 않는다).
     if (proposal.kind === ENTITY_REGISTER_KIND) return approveEntityRegisterRoute(c, deps, repo, proposal);

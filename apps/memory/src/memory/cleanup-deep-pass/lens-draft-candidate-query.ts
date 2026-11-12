@@ -32,6 +32,8 @@ import {
 } from "./lens-apply.ts";
 import { lensDraftFingerprint } from "./stage-fingerprint.ts";
 import { filterCandidatesByLedger } from "./stage-results-ledger.ts";
+import { isCleanupExcludedNode } from "./cleanup-eligibility.ts";
+import { cleanupEligibleProposalSql } from "./proposal-eligibility.ts";
 
 export const LENS_DRAFT_KIND = "lens_draft";
 
@@ -136,12 +138,19 @@ export function listEvidenceNodeIds(db: Database, entityId: string): number[] {
   return [...ids].sort((a, b) => a - b);
 }
 
+/** null은 근거가 전부 정리 제외 대상이라는 뜻. 원래 근거가 없던 엔티티의 []와 구분한다. */
+export function listCleanupEvidenceNodeIds(db: Database, entityId: string): number[] | null {
+  const original = listEvidenceNodeIds(db, entityId);
+  const eligible = original.filter((nodeId) => !isCleanupExcludedNode(db, nodeId));
+  return original.length > 0 && eligible.length === 0 ? null : eligible;
+}
+
 /** 이미 pending lens_draft 제안이 있는 (typeName, entityId) 집합을 읽는다(1차 멱등). */
 function pendingProposalKeys(db: Database): Set<string> {
   const rows = db
     .prepare(
-      `SELECT payload_json FROM cleanup_proposals
-        WHERE kind = ? AND status = 'pending'`,
+      `SELECT cp.payload_json FROM cleanup_proposals cp
+        WHERE cp.kind = ? AND cp.status = 'pending' AND ${cleanupEligibleProposalSql("cp")}`,
     )
     .all(LENS_DRAFT_KIND) as Array<{ payload_json: string }>;
   const set = new Set<string>();
@@ -203,7 +212,8 @@ export async function detectLensDraftCandidates(
       // 빈 칸이 하나도 없으면 채울 여지가 없다(후보 아님).
       if (emptyColumnKeys.length === 0) continue;
 
-      const evidenceNodeIds = listEvidenceNodeIds(db, entity.id);
+      const evidenceNodeIds = listCleanupEvidenceNodeIds(db, entity.id);
+      if (evidenceNodeIds === null) continue;
       const inputFingerprint = lensDraftFingerprint({
         entityStructuredValue: serializeEntityStructuredValue(deps, entity.id),
         lensSerialization,

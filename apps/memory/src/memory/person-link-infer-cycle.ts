@@ -9,6 +9,7 @@
  */
 
 import type { Database } from "bun:sqlite";
+import { isCleanupExcludedNode } from "./cleanup-deep-pass/cleanup-eligibility.ts";
 import type { EventPublisher } from "./events/event-contract.ts";
 import {
   CleanupConfigError,
@@ -481,6 +482,8 @@ async function processPersonLinkBatch(
     // 사람은 각자 연결 대상이고, 애매함은 같은 언급이 여러 사람으로 갈렸거나 모델이 불확실을
     // 표시한 연결에만 붙는다.
     for (const { decision, ambiguous } of resolveNodePersonLinks(group)) {
+      // 추론을 기다리는 동안 프로젝트/AI 표지가 바뀌었으면 오래된 답을 반영하지 않는다.
+      if (isCleanupExcludedNode(deps.db, nodeId)) break;
       if (existing.has(decision.personId!)) continue; // 이미 연결됨 — 판정에만 쓰고 쓰기 없음.
       // conf>=0.9 + 애매하지 않은 연결 — autoApply=true 면 자동 mentions 엣지, false 면 확실한
       // 연결도 검토 제안으로 보낸다(spec 5.B-2 적용 게이트 위치 선택 — 산출은 유지, 자동
@@ -535,6 +538,8 @@ async function processPersonLinkBatch(
   //   통째 누락 노드는 원장 미기록 → 다음 사이클 후보 잔존(영구 미처리 제거).
   const missing: PersonLinkNodeContext[] = [];
   for (const [nodeId, key] of batchLedgerKeys) {
+    // 제외는 처리 완료가 아니다. 나중에 제외 조건이 해제되면 다시 정상 후보가 될 수 있다.
+    if (isCleanupExcludedNode(deps.db, nodeId)) continue;
     if (!coveredNodeIds.has(nodeId)) {
       // 통째 누락 — 원장 기록은 호출자가 한다(배치면 단독 재호출, 단독이면 결정적 실패).
       missing.push(batch.find((n) => n.id === nodeId)!);

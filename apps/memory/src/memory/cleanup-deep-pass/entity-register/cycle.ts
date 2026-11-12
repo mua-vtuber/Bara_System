@@ -271,6 +271,10 @@ export async function runEntityRegisterCycle(deps: EntityRegisterCycleDeps): Pro
       const result = byNode.get(m.nodeId);
       if (!result) continue;
       const out = await processEntityRegisterMemo(proc, m, result);
+      if (out.ledger === "excluded") {
+        console.log(`${logPrefix} ${out.error}`);
+        continue;
+      }
       if (out.ledger === "already_processed") {
         summary.alreadyProcessed += 1;
         continue;
